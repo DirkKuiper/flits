@@ -1,4 +1,4 @@
-"""FLITS: Filterbank Loader, Inspector, and Transient Suite."""
+"""FLITS: Fast-Look Interactive Transient Suite."""
 
 from flits.models import BurstMeasurements, FilterbankMetadata, GaussianFit1D
 from flits.settings import ObservationConfig, TelescopePreset, available_presets

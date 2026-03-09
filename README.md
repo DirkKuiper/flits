@@ -1,6 +1,6 @@
 # FLITS
 
-Filterbank Loader, Inspector, and Transient Suite.
+Fast-Look Interactive Transient Suite.
 
 Browser-based scientific software for interactive burst inspection, masking, and measurement on filterbank data.
 
