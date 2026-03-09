@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -12,8 +13,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from flits.io import inspect_filterbank
 from flits.session import BurstSession
-from flits.settings import available_presets
+from flits.settings import available_presets, get_preset
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -24,12 +26,16 @@ SESSIONS: dict[str, BurstSession] = {}
 class CreateSessionRequest(BaseModel):
     bfile: str
     dm: float
-    telescope: str = "generic"
+    telescope: str | None = None
     sefd_jy: float | None = None
     read_start_sec: float | None = None
     initial_crop_sec: float | None = None
     distance_mpc: float | None = None
     redshift: float | None = None
+
+
+class DetectFilterbankRequest(BaseModel):
+    bfile: str
 
 
 class ActionRequest(BaseModel):
@@ -47,10 +53,18 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+def data_dir() -> Path:
+    configured = os.environ.get("FLITS_DATA_DIR")
+    base = ROOT_DIR if configured is None else Path(configured).expanduser()
+    return base.resolve()
+
+
 def resolve_burst_path(path_str: str) -> Path:
     candidate = Path(path_str).expanduser()
     if not candidate.is_absolute():
-        candidate = (ROOT_DIR / candidate).resolve()
+        candidate = (data_dir() / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
     if not candidate.exists():
         raise HTTPException(status_code=404, detail=f"Filterbank file not found: {path_str}")
     return candidate
@@ -64,7 +78,8 @@ def get_session(session_id: str) -> BurstSession:
 
 
 def list_filterbank_files() -> list[str]:
-    return sorted(path.name for path in ROOT_DIR.glob("*.fil"))
+    base = data_dir()
+    return sorted(str(path.relative_to(base)) for path in base.rglob("*.fil"))
 
 
 @app.get("/")
@@ -85,6 +100,28 @@ def files() -> dict[str, list[str]]:
 @app.get("/api/presets")
 def presets() -> dict[str, list[dict[str, Any]]]:
     return {"presets": [preset.to_dict() for preset in available_presets()]}
+
+
+@app.post("/api/detect")
+def detect_filterbank(request: DetectFilterbankRequest) -> dict[str, Any]:
+    burst_path = resolve_burst_path(request.bfile)
+    try:
+        inspection = inspect_filterbank(str(burst_path))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    detected_preset = get_preset(inspection.detected_preset_key)
+    return {
+        "bfile": str(burst_path),
+        "source_name": inspection.source_name,
+        "telescope_id": inspection.telescope_id,
+        "machine_id": inspection.machine_id,
+        "detected_preset_key": inspection.detected_preset_key,
+        "detected_preset_label": detected_preset.label,
+        "detection_basis": inspection.detection_basis,
+    }
 
 
 @app.post("/api/sessions")

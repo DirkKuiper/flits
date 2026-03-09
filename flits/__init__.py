@@ -1,7 +1,7 @@
 """FLITS: Fast-Look Interactive Transient Suite."""
 
 from flits.models import BurstMeasurements, FilterbankMetadata, GaussianFit1D
-from flits.settings import ObservationConfig, TelescopePreset, available_presets
+from flits.settings import ObservationConfig, TelescopePreset, available_presets, detect_preset, get_preset
 from flits.session import BurstSession
 
 __all__ = [
@@ -12,4 +12,6 @@ __all__ = [
     "ObservationConfig",
     "TelescopePreset",
     "available_presets",
+    "detect_preset",
+    "get_preset",
 ]

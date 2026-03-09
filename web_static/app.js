@@ -3,6 +3,8 @@ const state = {
   view: null,
   mode: "event",
   pending: null,
+  detection: null,
+  userSelectedPreset: false,
 }
 
 const modeHelp = {
@@ -27,6 +29,7 @@ const telescopeInput = document.getElementById("telescopeInput")
 const sefdInput = document.getElementById("sefdInput")
 const readStartInput = document.getElementById("readStartInput")
 const initialCropInput = document.getElementById("initialCropInput")
+const detectionHint = document.getElementById("detectionHint")
 const resolutionLabel = document.getElementById("resolutionLabel")
 const sessionFacts = document.getElementById("sessionFacts")
 const burstTitle = document.getElementById("burstTitle")
@@ -34,6 +37,7 @@ const burstSubtitle = document.getElementById("burstSubtitle")
 const heroMetrics = document.getElementById("heroMetrics")
 const resultsContent = document.getElementById("resultsContent")
 const presetDefaults = new Map()
+let syncingPresetSelection = false
 
 document.addEventListener("DOMContentLoaded", async () => {
   bindControls()
@@ -41,16 +45,30 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadFiles()
   if (fileSelect.options.length > 0) {
     fileInput.value = fileSelect.value
+    await detectSelectedFile()
     await loadSession()
   }
 })
 
 function bindControls() {
-  fileSelect.addEventListener("change", () => {
+  fileSelect.addEventListener("change", async () => {
     fileInput.value = fileSelect.value
+    state.userSelectedPreset = false
+    await detectSelectedFile()
   })
 
-  telescopeInput.addEventListener("change", syncPresetDefaults)
+  fileInput.addEventListener("change", async () => {
+    state.userSelectedPreset = false
+    await detectSelectedFile()
+  })
+
+  telescopeInput.addEventListener("change", () => {
+    if (!syncingPresetSelection) {
+      state.userSelectedPreset = true
+    }
+    syncPresetDefaults()
+    renderDetectionHint()
+  })
 
   document.getElementById("loadButton").addEventListener("click", loadSession)
   document.getElementById("setDmButton").addEventListener("click", () => {
@@ -96,10 +114,36 @@ async function loadPresets() {
       option.textContent = preset.label
       telescopeInput.appendChild(option)
     }
-    telescopeInput.value = "generic"
-    syncPresetDefaults()
+    setPresetSelection("generic")
+    renderDetectionHint()
   } catch (error) {
     setStatus(error.message, true)
+  }
+}
+
+async function detectSelectedFile() {
+  const bfile = fileInput.value.trim() || fileSelect.value
+  if (!bfile) {
+    state.detection = null
+    renderDetectionHint()
+    return null
+  }
+
+  try {
+    const payload = await api("/api/detect", {
+      method: "POST",
+      body: JSON.stringify({ bfile }),
+    })
+    state.detection = payload
+    if (!state.userSelectedPreset) {
+      setPresetSelection(payload.detected_preset_key)
+    }
+    renderDetectionHint()
+    return payload
+  } catch (error) {
+    state.detection = null
+    renderDetectionHint(error.message)
+    throw error
   }
 }
 
@@ -131,6 +175,7 @@ async function loadSession() {
   setStatus("Loading", false)
   clearPending()
   try {
+    await detectSelectedFile()
     const payload = await api("/api/sessions", {
       method: "POST",
       body: JSON.stringify({
@@ -173,7 +218,11 @@ function applyView(view) {
   state.view = view
   resolutionLabel.textContent = `t x${view.state.time_factor} / f x${view.state.freq_factor}`
   burstTitle.textContent = view.meta.burst_name
-  burstSubtitle.textContent = `${fmt(view.meta.shape[0], 0)} channels x ${fmt(view.meta.shape[1], 0)} time bins loaded with the ${view.meta.telescope} preset.`
+  const detectionSummary =
+    view.meta.preset_key === view.meta.detected_preset_key
+      ? `Detected from ${view.meta.detection_basis}.`
+      : `Detected ${view.meta.detected_telescope} from ${view.meta.detection_basis}, loaded with ${view.meta.telescope}.`
+  burstSubtitle.textContent = `${fmt(view.meta.shape[0], 0)} channels x ${fmt(view.meta.shape[1], 0)} time bins loaded with the ${view.meta.telescope} profile. ${detectionSummary}`
   renderHero(view)
   renderSessionFacts(view)
   renderResults(view.results)
@@ -201,7 +250,11 @@ function renderHero(view) {
 function renderSessionFacts(view) {
   const facts = [
     ["File", view.meta.burst_name],
-    ["Preset", view.meta.telescope],
+    ["Selected profile", view.meta.telescope],
+    ["Detected profile", view.meta.detected_telescope],
+    ["Telescope ID", view.meta.telescope_id === null ? "missing" : String(view.meta.telescope_id)],
+    ["Machine ID", view.meta.machine_id === null ? "missing" : String(view.meta.machine_id)],
+    ["Detection", view.meta.detection_basis],
     ["Raw shape", `${view.meta.shape[0]} x ${view.meta.shape[1]}`],
     ["Displayed shape", `${view.meta.view_shape[0]} x ${view.meta.view_shape[1]}`],
     ["SEFD", view.meta.sefd_jy === null ? "not set" : `${fmt(view.meta.sefd_jy, 2)} Jy`],
@@ -507,6 +560,41 @@ function setStatus(text, isError) {
   statusChip.textContent = text
   statusChip.style.background = isError ? "rgba(192, 86, 33, 0.12)" : "rgba(15, 118, 110, 0.1)"
   statusChip.style.color = isError ? "#c05621" : "#0f766e"
+}
+
+function setPresetSelection(presetKey) {
+  syncingPresetSelection = true
+  telescopeInput.value = presetKey
+  syncingPresetSelection = false
+  syncPresetDefaults()
+}
+
+function renderDetectionHint(errorMessage = null) {
+  if (errorMessage) {
+    detectionHint.textContent = `Detection error: ${errorMessage}`
+    return
+  }
+
+  if (!state.detection) {
+    detectionHint.textContent = "Detection: waiting for a filterbank."
+    return
+  }
+
+  const detectedLabel = state.detection.detected_preset_label
+  const selectedLabel = presetDefaults.get(telescopeInput.value)?.label || telescopeInput.value
+  let text = `Detection: ${detectedLabel} (${state.detection.detection_basis}).`
+
+  if (state.detection.detected_preset_key === "generic") {
+    text = `Detection: no known telescope match (${state.detection.detection_basis}). Using Generic Filterbank by default.`
+  }
+
+  if (state.userSelectedPreset && telescopeInput.value !== state.detection.detected_preset_key) {
+    text += ` Manual override active: ${selectedLabel}.`
+  } else {
+    text += " You can override this before loading."
+  }
+
+  detectionHint.textContent = text
 }
 
 function syncPresetDefaults() {

@@ -3,14 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+import warnings
 
 import numpy as np
 from astropy import units as u
 from scipy.optimize import curve_fit
 
-from flits.io import load_filterbank_data
+from flits.io import inspect_filterbank, load_filterbank_data
 from flits.models import BurstMeasurements, FilterbankMetadata, GaussianFit1D
-from flits.settings import ObservationConfig
+from flits.settings import ObservationConfig, get_preset
 from flits.signal import block_reduce_mean, dedisperse, gaussian_1d, radiometer
 
 try:
@@ -43,6 +44,15 @@ def _power_of_two_ceiling(value: float) -> int:
     while factor < value:
         factor *= 2
     return factor
+
+
+def _nanmean_profile(values: np.ndarray) -> np.ndarray:
+    if values.size == 0:
+        return np.array([], dtype=float)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        return np.nanmean(values, axis=0)
 
 
 def default_time_factor(num_time_bins: int, target_points: int = 1800) -> int:
@@ -91,7 +101,7 @@ class BurstSession:
         cls,
         bfile: str,
         dm: float,
-        telescope: str = "generic",
+        telescope: str | None = None,
         *,
         sefd_jy: float | None = None,
         read_start_sec: float | None = None,
@@ -99,16 +109,18 @@ class BurstSession:
         distance_mpc: float | None = None,
         redshift: float | None = None,
     ) -> "BurstSession":
+        inspection = inspect_filterbank(bfile)
+        preset_key = telescope if telescope is not None else inspection.detected_preset_key
         config = ObservationConfig.from_preset(
             dm=dm,
-            preset_key=telescope,
+            preset_key=preset_key,
             sefd_jy=sefd_jy,
             read_start_sec=read_start_sec,
             initial_crop_sec=initial_crop_sec,
             distance_mpc=distance_mpc,
             redshift=redshift,
         )
-        data, metadata = load_filterbank_data(bfile, config)
+        data, metadata = load_filterbank_data(bfile, config, inspection=inspection)
         num_time_bins = data.shape[1]
         return cls(
             config=config,
@@ -136,6 +148,10 @@ class BurstSession:
     @property
     def telescope(self) -> str:
         return self.config.telescope_label
+
+    @property
+    def detected_telescope(self) -> str:
+        return get_preset(self.metadata.detected_preset_key).label
 
     @property
     def tsamp(self) -> float:
@@ -245,6 +261,12 @@ class BurstSession:
                 "dm": self.dm,
                 "telescope": self.telescope,
                 "preset_key": self.config.preset_key,
+                "detected_telescope": self.detected_telescope,
+                "detected_preset_key": self.metadata.detected_preset_key,
+                "detection_basis": self.metadata.detection_basis,
+                "telescope_id": self.metadata.telescope_id,
+                "machine_id": self.metadata.machine_id,
+                "source_name": self.metadata.source_name,
                 "sefd_jy": self.sefd,
                 "tsamp_us": self.tsamp * 1e6,
                 "freqres_mhz": self.freqres,
@@ -446,8 +468,6 @@ class BurstSession:
             read_start_sec=self.config.read_start_sec,
             initial_crop_sec=self.config.initial_crop_sec,
             normalization_tail_fraction=self.config.normalization_tail_fraction,
-            use_filename_peak_time=self.config.use_filename_peak_time,
-            nrt_500ms_read_start_sec=self.config.nrt_500ms_read_start_sec,
             distance_mpc=self.config.distance_mpc,
             redshift=self.config.redshift,
         )
@@ -458,14 +478,22 @@ class BurstSession:
         rel_start = max(0, self.event_start - self.crop_start)
         rel_end = max(rel_start + 1, min(masked.shape[1], self.event_end - self.crop_start))
 
-        prof = np.nanmean(masked, axis=0)
+        prof = _nanmean_profile(masked)
         offprof = np.concatenate([prof[:rel_start], prof[rel_end:]])
         prof = _safe_normalize(prof, offprof)
 
-        burst_only = np.nanmean(masked[self.spec_ex_lo : self.spec_ex_hi + 1, :], axis=0)
+        burst_only = _nanmean_profile(masked[self.spec_ex_lo : self.spec_ex_hi + 1, :])
         offburst = np.concatenate([burst_only[:rel_start], burst_only[rel_end:]])
         burst_only = _safe_normalize(burst_only, offburst)
         return prof, burst_only
+
+    def _effective_selected_bandwidth_mhz(self) -> float:
+        masked = self.get_masked_crop()
+        selected = masked[self.spec_ex_lo : self.spec_ex_hi + 1, :]
+        if selected.size == 0:
+            return 0.0
+        active_channels = int(np.isfinite(selected).any(axis=1).sum())
+        return float(active_channels * self.freqres)
 
     def compute_properties(self) -> BurstMeasurements:
         prof, burst_only_prof = self._compute_profiles()
@@ -512,26 +540,16 @@ class BurstSession:
         plus_mjd_sec_updated = self.plus_mjd_sec + (peak_positions[0] * self.tsamp if peak_positions else 0.0)
         mjd_at_peak = self.start_mjd + (plus_mjd_sec_updated / (24 * 3600))
 
-        burst_time_from_filename = None
-        mjd_offset_ms = None
-        if self.config.use_filename_peak_time:
-            try:
-                filename = Path(self.burst_file).name
-                burst_time_from_filename = float(filename.split("_")[1].split("s")[0])
-                mjd_offset_ms = (mjd_at_peak - burst_time_from_filename) * (24 * 3600) * 1e3
-            except (IndexError, ValueError):
-                burst_time_from_filename = None
-                mjd_offset_ms = None
-
         rel_start = max(0, self.event_start - self.crop_start)
         rel_end = max(rel_start + 1, min(masked.shape[1], self.event_end - self.crop_start))
-        integrated_sn = prof[rel_start:rel_end]
+        integrated_sn = burst_only_prof[rel_start:rel_end]
+        effective_bw_mhz = self._effective_selected_bandwidth_mhz()
 
         peak_flux_jy = None
         fluence_jyms = None
         iso_e = None
-        if self.sefd is not None:
-            flux_prof = integrated_sn * radiometer(self.tsamp_ms, self.bw, self.npol, self.sefd)
+        if self.sefd is not None and effective_bw_mhz > 0:
+            flux_prof = integrated_sn * radiometer(self.tsamp_ms, effective_bw_mhz, self.npol, self.sefd)
             peak_flux_jy = float(np.nanmax(flux_prof)) if flux_prof.size else 0.0
             fluence_jyms = float(np.nansum(flux_prof * self.tsamp_ms)) if flux_prof.size else 0.0
             if self.config.distance_mpc and self.config.redshift:
@@ -541,7 +559,7 @@ class BurstSession:
                     * fluence_jyms
                     * u.Jy
                     * u.ms
-                    * self.bw
+                    * effective_bw_mhz
                     * u.MHz
                     * (self.config.distance_mpc * u.megaparsec) ** 2
                     / (1 + self.config.redshift)
@@ -551,7 +569,6 @@ class BurstSession:
             burst_name=Path(self.burst_file).stem,
             dm=self.dm,
             mjd_at_peak=float(mjd_at_peak),
-            mjd_offset_ms=float(mjd_offset_ms) if mjd_offset_ms is not None else None,
             peak_positions_ms=[float(value) for value in peak_ms],
             peak_flux_jy=peak_flux_jy,
             fluence_jyms=fluence_jyms,
@@ -565,6 +582,5 @@ class BurstSession:
             burst_only_profile_sn=np.asarray(burst_only_prof),
             time_axis_ms=np.asarray(zero_time_ms),
             iso_e=iso_e,
-            burst_time_from_filename=burst_time_from_filename,
         )
         return self.results

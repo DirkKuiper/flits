@@ -15,6 +15,7 @@ def _jsonable_1d(values: np.ndarray, digits: int = 4) -> list[float | None]:
 @dataclass(frozen=True)
 class FilterbankMetadata:
     source_path: Path
+    source_name: str | None
     tsamp: float
     freqres: float
     start_mjd: float
@@ -24,10 +25,15 @@ class FilterbankMetadata:
     npol: int
     freqs_mhz: np.ndarray
     header_npol: int
+    telescope_id: int | None
+    machine_id: int | None
+    detected_preset_key: str
+    detection_basis: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "source_path": str(self.source_path),
+            "source_name": self.source_name,
             "tsamp": self.tsamp,
             "freqres": self.freqres,
             "start_mjd": self.start_mjd,
@@ -36,6 +42,10 @@ class FilterbankMetadata:
             "bandwidth_mhz": self.bandwidth_mhz,
             "npol": self.npol,
             "header_npol": self.header_npol,
+            "telescope_id": self.telescope_id,
+            "machine_id": self.machine_id,
+            "detected_preset_key": self.detected_preset_key,
+            "detection_basis": self.detection_basis,
             "freqs_mhz": _jsonable_1d(self.freqs_mhz),
         }
 
@@ -61,7 +71,6 @@ class BurstMeasurements:
     burst_name: str
     dm: float
     mjd_at_peak: float
-    mjd_offset_ms: float | None
     peak_positions_ms: list[float]
     peak_flux_jy: float | None
     fluence_jyms: float | None
@@ -75,14 +84,12 @@ class BurstMeasurements:
     burst_only_profile_sn: np.ndarray
     time_axis_ms: np.ndarray
     iso_e: float | None
-    burst_time_from_filename: float | None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "burst_name": self.burst_name,
             "dm": self.dm,
             "mjd_at_peak": self.mjd_at_peak,
-            "mjd_offset_ms": self.mjd_offset_ms,
             "peak_positions_ms": self.peak_positions_ms,
             "peak_flux_jy": self.peak_flux_jy,
             "fluence_jyms": self.fluence_jyms,
@@ -96,5 +103,4 @@ class BurstMeasurements:
             "burst_only_profile_sn": _jsonable_1d(self.burst_only_profile_sn),
             "time_axis_ms": _jsonable_1d(self.time_axis_ms),
             "iso_e": self.iso_e,
-            "burst_time_from_filename": self.burst_time_from_filename,
         }
