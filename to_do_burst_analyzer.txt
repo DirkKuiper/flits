@@ -1,0 +1,31 @@
+To-Fix:
+NBNB - currently, the NRT SEFD is for 1.4 GHz not 2.3? GHz
+
+- enable downsampling in time
+- add v_lo and v_hi (top and bot freq)
+- double check all the calculations, e.g. fluence, energy, etc
+- convert the toas to barycentric?
+- better normalization (normalise vs normalize in basic funcs)
+- preview and flag stage: remove ax_space and ax_right ticks/labels
+- burst properties in pandas df should be from acf
+- gaussian fitting on spectral extent is funny (maybe don't do and only use manual lines?)
+- make sure plus_mjd_sec_updated is being updated properly
+- double check temporal widths from acf
+- if only 1 burst, output file = input name
+
+
+Done: (test/check and remove from list)
+- updated list of parameters to save in dataframe
+- spectra is saved in npz for each file if flag is raised
+- peaks dont update with change in time resolution (clicking adds a line at wrong position)
+- reset to original resolution(s) at the end of stage 1 and cleared masks
+- add a check so that the dynamic spectrum is the correct shape to downsample
+- flag stage: zapping close to the window edges after jess doesnt work\
+- Created DataFrame with csv output for burst properties
+- compute stage: the event duration lines dont update with tsamp changes
+- added adjustable DM via textbox in stage 1
+- improve acf/gaussian fitting initial parameters
+    - test separate 1d fits instead of 2d
+    - stage 3: only timeseries is normalized which causes scaling differences from the fits
+- optimized stage 1 replotting/clicks (doesn't take a million years now woooo!!!!)
+- if gaussian fits dont work, button to flag bad fit (in this case use manually selected event dur/ specex)
