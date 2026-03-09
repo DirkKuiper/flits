@@ -1,0 +1,12 @@
+services:
+  flits:
+    build: .
+    image: flits:latest
+    environment:
+      FLITS_DATA_DIR: /data
+    ports:
+      - "${FLITS_PORT:-8123}:8123"
+    volumes:
+      - type: bind
+        source: ${DATA_DIR:-.}
+        target: /data

@@ -7,3 +7,4 @@ __pycache__/
 *.fil
 *.npz
 burst_properties.csv
+web_static/vendor/
