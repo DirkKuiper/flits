@@ -187,6 +187,12 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
             session.auto_mask_jess()
         elif action == "set_dm":
             session.set_dm(float(payload["dm"]))
+        elif action == "optimize_dm":
+            session.optimize_dm(
+                float(payload["center_dm"]),
+                float(payload["half_range"]),
+                float(payload["step"]),
+            )
         elif action == "compute_properties":
             session.compute_properties()
         else:

@@ -10,7 +10,7 @@ from astropy import units as u
 from scipy.optimize import curve_fit
 
 from flits.io import inspect_filterbank, load_filterbank_data
-from flits.models import BurstMeasurements, FilterbankMetadata, GaussianFit1D
+from flits.models import BurstMeasurements, DmOptimizationResult, FilterbankMetadata, GaussianFit1D
 from flits.settings import ObservationConfig, get_preset
 from flits.signal import block_reduce_mean, dedisperse, gaussian_1d, radiometer
 
@@ -21,6 +21,8 @@ except ImportError:  # pragma: no cover - optional dependency
 
 
 def _safe_normalize(series: np.ndarray, offpulse: np.ndarray) -> np.ndarray:
+    if series.size == 0:
+        return np.array([], dtype=float)
     offpulse = offpulse[np.isfinite(offpulse)]
     baseline = float(np.nanmean(offpulse)) if offpulse.size else float(np.nanmean(series))
     sigma = float(np.nanstd(offpulse)) if offpulse.size else float(np.nanstd(series))
@@ -76,6 +78,16 @@ def robust_color_limits(values: np.ndarray) -> tuple[float, float]:
     return vmin, vmax
 
 
+def _offpulse_window(series: np.ndarray, rel_start: int, rel_end: int) -> np.ndarray:
+    if series.size == 0:
+        return np.array([], dtype=float)
+    parts = [series[:rel_start], series[rel_end:]]
+    valid_parts = [part for part in parts if part.size]
+    if not valid_parts:
+        return np.array([], dtype=float)
+    return np.concatenate(valid_parts)
+
+
 @dataclass
 class BurstSession:
     config: ObservationConfig
@@ -95,6 +107,7 @@ class BurstSession:
     channel_mask: np.ndarray | None = None
     mask_history: list[list[int]] = field(default_factory=list)
     results: BurstMeasurements | None = None
+    dm_optimization: DmOptimizationResult | None = None
 
     @classmethod
     def from_file(
@@ -188,6 +201,13 @@ class BurstSession:
     def invalidate_results(self) -> None:
         self.results = None
 
+    def clear_dm_optimization(self) -> None:
+        self.dm_optimization = None
+
+    def invalidate_selection_state(self) -> None:
+        self.invalidate_results()
+        self.clear_dm_optimization()
+
     @property
     def total_time_bins(self) -> int:
         return int(self.data.shape[1])
@@ -217,6 +237,25 @@ class BurstSession:
     def freq_to_channel(self, freq_mhz: float) -> int:
         return int(np.argmin(np.abs(self.freqs - float(freq_mhz))))
 
+    def _ordered_channel_bounds(self, start: int, end: int) -> tuple[int, int]:
+        return tuple(sorted((self.clamp_channel(start), self.clamp_channel(end))))
+
+    def _channel_bounds_for_freqs(self, low_freq_mhz: float, high_freq_mhz: float) -> tuple[int, int]:
+        return self._ordered_channel_bounds(
+            self.freq_to_channel(low_freq_mhz),
+            self.freq_to_channel(high_freq_mhz),
+        )
+
+    def _selected_channel_bounds(self) -> tuple[int, int]:
+        return self._ordered_channel_bounds(self.spec_ex_lo, self.spec_ex_hi)
+
+    def _selected_frequency_bounds_mhz(self) -> tuple[float, float]:
+        low_chan, high_chan = self._selected_channel_bounds()
+        return tuple(sorted((float(self.freqs[low_chan]), float(self.freqs[high_chan]))))
+
+    def _frequency_range_mhz(self) -> tuple[float, float]:
+        return float(np.min(self.freqs)), float(np.max(self.freqs))
+
     def _current_peak_positions(self) -> list[int]:
         if self.manual_peaks and self.peak_positions:
             return sorted(p for p in self.peak_positions if self.crop_start <= p < self.crop_end)
@@ -230,15 +269,42 @@ class BurstSession:
         peak_local = int(np.nanargmax(profile))
         return [self.crop_start + peak_local]
 
-    def get_masked_crop(self) -> np.ndarray:
-        arr = self.data[:, self.crop_start:self.crop_end].astype(float, copy=True)
+    def get_masked_crop(self, data: np.ndarray | None = None) -> np.ndarray:
+        source = self.data if data is None else data
+        arr = source[:, self.crop_start:self.crop_end].astype(float, copy=True)
         if self.channel_mask is not None and self.channel_mask.any():
             arr[self.channel_mask, :] = np.nan
         return arr
 
+    def _event_bounds_in_crop(self, time_bins: int) -> tuple[int, int]:
+        rel_start = max(0, self.event_start - self.crop_start)
+        rel_end = max(rel_start + 1, min(time_bins, self.event_end - self.crop_start))
+        return rel_start, rel_end
+
+    def _compute_profiles_for_data(self, data: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
+        masked = self.get_masked_crop(data)
+        rel_start, rel_end = self._event_bounds_in_crop(masked.shape[1])
+        spec_lo, spec_hi = self._selected_channel_bounds()
+
+        prof = _nanmean_profile(masked)
+        prof = _safe_normalize(prof, _offpulse_window(prof, rel_start, rel_end))
+
+        burst_only = _nanmean_profile(masked[spec_lo : spec_hi + 1, :])
+        burst_only = _safe_normalize(burst_only, _offpulse_window(burst_only, rel_start, rel_end))
+        return masked, prof, burst_only, rel_start, rel_end
+
+    def _score_event_sn(self, burst_only_profile: np.ndarray, rel_start: int, rel_end: int) -> float:
+        event = burst_only_profile[rel_start:rel_end]
+        finite = event[np.isfinite(event)]
+        if finite.size == 0:
+            return float("-inf")
+        return float(np.nansum(finite) / np.sqrt(finite.size))
+
     def get_view(self) -> dict[str, Any]:
         masked = self.get_masked_crop()
         reduced = block_reduce_mean(masked, tfac=self.time_factor, ffac=self.freq_factor)
+        freq_lo_mhz, freq_hi_mhz = self._frequency_range_mhz()
+        spec_lo_mhz, spec_hi_mhz = self._selected_frequency_bounds_mhz()
 
         time_axis = (
             (self.crop_start + np.arange(reduced.shape[1]) * self.time_factor) * self.tsamp_ms
@@ -273,7 +339,7 @@ class BurstSession:
                 "npol": self.npol,
                 "shape": [self.total_channels, self.total_time_bins],
                 "view_shape": [int(reduced.shape[0]), int(reduced.shape[1])],
-                "freq_range_mhz": [float(self.freqs[0]), float(self.freqs[-1])],
+                "freq_range_mhz": [freq_lo_mhz, freq_hi_mhz],
             },
             "state": {
                 "time_factor": self.time_factor,
@@ -285,10 +351,7 @@ class BurstSession:
                 ],
                 "peak_ms": [self.bin_to_ms(peak) for peak in peak_positions],
                 "manual_peaks": self.manual_peaks,
-                "spectral_extent_mhz": [
-                    float(self.freqs[self.spec_ex_lo]),
-                    float(self.freqs[self.spec_ex_hi]),
-                ],
+                "spectral_extent_mhz": [spec_lo_mhz, spec_hi_mhz],
                 "masked_channels": np.flatnonzero(self.channel_mask).astype(int).tolist(),
             },
             "plot": {
@@ -309,6 +372,7 @@ class BurstSession:
                 },
             },
             "results": self.results.to_dict() if self.results is not None else None,
+            "dm_optimization": self.dm_optimization.to_dict() if self.dm_optimization is not None else None,
         }
 
     def _sync_selections_to_crop(self) -> None:
@@ -342,7 +406,7 @@ class BurstSession:
         self.burst_regions = []
         self.peak_positions = []
         self.manual_peaks = False
-        self.invalidate_results()
+        self.invalidate_selection_state()
 
     def set_time_factor(self, factor: int) -> None:
         self.time_factor = max(1, min(int(factor), self.crop_end - self.crop_start))
@@ -355,7 +419,7 @@ class BurstSession:
         self.crop_start = self.clamp_bin(start)
         self.crop_end = self.clamp_bin(end, is_end=True)
         self._sync_selections_to_crop()
-        self.invalidate_results()
+        self.invalidate_selection_state()
 
     def set_event_ms(self, start_ms: float, end_ms: float) -> None:
         start, end = sorted((self.ms_to_bin(start_ms), self.ms_to_bin(end_ms)))
@@ -363,7 +427,7 @@ class BurstSession:
         self.event_end = min(self.crop_end, self.clamp_bin(end, is_end=True))
         if self.event_end <= self.event_start:
             self.event_end = min(self.crop_end, self.event_start + 2)
-        self.invalidate_results()
+        self.invalidate_selection_state()
 
     def add_region_ms(self, start_ms: float, end_ms: float) -> None:
         start, end = sorted((self.ms_to_bin(start_ms), self.ms_to_bin(end_ms)))
@@ -404,14 +468,13 @@ class BurstSession:
                 added.append(chan)
         if added:
             self.mask_history.append(added)
-            self.invalidate_results()
+            self.invalidate_selection_state()
 
     def mask_channel_freq(self, freq_mhz: float) -> None:
         self._mask_batch([self.freq_to_channel(freq_mhz)])
 
     def mask_range_freq(self, low_freq_mhz: float, high_freq_mhz: float) -> None:
-        low = self.freq_to_channel(min(low_freq_mhz, high_freq_mhz))
-        high = self.freq_to_channel(max(low_freq_mhz, high_freq_mhz))
+        low, high = self._channel_bounds_for_freqs(low_freq_mhz, high_freq_mhz)
         self._mask_batch(list(range(low, high + 1)))
 
     def undo_mask(self) -> None:
@@ -420,28 +483,27 @@ class BurstSession:
         latest = self.mask_history.pop()
         for chan in latest:
             self.channel_mask[chan] = False
-        self.invalidate_results()
+        self.invalidate_selection_state()
 
     def reset_mask(self) -> None:
         self.channel_mask[:] = False
         self.mask_history = []
-        self.invalidate_results()
+        self.invalidate_selection_state()
 
     def set_spectral_extent_freq(self, low_freq_mhz: float, high_freq_mhz: float) -> None:
-        low = self.freq_to_channel(min(low_freq_mhz, high_freq_mhz))
-        high = self.freq_to_channel(max(low_freq_mhz, high_freq_mhz))
+        low, high = self._channel_bounds_for_freqs(low_freq_mhz, high_freq_mhz)
         self.spec_ex_lo, self.spec_ex_hi = low, high
-        self.invalidate_results()
+        self.invalidate_selection_state()
 
     def auto_mask_jess(self) -> None:
         if jess is None:
             raise RuntimeError("Jess is not installed in the active environment.")
 
         masked = self.get_masked_crop()
-        rel_start = max(0, self.event_start - self.crop_start)
-        rel_end = max(rel_start + 1, min(masked.shape[1], self.event_end - self.crop_start))
+        rel_start, rel_end = self._event_bounds_in_crop(masked.shape[1])
         offburst_parts = [masked[:, :rel_start], masked[:, rel_end:]]
-        offburst = np.concatenate([part for part in offburst_parts if part.size], axis=1)
+        valid_offburst_parts = [part for part in offburst_parts if part.size]
+        offburst = np.concatenate(valid_offburst_parts, axis=1) if valid_offburst_parts else masked
         if offburst.size == 0:
             offburst = masked
         filled = np.nan_to_num(offburst, nan=float(np.nanmedian(offburst)))
@@ -473,41 +535,151 @@ class BurstSession:
         )
         self.invalidate_results()
 
-    def _compute_profiles(self) -> tuple[np.ndarray, np.ndarray]:
-        masked = self.get_masked_crop()
-        rel_start = max(0, self.event_start - self.crop_start)
-        rel_end = max(rel_start + 1, min(masked.shape[1], self.event_end - self.crop_start))
-
-        prof = _nanmean_profile(masked)
-        offprof = np.concatenate([prof[:rel_start], prof[rel_end:]])
-        prof = _safe_normalize(prof, offprof)
-
-        burst_only = _nanmean_profile(masked[self.spec_ex_lo : self.spec_ex_hi + 1, :])
-        offburst = np.concatenate([burst_only[:rel_start], burst_only[rel_end:]])
-        burst_only = _safe_normalize(burst_only, offburst)
-        return prof, burst_only
-
-    def _effective_selected_bandwidth_mhz(self) -> float:
-        masked = self.get_masked_crop()
-        selected = masked[self.spec_ex_lo : self.spec_ex_hi + 1, :]
+    def _effective_selected_bandwidth_mhz(self, masked: np.ndarray | None = None) -> float:
+        masked = self.get_masked_crop() if masked is None else masked
+        spec_lo, spec_hi = self._selected_channel_bounds()
+        selected = masked[spec_lo : spec_hi + 1, :]
         if selected.size == 0:
             return 0.0
         active_channels = int(np.isfinite(selected).any(axis=1).sum())
         return float(active_channels * self.freqres)
 
+    def _fit_dm_peak(
+        self,
+        trial_dms: np.ndarray,
+        snr: np.ndarray,
+        peak_index: int,
+    ) -> tuple[float, float, float | None, str]:
+        sampled_best_dm = float(trial_dms[peak_index])
+        sampled_best_sn = float(snr[peak_index])
+
+        if peak_index < 2 or peak_index > len(trial_dms) - 3:
+            return sampled_best_dm, sampled_best_sn, None, "peak_on_sweep_edge"
+
+        x = np.asarray(trial_dms[peak_index - 2 : peak_index + 3], dtype=float)
+        y = np.asarray(snr[peak_index - 2 : peak_index + 3], dtype=float)
+        if x.size != 5 or not np.all(np.isfinite(y)):
+            return sampled_best_dm, sampled_best_sn, None, "insufficient_peak_window"
+
+        try:
+            coeffs = np.polyfit(x, y, 2)
+        except Exception:
+            return sampled_best_dm, sampled_best_sn, None, "quadratic_fit_failed"
+
+        a, b, c = (float(value) for value in coeffs)
+        if not np.all(np.isfinite(coeffs)):
+            return sampled_best_dm, sampled_best_sn, None, "quadratic_fit_failed"
+        if a >= 0:
+            return sampled_best_dm, sampled_best_sn, None, "quadratic_not_concave"
+
+        best_dm = float(-b / (2 * a))
+        if best_dm < float(x[0]) or best_dm > float(x[-1]):
+            return sampled_best_dm, sampled_best_sn, None, "fit_vertex_outside_peak_window"
+
+        best_sn = float(np.polyval(coeffs, best_dm))
+        if not np.isfinite(best_sn):
+            return sampled_best_dm, sampled_best_sn, None, "quadratic_fit_failed"
+
+        target_sn = best_sn - 1.0
+        uncertainty: float | None = None
+        status = "quadratic_peak_fit"
+        try:
+            roots = np.roots([a, b, c - target_sn])
+        except Exception:
+            roots = np.array([], dtype=complex)
+
+        real_roots = sorted(
+            float(root.real)
+            for root in np.atleast_1d(roots)
+            if np.isfinite(root.real) and abs(float(root.imag)) < 1e-6
+        )
+        lower = max((root for root in real_roots if root <= best_dm), default=None)
+        upper = min((root for root in real_roots if root >= best_dm), default=None)
+        if lower is not None and upper is not None:
+            sweep_min = float(np.min(trial_dms))
+            sweep_max = float(np.max(trial_dms))
+            candidate = 0.5 * (upper - lower)
+            if (
+                np.isfinite(candidate)
+                and candidate > 0
+                and lower >= sweep_min
+                and upper <= sweep_max
+            ):
+                uncertainty = float(candidate)
+            else:
+                status = "quadratic_peak_fit_uncertainty_unavailable"
+        else:
+            status = "quadratic_peak_fit_uncertainty_unavailable"
+
+        return best_dm, best_sn, uncertainty, status
+
+    def optimize_dm(self, center_dm: float, half_range: float, step: float) -> DmOptimizationResult:
+        center_dm = float(center_dm)
+        half_range = float(half_range)
+        step = float(step)
+        if not all(np.isfinite(value) for value in (center_dm, half_range, step)):
+            raise ValueError("DM sweep parameters must be finite numbers.")
+        if half_range <= 0:
+            raise ValueError("DM sweep half-range must be greater than zero.")
+        if step <= 0:
+            raise ValueError("DM sweep step must be greater than zero.")
+
+        num_side = int(np.floor((half_range / step) + 1e-12))
+        num_trials = 2 * num_side + 1
+        if num_trials < 5:
+            raise ValueError("DM sweep must include at least 5 trial DMs.")
+        if num_trials > 121:
+            raise ValueError("DM sweep supports at most 121 trial DMs.")
+
+        offsets = np.arange(-num_side, num_side + 1, dtype=float) * step
+        trial_dms = np.round(center_dm + offsets, 12)
+        actual_half_range = float(abs(offsets[-1])) if offsets.size else 0.0
+
+        snr = np.empty(trial_dms.size, dtype=float)
+        for idx, trial_dm in enumerate(trial_dms):
+            if np.isclose(trial_dm, self.dm):
+                trial_data = self.data
+            else:
+                trial_data = dedisperse(self.data, float(trial_dm - self.dm), self.freqs, self.tsamp)
+            _, _, burst_only, rel_start, rel_end = self._compute_profiles_for_data(trial_data)
+            snr[idx] = self._score_event_sn(burst_only, rel_start, rel_end)
+
+        if not np.isfinite(snr).any():
+            raise ValueError("Unable to compute DM sweep for the current selection.")
+
+        peak_index = int(np.nanargmax(snr))
+        sampled_best_dm = float(trial_dms[peak_index])
+        sampled_best_sn = float(snr[peak_index])
+        best_dm, best_sn, best_dm_uncertainty, fit_status = self._fit_dm_peak(trial_dms, snr, peak_index)
+
+        self.dm_optimization = DmOptimizationResult(
+            center_dm=center_dm,
+            requested_half_range=half_range,
+            actual_half_range=actual_half_range,
+            step=step,
+            trial_dms=trial_dms,
+            snr=snr,
+            sampled_best_dm=sampled_best_dm,
+            sampled_best_sn=sampled_best_sn,
+            best_dm=best_dm,
+            best_dm_uncertainty=best_dm_uncertainty,
+            best_sn=best_sn,
+            fit_status=fit_status,
+        )
+        return self.dm_optimization
+
     def compute_properties(self) -> BurstMeasurements:
-        prof, burst_only_prof = self._compute_profiles()
-        masked = self.get_masked_crop()
+        masked, prof, burst_only_prof, event_rel_start, event_rel_end = self._compute_profiles_for_data()
         zero_time_ms = (self.crop_start + np.arange(masked.shape[1])) * self.tsamp_ms
 
         gaussian_fits: list[GaussianFit1D] = []
         for start, end in self.burst_regions:
-            rel_start = max(0, start - self.crop_start)
-            rel_end = min(masked.shape[1], end - self.crop_start)
-            if rel_end - rel_start < 4:
+            fit_rel_start = max(0, start - self.crop_start)
+            fit_rel_end = min(masked.shape[1], end - self.crop_start)
+            if fit_rel_end - fit_rel_start < 4:
                 continue
-            xdata = zero_time_ms[rel_start:rel_end]
-            ydata = prof[rel_start:rel_end]
+            xdata = zero_time_ms[fit_rel_start:fit_rel_end]
+            ydata = prof[fit_rel_start:fit_rel_end]
             initial_guess = (
                 float(np.nanmax(ydata)),
                 float(xdata[int(np.nanargmax(ydata))]),
@@ -540,10 +712,8 @@ class BurstSession:
         plus_mjd_sec_updated = self.plus_mjd_sec + (peak_positions[0] * self.tsamp if peak_positions else 0.0)
         mjd_at_peak = self.start_mjd + (plus_mjd_sec_updated / (24 * 3600))
 
-        rel_start = max(0, self.event_start - self.crop_start)
-        rel_end = max(rel_start + 1, min(masked.shape[1], self.event_end - self.crop_start))
-        integrated_sn = burst_only_prof[rel_start:rel_end]
-        effective_bw_mhz = self._effective_selected_bandwidth_mhz()
+        integrated_sn = burst_only_prof[event_rel_start:event_rel_end]
+        effective_bw_mhz = self._effective_selected_bandwidth_mhz(masked)
 
         peak_flux_jy = None
         fluence_jyms = None
@@ -565,6 +735,7 @@ class BurstSession:
                     / (1 + self.config.redshift)
                 ).to_value()
 
+        spec_lo_mhz, spec_hi_mhz = self._selected_frequency_bounds_mhz()
         self.results = BurstMeasurements(
             burst_name=Path(self.burst_file).stem,
             dm=self.dm,
@@ -573,7 +744,7 @@ class BurstSession:
             peak_flux_jy=peak_flux_jy,
             fluence_jyms=fluence_jyms,
             event_duration_ms=float((self.event_end - self.event_start) * self.tsamp_ms),
-            spectral_extent_mhz=float(self.freqs[self.spec_ex_hi] - self.freqs[self.spec_ex_lo]),
+            spectral_extent_mhz=float(spec_hi_mhz - spec_lo_mhz),
             gaussian_fits=gaussian_fits,
             mask_count=int(self.channel_mask.sum()),
             masked_channels=np.flatnonzero(self.channel_mask).astype(int).tolist(),

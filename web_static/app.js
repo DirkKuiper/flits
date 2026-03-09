@@ -42,8 +42,11 @@ const telescopeInput = document.getElementById("telescopeInput")
 const sefdInput = document.getElementById("sefdInput")
 const readStartInput = document.getElementById("readStartInput")
 const initialCropInput = document.getElementById("initialCropInput")
+const dmHalfRangeInput = document.getElementById("dmHalfRangeInput")
+const dmStepInput = document.getElementById("dmStepInput")
 const detectionHint = document.getElementById("detectionHint")
 const resolutionLabel = document.getElementById("resolutionLabel")
+const dmOptimizeBadge = document.getElementById("dmOptimizeBadge")
 const sessionSummary = document.getElementById("sessionSummary")
 const sessionFacts = document.getElementById("sessionFacts")
 const sessionBadge = document.getElementById("sessionBadge")
@@ -53,7 +56,11 @@ const heroTags = document.getElementById("heroTags")
 const burstSubtitle = document.getElementById("burstSubtitle")
 const heroMetrics = document.getElementById("heroMetrics")
 const resultsContent = document.getElementById("resultsContent")
+const dmOptimizationContent = document.getElementById("dmOptimizationContent")
+const dmOptimizationPlot = document.getElementById("dmOptimizationPlot")
 const setDmButton = document.getElementById("setDmButton")
+const optimizeDmButton = document.getElementById("optimizeDmButton")
+const applyBestDmButton = document.getElementById("applyBestDmButton")
 const resetViewButton = document.getElementById("resetViewButton")
 const clearRegionsButton = document.getElementById("clearRegionsButton")
 const computeButton = document.getElementById("computeButton")
@@ -75,6 +82,8 @@ const viewerDomains = {
 const modeButtons = Array.from(document.querySelectorAll(".mode-button"))
 const sessionControls = [
   setDmButton,
+  optimizeDmButton,
+  applyBestDmButton,
   resetViewButton,
   clearRegionsButton,
   computeButton,
@@ -87,7 +96,18 @@ const sessionControls = [
   freqUpButton,
   ...modeButtons,
 ]
-const busyLockControls = [loadButton, fileSelect, fileInput, dmInput, telescopeInput, sefdInput, readStartInput, initialCropInput]
+const busyLockControls = [
+  loadButton,
+  fileSelect,
+  fileInput,
+  dmInput,
+  telescopeInput,
+  sefdInput,
+  readStartInput,
+  initialCropInput,
+  dmHalfRangeInput,
+  dmStepInput,
+]
 
 document.addEventListener("DOMContentLoaded", async () => {
   rememberButtonLabels()
@@ -133,6 +153,21 @@ function bindControls() {
   loadButton.addEventListener("click", () => loadSession())
   setDmButton.addEventListener("click", () => {
     postAction("set_dm", { dm: Number(dmInput.value) })
+  })
+  optimizeDmButton.addEventListener("click", () => {
+    postAction("optimize_dm", {
+      center_dm: Number(dmInput.value),
+      half_range: Number(dmHalfRangeInput.value),
+      step: Number(dmStepInput.value),
+    })
+  })
+  applyBestDmButton.addEventListener("click", () => {
+    const bestDm = state.view?.dm_optimization?.best_dm
+    if (!Number.isFinite(Number(bestDm))) {
+      return
+    }
+    dmInput.value = String(bestDm)
+    postAction("set_dm", { dm: Number(bestDm) })
   })
   resetViewButton.addEventListener("click", () => postAction("reset_view"))
   clearRegionsButton.addEventListener("click", () => postAction("clear_regions"))
@@ -312,6 +347,7 @@ function applyView(view) {
   renderHero(view)
   renderSessionFacts(view)
   renderResults(view.results)
+  renderDmOptimization(view)
   renderPlots(view)
   updateControlStates()
 }
@@ -421,6 +457,55 @@ function renderResults(results) {
   `
 }
 
+function renderDmOptimization(view) {
+  const optimization = view.dm_optimization
+  if (!optimization) {
+    dmOptimizeBadge.textContent = "Idle"
+    dmOptimizeBadge.dataset.tone = "neutral"
+    dmOptimizationContent.innerHTML =
+      '<div class="empty-state">No DM sweep yet. Run Optimize DM to inspect the S/N-vs-DM curve.</div>'
+    dmOptimizationPlot.classList.add("is-empty")
+    Plotly.purge(dmOptimizationPlot)
+    dmOptimizationPlot.replaceChildren()
+    return
+  }
+
+  const fitTone = fitStatusTone(optimization.fit_status)
+  dmOptimizeBadge.textContent = fitTone === "success" ? "Fit Ready" : "Sweep Ready"
+  dmOptimizeBadge.dataset.tone = fitTone
+
+  const primaryTiles = [
+    resultTile("Best DM", fmt(optimization.best_dm, 6), "primary"),
+    resultTile("Uncertainty", optimization.best_dm_uncertainty === null ? "n/a" : `±${fmt(optimization.best_dm_uncertainty, 6)}`, "primary"),
+    resultTile("Best S/N", fmt(optimization.best_sn, 3), "primary"),
+  ]
+
+  const secondaryTiles = [
+    resultTile("Sweep Center", fmt(optimization.center_dm, 6), "secondary"),
+    resultTile("Sampled Best", fmt(optimization.sampled_best_dm, 6), "secondary"),
+    resultTile("Sampled S/N", fmt(optimization.sampled_best_sn, 3), "secondary"),
+    resultTile("Half-range", fmt(optimization.actual_half_range, 3), "secondary"),
+    resultTile("Step", fmt(optimization.step, 3), "secondary"),
+    resultTile("Applied DM", fmt(view.meta.dm, 6), "secondary"),
+  ]
+
+  dmOptimizationContent.innerHTML = `
+    <div class="results-primary">
+      ${primaryTiles.join("")}
+    </div>
+    <div class="results-secondary">
+      ${secondaryTiles.join("")}
+    </div>
+    <div class="dm-fit-note" data-tone="${escapeHtml(fitTone)}">
+      <strong>${escapeHtml(fitStatusLabel(optimization.fit_status))}</strong>
+      <span>${escapeHtml(fitStatusCopy(optimization.fit_status))}</span>
+    </div>
+  `
+
+  dmOptimizationPlot.classList.remove("is-empty")
+  renderDmOptimizationPlot(optimization, view.meta.dm)
+}
+
 function resultTile(label, value, variant) {
   return `<div class="result-tile ${variant}"><span class="results-label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
 }
@@ -522,6 +607,67 @@ async function renderPlots(view) {
   )
 
   bindPlotEvents()
+}
+
+async function renderDmOptimizationPlot(optimization, appliedDm) {
+  const yRange = dmOptimizationYRange(optimization.snr)
+  const traces = []
+
+  if (optimization.best_dm_uncertainty !== null) {
+    traces.push({
+      x: [
+        optimization.best_dm - optimization.best_dm_uncertainty,
+        optimization.best_dm + optimization.best_dm_uncertainty,
+        optimization.best_dm + optimization.best_dm_uncertainty,
+        optimization.best_dm - optimization.best_dm_uncertainty,
+      ],
+      y: [yRange[0], yRange[0], yRange[1], yRange[1]],
+      type: "scatter",
+      mode: "lines",
+      fill: "toself",
+      line: { width: 0, color: "rgba(15, 118, 110, 0)" },
+      fillcolor: "rgba(15, 118, 110, 0.12)",
+      hoverinfo: "skip",
+      showlegend: false,
+    })
+  }
+
+  traces.push({
+    x: optimization.trial_dms,
+    y: optimization.snr,
+    mode: "lines+markers",
+    type: "scattergl",
+    line: { color: "#0f766e", width: 2.5 },
+    marker: { color: "#0c5f58", size: 8 },
+    hovertemplate: "DM %{x:.6f}<br>S/N %{y:.3f}<extra></extra>",
+    name: "S/N sweep",
+  })
+
+  await Plotly.react(
+    "dmOptimizationPlot",
+    traces,
+    {
+      margin: { l: 70, r: 24, t: 18, b: 54 },
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(255,255,255,0.55)",
+      showlegend: false,
+      hovermode: "closest",
+      xaxis: {
+        title: "Dispersion Measure",
+        automargin: true,
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+      yaxis: {
+        title: "Event S/N",
+        automargin: true,
+        range: yRange,
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+      shapes: buildDmOptimizationShapes(optimization, appliedDm, yRange),
+      annotations: buildDmOptimizationAnnotations(optimization, yRange),
+    },
+    { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
+  )
 }
 
 function bindPlotEvents() {
@@ -642,6 +788,46 @@ function buildViewerAnnotations() {
   ]
 }
 
+function buildDmOptimizationShapes(optimization, appliedDm, yRange) {
+  return [
+    verticalLine(optimization.center_dm, yRange[0], yRange[1], "#475569", "dot"),
+    verticalLine(optimization.sampled_best_dm, yRange[0], yRange[1], "#d97706", "dash"),
+    verticalLine(optimization.best_dm, yRange[0], yRange[1], "#15803d", "solid"),
+    verticalLine(appliedDm, yRange[0], yRange[1], "#b91c1c", "dot"),
+  ]
+}
+
+function buildDmOptimizationAnnotations(optimization, yRange) {
+  const y = yRange[1]
+  return [
+    dmOptimizationLabel("Center", optimization.center_dm, y, "#475569"),
+    dmOptimizationLabel("Sampled", optimization.sampled_best_dm, y, "#d97706"),
+    dmOptimizationLabel("Best", optimization.best_dm, y, "#15803d"),
+  ]
+}
+
+function dmOptimizationLabel(text, x, y, color) {
+  return {
+    x,
+    y,
+    xref: "x",
+    yref: "y",
+    yanchor: "bottom",
+    xanchor: "center",
+    yshift: 4,
+    showarrow: false,
+    text: `<b>${escapeHtml(text)}</b>`,
+    font: {
+      family: '"IBM Plex Mono", monospace',
+      size: 11,
+      color,
+    },
+    bgcolor: "rgba(255,255,255,0.78)",
+    bordercolor: "rgba(24, 33, 38, 0.08)",
+    borderpad: 3,
+  }
+}
+
 function panelLabel(text, x, y) {
   return {
     x,
@@ -758,6 +944,7 @@ function updateControlStates() {
   const hasSession = Boolean(state.sessionId && state.view)
   const isBusy = Boolean(state.busyAction)
   const hasBurstPath = Boolean(fileInput.value.trim() || fileSelect.value)
+  const hasBestDm = Number.isFinite(Number(state.view?.dm_optimization?.best_dm))
 
   for (const control of sessionControls) {
     control.disabled = !hasSession || isBusy
@@ -768,11 +955,14 @@ function updateControlStates() {
   }
 
   loadButton.disabled = isBusy || !hasBurstPath
+  applyBestDmButton.disabled = !hasSession || isBusy || !hasBestDm
   hero.classList.toggle("is-loaded", hasSession)
 
   if (!hasSession) {
     sessionBadge.textContent = "Not loaded"
     sessionBadge.dataset.tone = "neutral"
+    dmOptimizeBadge.textContent = "Idle"
+    dmOptimizeBadge.dataset.tone = "neutral"
   }
 
   syncBusyButtons()
@@ -799,6 +989,7 @@ function busyButtonForAction(action) {
   if (action === "load") return loadButton
   if (action === "compute_properties") return computeButton
   if (action === "auto_mask_jess") return jessButton
+  if (action === "optimize_dm") return optimizeDmButton
   if (action === "set_dm") return setDmButton
   if (action === "reset_view") return resetViewButton
   return null
@@ -808,6 +999,7 @@ function busyButtonText(action) {
   if (action === "load") return "Loading..."
   if (action === "compute_properties") return "Computing..."
   if (action === "auto_mask_jess") return "Masking..."
+  if (action === "optimize_dm") return "Sweeping DM..."
   if (action === "set_dm") return "Applying DM..."
   if (action === "reset_view") return "Resetting..."
   return actionBusyText(action)
@@ -830,6 +1022,7 @@ function actionBusyText(action) {
     reset_mask: "Resetting masks",
     set_spectral_extent: "Setting spectral extent",
     auto_mask_jess: "Auto masking",
+    optimize_dm: "Sweeping DM",
     set_dm: "Applying DM",
     compute_properties: "Computing",
   }
@@ -843,6 +1036,7 @@ function actionSuccessText(action) {
     undo_mask: "Last mask removed",
     reset_mask: "All masks cleared",
     auto_mask_jess: "Auto mask applied",
+    optimize_dm: "DM sweep completed",
     set_dm: "Dispersion measure updated",
     compute_properties: "Derived properties updated",
   }
@@ -980,6 +1174,46 @@ function minFinite(values) {
 function maxFinite(values) {
   const finite = values.map(Number).filter(Number.isFinite)
   return finite.length ? Math.max(...finite) : 1
+}
+
+function dmOptimizationYRange(values) {
+  const yMin = minFinite(values)
+  const yMax = maxFinite(values)
+  const span = yMax - yMin
+  const pad = span > 0 ? span * 0.12 : Math.max(0.5, Math.abs(yMax) * 0.12 || 0.5)
+  return [yMin - pad, yMax + pad]
+}
+
+function fitStatusTone(status) {
+  if (status === "quadratic_peak_fit") return "success"
+  if (status === "quadratic_peak_fit_uncertainty_unavailable") return "warning"
+  return "warning"
+}
+
+function fitStatusLabel(status) {
+  const labels = {
+    quadratic_peak_fit: "Quadratic peak fit accepted",
+    quadratic_peak_fit_uncertainty_unavailable: "Quadratic fit accepted without uncertainty",
+    peak_on_sweep_edge: "Sampled best DM is on the sweep edge",
+    insufficient_peak_window: "Peak window is too sparse for a fit",
+    quadratic_fit_failed: "Quadratic fit failed",
+    quadratic_not_concave: "Local peak fit is not concave",
+    fit_vertex_outside_peak_window: "Fitted peak moved outside the local window",
+  }
+  return labels[status] || "DM sweep completed"
+}
+
+function fitStatusCopy(status) {
+  const labels = {
+    quadratic_peak_fit: "The fitted best DM and uncertainty come from a local quadratic model around the sampled peak.",
+    quadratic_peak_fit_uncertainty_unavailable: "The local fit found a best DM, but the sampled range was not sufficient to derive a stable uncertainty band.",
+    peak_on_sweep_edge: "Expand the DM half-range so the peak is bracketed before trusting the best-DM estimate.",
+    insufficient_peak_window: "Use a smaller step or a broader sweep so the local peak has enough neighboring samples for a fit.",
+    quadratic_fit_failed: "The sampled S/N curve could not support a stable local quadratic fit.",
+    quadratic_not_concave: "The sampled S/N curve near the discrete peak does not resemble a local maximum.",
+    fit_vertex_outside_peak_window: "The local quadratic fit shifted the maximum outside the sampled peak window, so the discrete best DM was retained.",
+  }
+  return labels[status] || "Review the sampled S/N curve before applying a new DM."
 }
 
 function compactList(values) {

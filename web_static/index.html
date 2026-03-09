@@ -85,6 +85,27 @@
 
         <section class="panel">
           <div class="panel-head">
+            <h2>DM Optimize</h2>
+            <span class="panel-badge" id="dmOptimizeBadge">Idle</span>
+          </div>
+          <div class="field-row">
+            <label class="field">
+              <span>Half-range</span>
+              <input id="dmHalfRangeInput" type="number" step="0.001" value="2.0">
+            </label>
+            <label class="field">
+              <span>Step</span>
+              <input id="dmStepInput" type="number" step="0.001" value="0.1">
+            </label>
+          </div>
+          <div class="button-grid two">
+            <button class="ghost-button" id="optimizeDmButton">Optimize DM</button>
+            <button class="primary-button" id="applyBestDmButton">Apply Best DM</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
             <h2>Interaction</h2>
           </div>
           <div class="mode-groups">
@@ -207,6 +228,19 @@
             <div id="resultsContent" class="results-content">
               <div class="empty-state">No measurements yet. Click Compute after marking the burst.</div>
             </div>
+          </div>
+
+          <div class="card results-card">
+            <div class="card-head">
+              <div>
+                <h3>DM Optimization</h3>
+                <p>S/N sweep around the current trial DM using the active crop, mask, event window, and spectral extent.</p>
+              </div>
+            </div>
+            <div id="dmOptimizationContent" class="results-content">
+              <div class="empty-state">No DM sweep yet. Run Optimize DM to inspect the S/N-vs-DM curve.</div>
+            </div>
+            <div class="plot dm-optimization-plot is-empty" id="dmOptimizationPlot"></div>
           </div>
         </section>
       </main>

@@ -67,6 +67,38 @@ class GaussianFit1D:
 
 
 @dataclass(frozen=True)
+class DmOptimizationResult:
+    center_dm: float
+    requested_half_range: float
+    actual_half_range: float
+    step: float
+    trial_dms: np.ndarray
+    snr: np.ndarray
+    sampled_best_dm: float
+    sampled_best_sn: float
+    best_dm: float
+    best_dm_uncertainty: float | None
+    best_sn: float
+    fit_status: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "center_dm": self.center_dm,
+            "requested_half_range": self.requested_half_range,
+            "actual_half_range": self.actual_half_range,
+            "step": self.step,
+            "trial_dms": _jsonable_1d(self.trial_dms, digits=6),
+            "snr": _jsonable_1d(self.snr, digits=6),
+            "sampled_best_dm": self.sampled_best_dm,
+            "sampled_best_sn": self.sampled_best_sn,
+            "best_dm": self.best_dm,
+            "best_dm_uncertainty": self.best_dm_uncertainty,
+            "best_sn": self.best_sn,
+            "fit_status": self.fit_status,
+        }
+
+
+@dataclass(frozen=True)
 class BurstMeasurements:
     burst_name: str
     dm: float

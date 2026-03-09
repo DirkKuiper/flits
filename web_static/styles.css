@@ -535,18 +535,11 @@ button.is-busy::after {
 .plot-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas:
-    "viewer"
-    "results";
   gap: 22px;
 }
 
 .plot-card {
   padding: 18px 18px 10px;
-}
-
-.viewer-card {
-  grid-area: viewer;
 }
 
 .viewer-status-bar {
@@ -640,7 +633,6 @@ button.is-busy::after {
 }
 
 .results-card {
-  grid-area: results;
   padding: 20px;
 }
 
@@ -652,6 +644,16 @@ button.is-busy::after {
 .viewer-plot {
   height: 760px;
   min-height: 760px;
+}
+
+.dm-optimization-plot {
+  height: 340px;
+  min-height: 340px;
+  margin-top: 16px;
+}
+
+.dm-optimization-plot.is-empty {
+  display: none;
 }
 
 .results-content {
@@ -696,6 +698,29 @@ button.is-busy::after {
 
 .results-details {
   grid-column: 1 / -1;
+}
+
+.dm-fit-note {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(24, 33, 38, 0.08);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.dm-fit-note strong {
+  font-size: 0.98rem;
+}
+
+.dm-fit-note[data-tone="success"] {
+  background: rgba(236, 247, 244, 0.92);
+  border-color: rgba(15, 118, 110, 0.16);
+}
+
+.dm-fit-note[data-tone="warning"] {
+  background: rgba(255, 248, 239, 0.92);
+  border-color: rgba(180, 83, 9, 0.18);
 }
 
 .fit-list {
@@ -779,9 +804,6 @@ button.is-busy::after {
 
   .plot-layout {
     grid-template-columns: 1fr;
-    grid-template-areas:
-      "viewer"
-      "results";
   }
 
   .results-primary {
@@ -791,6 +813,11 @@ button.is-busy::after {
   .viewer-plot {
     height: 560px;
     min-height: 560px;
+  }
+
+  .dm-optimization-plot {
+    height: 300px;
+    min-height: 300px;
   }
 }
 
@@ -845,5 +872,10 @@ button.is-busy::after {
   .viewer-plot {
     height: 460px;
     min-height: 460px;
+  }
+
+  .dm-optimization-plot {
+    height: 260px;
+    min-height: 260px;
   }
 }
