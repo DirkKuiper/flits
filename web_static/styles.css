@@ -289,11 +289,10 @@ button:hover {
 
 .plot-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-areas:
-    "time spectrum"
-    "heatmap spectrum"
-    "results results";
+    "viewer"
+    "results";
   gap: 22px;
 }
 
@@ -301,16 +300,8 @@ button:hover {
   padding: 18px 18px 10px;
 }
 
-.time-card {
-  grid-area: time;
-}
-
-.heatmap-card {
-  grid-area: heatmap;
-}
-
-.spectrum-card {
-  grid-area: spectrum;
+.viewer-card {
+  grid-area: viewer;
 }
 
 .results-card {
@@ -320,14 +311,12 @@ button:hover {
 
 .plot {
   min-height: 260px;
+  width: 100%;
 }
 
-.heatmap-card .plot {
-  min-height: 540px;
-}
-
-.spectrum-card .plot {
-  min-height: 840px;
+.viewer-plot {
+  height: 760px;
+  min-height: 760px;
 }
 
 .results-content {
@@ -386,15 +375,13 @@ button:hover {
   .plot-layout {
     grid-template-columns: 1fr;
     grid-template-areas:
-      "time"
-      "heatmap"
-      "spectrum"
+      "viewer"
       "results";
   }
 
-  .spectrum-card .plot,
-  .heatmap-card .plot {
-    min-height: 360px;
+  .viewer-plot {
+    height: 560px;
+    min-height: 560px;
   }
 }
 
@@ -418,5 +405,10 @@ button:hover {
 
   .hero-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .viewer-plot {
+    height: 460px;
+    min-height: 460px;
   }
 }

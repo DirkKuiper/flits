@@ -97,7 +97,7 @@
             <button class="mode-button" data-mode="spec-extent">Spectral Extent</button>
           </div>
           <p class="mode-help" id="modeHelp">
-            Click twice on the time-profile panel to mark the start and end of the event window.
+            Click twice on the top time profile to mark the start and end of the event window.
           </p>
           <div class="pending-box" id="pendingBox">Waiting for first click.</div>
         </section>
@@ -131,8 +131,8 @@
             <div class="eyebrow">Interactive Workspace</div>
             <h2 id="burstTitle">Load a filterbank to begin</h2>
             <p class="muted" id="burstSubtitle">
-              The time profile controls crop, event window, burst regions, and peaks. The heatmap
-              controls masking. The right-hand spectrum controls spectral extent.
+              Use the aligned viewer: top time profile for time edits, center dynamic spectrum for
+              masking, and right frequency profile for spectral selection.
             </p>
           </div>
           <div class="hero-metrics" id="heroMetrics">
@@ -152,34 +152,14 @@
         </section>
 
         <section class="plot-layout">
-          <div class="card plot-card time-card">
+          <div class="card plot-card viewer-card">
             <div class="card-head">
               <div>
-                <h3>Time Profile</h3>
-                <p>Crop window, event window, burst regions, and peak selection.</p>
+                <h3>Aligned Viewer</h3>
+                <p>Top: time profile. Center: dynamic spectrum. Right: frequency profile.</p>
               </div>
             </div>
-            <div class="plot" id="timePlot"></div>
-          </div>
-
-          <div class="card plot-card heatmap-card">
-            <div class="card-head">
-              <div>
-                <h3>Dynamic Spectrum</h3>
-                <p>Use masking tools here. Event and spectral boundaries are overlaid.</p>
-              </div>
-            </div>
-            <div class="plot" id="heatmapPlot"></div>
-          </div>
-
-          <div class="card plot-card spectrum-card">
-            <div class="card-head">
-              <div>
-                <h3>Frequency Spectrum</h3>
-                <p>Click in spectral-extent mode to set the band used for measurements.</p>
-              </div>
-            </div>
-            <div class="plot" id="spectrumPlot"></div>
+            <div class="plot viewer-plot" id="viewerPlot"></div>
           </div>
 
           <div class="card results-card">

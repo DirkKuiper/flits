@@ -8,14 +8,14 @@ const state = {
 }
 
 const modeHelp = {
-  event: "Click twice on the time-profile panel to mark the start and end of the event window.",
-  crop: "Click twice on the time-profile panel to define the crop window you want to work in.",
-  region: "Click twice on the time-profile panel to add a burst or sub-burst fitting region.",
-  "add-peak": "Click once on the time-profile panel to place a peak marker.",
-  "remove-peak": "Click once near an existing peak on the time-profile panel to remove it.",
-  "mask-channel": "Click once on the heatmap or spectrum panel to mask a single frequency channel.",
-  "mask-range": "Click twice on the heatmap or spectrum panel to mask a contiguous frequency range.",
-  "spec-extent": "Click twice on the spectrum panel to set the spectral extent used for measurements.",
+  event: "Click twice on the top time profile to mark the start and end of the event window.",
+  crop: "Click twice on the top time profile to define the crop window you want to work in.",
+  region: "Click twice on the top time profile to add a burst or sub-burst fitting region.",
+  "add-peak": "Click once on the top time profile to place a peak marker.",
+  "remove-peak": "Click once near an existing peak on the top time profile to remove it.",
+  "mask-channel": "Click once on the center dynamic spectrum or right frequency profile to mask a single frequency channel.",
+  "mask-range": "Click twice on the center dynamic spectrum or right frequency profile to mask a contiguous frequency range.",
+  "spec-extent": "Click twice on the right frequency profile to set the spectral extent used for measurements.",
 }
 
 const statusChip = document.getElementById("statusChip")
@@ -38,6 +38,11 @@ const heroMetrics = document.getElementById("heroMetrics")
 const resultsContent = document.getElementById("resultsContent")
 const presetDefaults = new Map()
 let syncingPresetSelection = false
+const viewerDomains = {
+  heatmap: { x: [0.0, 0.78], y: [0.0, 0.78] },
+  time: { x: [0.0, 0.78], y: [0.82, 1.0] },
+  spectrum: { x: [0.82, 1.0], y: [0.0, 0.78] },
+}
 
 document.addEventListener("DOMContentLoaded", async () => {
   bindControls()
@@ -315,62 +320,42 @@ function tile(label, value) {
 
 async function renderPlots(view) {
   await Plotly.react(
-    "timePlot",
+    "viewerPlot",
     [
       {
         x: view.plot.time_profile.x_ms,
         y: view.plot.time_profile.y,
+        xaxis: "x2",
+        yaxis: "y2",
         mode: "lines",
         type: "scattergl",
         line: { color: "#162e3a", width: 2.2 },
         hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra></extra>",
       },
-    ],
-    {
-      margin: { l: 60, r: 20, t: 10, b: 44 },
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor: "rgba(255,255,255,0.55)",
-      xaxis: { title: "Time (ms)", gridcolor: "rgba(24,33,38,0.08)" },
-      yaxis: { title: "Summed Intensity", gridcolor: "rgba(24,33,38,0.08)" },
-      shapes: buildTimeShapes(view),
-      showlegend: false,
-    },
-    { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
-  )
-
-  await Plotly.react(
-    "heatmapPlot",
-    [
       {
         x: view.plot.heatmap.x_ms,
         y: view.plot.heatmap.y_mhz,
         z: view.plot.heatmap.z,
+        xaxis: "x",
+        yaxis: "y",
         type: "heatmap",
         colorscale: "Viridis",
         zmin: view.plot.heatmap.zmin,
         zmax: view.plot.heatmap.zmax,
         hovertemplate: "%{x:.3f} ms<br>%{y:.3f} MHz<br>%{z:.3f}<extra></extra>",
-        colorbar: { title: "I" },
+        colorbar: {
+          title: { text: "I" },
+          x: 1.08,
+          y: 0.39,
+          len: 0.78,
+          thickness: 14,
+        },
       },
-    ],
-    {
-      margin: { l: 72, r: 24, t: 10, b: 46 },
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor: "rgba(255,255,255,0.55)",
-      xaxis: { title: "Time (ms)" },
-      yaxis: { title: "Frequency (MHz)" },
-      shapes: buildHeatmapShapes(view),
-      showlegend: false,
-    },
-    { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
-  )
-
-  await Plotly.react(
-    "spectrumPlot",
-    [
       {
         x: view.plot.spectrum.x,
         y: view.plot.spectrum.y_mhz,
+        xaxis: "x3",
+        yaxis: "y3",
         mode: "lines",
         type: "scattergl",
         line: { color: "#8b4513", width: 2.2 },
@@ -378,13 +363,53 @@ async function renderPlots(view) {
       },
     ],
     {
-      margin: { l: 56, r: 20, t: 10, b: 44 },
+      margin: { l: 76, r: 118, t: 18, b: 54 },
       paper_bgcolor: "rgba(0,0,0,0)",
       plot_bgcolor: "rgba(255,255,255,0.55)",
-      xaxis: { title: "Summed Intensity", gridcolor: "rgba(24,33,38,0.08)" },
-      yaxis: { title: "Frequency (MHz)", gridcolor: "rgba(24,33,38,0.08)" },
-      shapes: buildSpectrumShapes(view),
       showlegend: false,
+      hovermode: "closest",
+      xaxis: {
+        domain: viewerDomains.heatmap.x,
+        anchor: "y",
+        title: "Time (ms)",
+        automargin: true,
+      },
+      yaxis: {
+        domain: viewerDomains.heatmap.y,
+        anchor: "x",
+        title: "Frequency (MHz)",
+        automargin: true,
+      },
+      xaxis2: {
+        domain: viewerDomains.time.x,
+        anchor: "y2",
+        matches: "x",
+        showticklabels: false,
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+      yaxis2: {
+        domain: viewerDomains.time.y,
+        anchor: "x2",
+        title: "Summed Intensity",
+        automargin: true,
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+      xaxis3: {
+        domain: viewerDomains.spectrum.x,
+        anchor: "y3",
+        title: "Summed Intensity",
+        automargin: true,
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+      yaxis3: {
+        domain: viewerDomains.spectrum.y,
+        anchor: "x3",
+        matches: "y",
+        showticklabels: false,
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+      shapes: buildViewerShapes(view),
+      annotations: buildViewerAnnotations(),
     },
     { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
   )
@@ -393,9 +418,7 @@ async function renderPlots(view) {
 }
 
 function bindPlotEvents() {
-  bindPlotEvent("timePlot", handleTimePlotClick)
-  bindPlotEvent("heatmapPlot", handleFreqPlotClick)
-  bindPlotEvent("spectrumPlot", handleFreqPlotClick)
+  bindPlotEvent("viewerPlot", handleViewerPlotClick)
 }
 
 function bindPlotEvent(elementId, handler) {
@@ -407,11 +430,34 @@ function bindPlotEvent(elementId, handler) {
   plot.dataset.bound = "true"
 }
 
-function handleTimePlotClick(event) {
+function handleViewerPlotClick(event) {
   const point = event.points?.[0]
   if (!point) return
-  const timeMs = Number(point.x)
+  const panel = panelFromPoint(point)
 
+  if (panel === "time") {
+    handleTimePlotClick(Number(point.x))
+  } else if (panel === "heatmap") {
+    handleFreqPlotClick(Number(point.y), false)
+  } else if (panel === "spectrum") {
+    handleFreqPlotClick(Number(point.y), true)
+  }
+}
+
+function panelFromPoint(point) {
+  const xaxisId = point.data?.xaxis || point.fullData?.xaxis || point.xaxis?._id || "x"
+  const yaxisId = point.data?.yaxis || point.fullData?.yaxis || point.yaxis?._id || "y"
+
+  if (xaxisId === "x2" || yaxisId === "y2") {
+    return "time"
+  }
+  if (xaxisId === "x3" || yaxisId === "y3") {
+    return "spectrum"
+  }
+  return "heatmap"
+}
+
+function handleTimePlotClick(timeMs) {
   if (state.mode === "event") {
     handlePair("set_event", timeMs, "ms")
   } else if (state.mode === "crop") {
@@ -425,16 +471,12 @@ function handleTimePlotClick(event) {
   }
 }
 
-function handleFreqPlotClick(event) {
-  const point = event.points?.[0]
-  if (!point) return
-  const freqMHz = Number(point.y)
-
+function handleFreqPlotClick(freqMHz, allowSpectralExtent) {
   if (state.mode === "mask-channel") {
     postAction("mask_channel", { freq_mhz: freqMHz })
   } else if (state.mode === "mask-range") {
     handlePair("mask_range", freqMHz, "MHz")
-  } else if (state.mode === "spec-extent") {
+  } else if (state.mode === "spec-extent" && allowSpectralExtent) {
     handlePair("set_spectral_extent", freqMHz, "MHz")
   }
 }
@@ -479,30 +521,62 @@ function scaleFactor(axis, multiplier) {
   postAction(key, { value: next })
 }
 
+function buildViewerShapes(view) {
+  return [...buildTimeShapes(view), ...buildHeatmapShapes(view), ...buildSpectrumShapes(view)]
+}
+
+function buildViewerAnnotations() {
+  return [
+    panelLabel("Time Profile", viewerDomains.time.x[0], viewerDomains.time.y[1]),
+    panelLabel("Dynamic Spectrum", viewerDomains.heatmap.x[0], viewerDomains.heatmap.y[1]),
+    panelLabel("Frequency Profile", viewerDomains.spectrum.x[0], viewerDomains.spectrum.y[1]),
+  ]
+}
+
+function panelLabel(text, x, y) {
+  return {
+    x,
+    y,
+    xref: "paper",
+    yref: "paper",
+    xanchor: "left",
+    yanchor: "bottom",
+    xshift: 4,
+    yshift: 4,
+    showarrow: false,
+    text: `<b>${text}</b>`,
+    font: {
+      family: '"IBM Plex Mono", monospace',
+      size: 11,
+      color: "#5c6c73",
+    },
+  }
+}
+
 function buildTimeShapes(view) {
   const yMin = minFinite(view.plot.time_profile.y)
   const yMax = maxFinite(view.plot.time_profile.y)
   const shapes = [
-    verticalLine(view.state.event_ms[0], yMin, yMax, "#d97706"),
-    verticalLine(view.state.event_ms[1], yMin, yMax, "#d97706"),
+    verticalLine(view.state.event_ms[0], yMin, yMax, "#d97706", "solid", "x2", "y2"),
+    verticalLine(view.state.event_ms[1], yMin, yMax, "#d97706", "solid", "x2", "y2"),
   ]
 
   for (const region of view.state.burst_regions_ms) {
     shapes.push({
       type: "rect",
-      xref: "x",
-      yref: "paper",
+      xref: "x2",
+      yref: "y2",
       x0: region[0],
       x1: region[1],
-      y0: 0,
-      y1: 1,
+      y0: yMin,
+      y1: yMax,
       fillcolor: "rgba(22, 163, 74, 0.14)",
       line: { width: 0 },
     })
   }
 
   for (const peak of view.state.peak_ms) {
-    shapes.push(verticalLine(peak, yMin, yMax, "#dc2626", "dot"))
+    shapes.push(verticalLine(peak, yMin, yMax, "#dc2626", "dot", "x2", "y2"))
   }
   return shapes
 }
@@ -513,14 +587,14 @@ function buildHeatmapShapes(view) {
   const y0 = view.meta.freq_range_mhz[0]
   const y1 = view.meta.freq_range_mhz[1]
   const shapes = [
-    verticalLine(view.state.event_ms[0], y0, y1, "#d97706"),
-    verticalLine(view.state.event_ms[1], y0, y1, "#d97706"),
-    horizontalLine(view.state.spectral_extent_mhz[0], x0, x1, "#7c3aed"),
-    horizontalLine(view.state.spectral_extent_mhz[1], x0, x1, "#7c3aed"),
+    verticalLine(view.state.event_ms[0], y0, y1, "#d97706", "solid", "x", "y"),
+    verticalLine(view.state.event_ms[1], y0, y1, "#d97706", "solid", "x", "y"),
+    horizontalLine(view.state.spectral_extent_mhz[0], x0, x1, "#7c3aed", "solid", "x", "y"),
+    horizontalLine(view.state.spectral_extent_mhz[1], x0, x1, "#7c3aed", "solid", "x", "y"),
   ]
 
   for (const peak of view.state.peak_ms) {
-    shapes.push(verticalLine(peak, y0, y1, "#dc2626", "dot"))
+    shapes.push(verticalLine(peak, y0, y1, "#dc2626", "dot", "x", "y"))
   }
   return shapes
 }
@@ -529,14 +603,16 @@ function buildSpectrumShapes(view) {
   const xMin = minFinite(view.plot.spectrum.x)
   const xMax = maxFinite(view.plot.spectrum.x)
   return [
-    horizontalLine(view.state.spectral_extent_mhz[0], xMin, xMax, "#7c3aed"),
-    horizontalLine(view.state.spectral_extent_mhz[1], xMin, xMax, "#7c3aed"),
+    horizontalLine(view.state.spectral_extent_mhz[0], xMin, xMax, "#7c3aed", "solid", "x3", "y3"),
+    horizontalLine(view.state.spectral_extent_mhz[1], xMin, xMax, "#7c3aed", "solid", "x3", "y3"),
   ]
 }
 
-function verticalLine(x, y0, y1, color, dash = "solid") {
+function verticalLine(x, y0, y1, color, dash = "solid", xref = "x", yref = "y") {
   return {
     type: "line",
+    xref,
+    yref,
     x0: x,
     x1: x,
     y0,
@@ -545,9 +621,11 @@ function verticalLine(x, y0, y1, color, dash = "solid") {
   }
 }
 
-function horizontalLine(y, x0, x1, color, dash = "solid") {
+function horizontalLine(y, x0, x1, color, dash = "solid", xref = "x", yref = "y") {
   return {
     type: "line",
+    xref,
+    yref,
     x0,
     x1,
     y0: y,
