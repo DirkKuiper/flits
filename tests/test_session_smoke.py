@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from burst_analyzer.session import BurstSession
+from flits.session import BurstSession
 
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -5,9 +5,9 @@ from pathlib import Path
 import numpy as np
 import your
 
-from burst_analyzer.models import FilterbankMetadata
-from burst_analyzer.settings import ObservationConfig
-from burst_analyzer.signal import dedisperse, normalize
+from flits.models import FilterbankMetadata
+from flits.settings import ObservationConfig
+from flits.signal import dedisperse, normalize
 
 
 def _build_stokes_i(raw: np.ndarray) -> tuple[np.ndarray, int]:

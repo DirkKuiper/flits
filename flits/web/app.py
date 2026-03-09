@@ -12,8 +12,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from burst_analyzer.session import BurstSession
-from burst_analyzer.settings import available_presets
+from flits.session import BurstSession
+from flits.settings import available_presets
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -37,7 +37,7 @@ class ActionRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
-app = FastAPI(title="Burst Analyzer Web")
+app = FastAPI(title="FLITS")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -163,11 +163,11 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the web burst analyzer.")
+    parser = argparse.ArgumentParser(description="Run FLITS.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
-    uvicorn.run("burst_analyzer.web.app:app", host=args.host, port=args.port, reload=False)
+    uvicorn.run("flits.web.app:app", host=args.host, port=args.port, reload=False)
 
 
 if __name__ == "__main__":

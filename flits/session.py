@@ -8,10 +8,10 @@ import numpy as np
 from astropy import units as u
 from scipy.optimize import curve_fit
 
-from burst_analyzer.io import load_filterbank_data
-from burst_analyzer.models import BurstMeasurements, FilterbankMetadata, GaussianFit1D
-from burst_analyzer.settings import ObservationConfig
-from burst_analyzer.signal import block_reduce_mean, dedisperse, gaussian_1d, radiometer
+from flits.io import load_filterbank_data
+from flits.models import BurstMeasurements, FilterbankMetadata, GaussianFit1D
+from flits.settings import ObservationConfig
+from flits.signal import block_reduce_mean, dedisperse, gaussian_1d, radiometer
 
 try:
     import jess.channel_masks
