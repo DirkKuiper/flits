@@ -1,0 +1,422 @@
+:root {
+  --bg: #f4efe7;
+  --bg-strong: #efe3d0;
+  --panel: rgba(255, 252, 247, 0.88);
+  --panel-strong: rgba(255, 248, 239, 0.96);
+  --border: rgba(45, 51, 56, 0.12);
+  --ink: #182126;
+  --muted: #5c6c73;
+  --accent: #0f766e;
+  --accent-soft: rgba(15, 118, 110, 0.1);
+  --alert: #c05621;
+  --shadow: 0 18px 55px rgba(26, 35, 38, 0.12);
+  --radius: 24px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top right, rgba(215, 142, 73, 0.24), transparent 28%),
+    radial-gradient(circle at bottom left, rgba(24, 131, 121, 0.18), transparent 24%),
+    linear-gradient(135deg, #f8f3eb 0%, #f2e9dd 42%, #ecdfd0 100%);
+  font-family: "Space Grotesk", sans-serif;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(24, 33, 38, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(24, 33, 38, 0.03) 1px, transparent 1px);
+  background-size: 36px 36px;
+  mask-image: radial-gradient(circle at center, black 30%, transparent 92%);
+}
+
+.page-glow {
+  position: fixed;
+  inset: auto auto 0 0;
+  width: 45vw;
+  height: 45vw;
+  background: radial-gradient(circle, rgba(15, 118, 110, 0.17), transparent 72%);
+  pointer-events: none;
+  filter: blur(10px);
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 22px;
+  padding: 24px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+
+.sidebar {
+  position: sticky;
+  top: 24px;
+  align-self: start;
+  padding: 22px;
+  display: grid;
+  gap: 18px;
+}
+
+.main-content {
+  display: grid;
+  gap: 22px;
+}
+
+.brand h1,
+.hero h2,
+.card-head h3,
+.panel-head h2 {
+  margin: 0;
+}
+
+.brand h1 {
+  font-size: 2rem;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.hero {
+  padding: 24px 26px;
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.hero-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 12px;
+  min-width: 360px;
+}
+
+.metric-card {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: var(--panel-strong);
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  display: grid;
+  gap: 6px;
+}
+
+.metric-card span,
+.eyebrow,
+.panel-badge,
+.kv-item span,
+.field span,
+.results-label {
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.metric-card span,
+.muted,
+.card-head p,
+.mode-help,
+.empty-state,
+.kv-item span,
+.field span {
+  color: var(--muted);
+}
+
+.metric-card strong {
+  font-size: 1.05rem;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.72rem;
+  color: var(--accent);
+}
+
+.eyebrow::before {
+  content: "";
+  width: 32px;
+  height: 1px;
+  background: currentColor;
+}
+
+.panel {
+  padding: 18px;
+  border-radius: 20px;
+  background: var(--panel-strong);
+  border: 1px solid rgba(24, 33, 38, 0.08);
+  display: grid;
+  gap: 14px;
+}
+
+.panel-head,
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.panel-badge {
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.field,
+.field-row {
+  display: grid;
+  gap: 8px;
+}
+
+.field-row {
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+input,
+select,
+button {
+  font: inherit;
+}
+
+input,
+select {
+  width: 100%;
+  border: 1px solid rgba(24, 33, 38, 0.12);
+  background: rgba(255, 255, 255, 0.88);
+  border-radius: 14px;
+  padding: 12px 14px;
+  color: var(--ink);
+}
+
+button {
+  cursor: pointer;
+  border: 0;
+  border-radius: 14px;
+  padding: 12px 14px;
+  transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+}
+
+.primary-button {
+  background: linear-gradient(135deg, #0f766e, #0c5f58);
+  color: white;
+  font-weight: 700;
+}
+
+.ghost-button,
+.mode-button {
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(24, 33, 38, 0.1);
+  color: var(--ink);
+}
+
+.mode-button.active {
+  background: linear-gradient(135deg, #1f5f74, #16485b);
+  color: white;
+  border-color: transparent;
+}
+
+.button-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.button-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.button-grid .wide {
+  grid-column: 1 / -1;
+}
+
+.pending-box {
+  min-height: 48px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(192, 86, 33, 0.08);
+  border: 1px dashed rgba(192, 86, 33, 0.25);
+  color: var(--alert);
+}
+
+.kv-list {
+  display: grid;
+  gap: 10px;
+}
+
+.kv-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(24, 33, 38, 0.08);
+}
+
+.kv-item:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.kv-item strong {
+  text-align: right;
+  max-width: 180px;
+  overflow-wrap: anywhere;
+}
+
+.plot-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-areas:
+    "time spectrum"
+    "heatmap spectrum"
+    "results results";
+  gap: 22px;
+}
+
+.plot-card {
+  padding: 18px 18px 10px;
+}
+
+.time-card {
+  grid-area: time;
+}
+
+.heatmap-card {
+  grid-area: heatmap;
+}
+
+.spectrum-card {
+  grid-area: spectrum;
+}
+
+.results-card {
+  grid-area: results;
+  padding: 20px;
+}
+
+.plot {
+  min-height: 260px;
+}
+
+.heatmap-card .plot {
+  min-height: 540px;
+}
+
+.spectrum-card .plot {
+  min-height: 840px;
+}
+
+.results-content {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.result-tile {
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(24, 33, 38, 0.08);
+  display: grid;
+  gap: 6px;
+}
+
+.result-tile strong {
+  font-size: 1.15rem;
+}
+
+.result-tile.code {
+  grid-column: 1 / -1;
+}
+
+.fit-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.empty-state {
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px dashed rgba(24, 33, 38, 0.12);
+}
+
+@media (max-width: 1200px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+  }
+
+  .hero {
+    flex-direction: column;
+  }
+
+  .hero-metrics {
+    min-width: 0;
+  }
+
+  .plot-layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "time"
+      "heatmap"
+      "spectrum"
+      "results";
+  }
+
+  .spectrum-card .plot,
+  .heatmap-card .plot {
+    min-height: 360px;
+  }
+}
+
+@media (max-width: 720px) {
+  .app-shell {
+    padding: 14px;
+  }
+
+  .sidebar,
+  .hero,
+  .plot-card,
+  .results-card {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .button-grid,
+  .field-row {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-metrics {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,23 +1,32 @@
 # burst_analyzer
-This is an interactive tool to read in burst snippet in filterbank format, zap RFI, and calculate burst properties.
 
-There are 3 stages. 
+Browser-based scientific software for interactive burst inspection, masking, and measurement on filterbank data.
 
-## Stage 1: burst preview
-Hold the 'c' key and click in the top panel to select a crop window. Similarly, the 'e' key is used to set the bounds of the event duration (for complex bursts or failed fits this can be used as a measure of the burst duration). The 'b' key is used to set bounds of either the bursts, or subbursts. In Stage 3 the code will attempt to fit 1-D Gaussians to each burst region. Peak positions can be added/deleted with the 'm'/'d' keys, e.g. to check the separation between different burst components. If the burst is not visible, you can downsample in time or frequency.
+## Run
 
-## Stage 2: RFI zapping
-Left and right click to zap a range, or hold 'z' and click to zap a channel. Jess (https://github.com/josephwkania/jess?tab=readme-ov-file) can be called to provide automatic zapping. Also set the spectral extent of the burst here using the 'b' key and clicking in right panel.
+```bash
+.venv_test/bin/python -m burst_analyzer --host 127.0.0.1 --port 8123
+```
 
-## Stage 3: burst property calculation
-Click on burst properties to calculate various burst properties and attempt 1D Gaussian fits to all burst regions. The save button will save these properties in a .csv. 
+Then open `http://127.0.0.1:8123`.
 
-# Usage
-python CLASSY_burst_analyzer.py -b burst.fil -d 123 -t NRT -v
+For non-NRT data, use the `Generic Filterbank` preset and optionally provide an SEFD override if you want calibrated flux and fluence values.
 
-Extracted burst properties:
-- Fluence (Jy ms), calculated for the selected event duration over the entire bandwidth
-- Peak flux density (Jy)
-- Event duration (ms), manually selected 
-- Spectral extent (MHz), manually selected
-- MJD: Topocentric at NRT
+## Code Structure
+
+- `burst_analyzer/settings.py`: observation presets and explicit overrides
+- `burst_analyzer/io/filterbank.py`: filterbank loading and Stokes-I extraction
+- `burst_analyzer/signal.py`: shared numerical utilities
+- `burst_analyzer/models.py`: typed metadata and measurement containers
+- `burst_analyzer/session.py`: interactive burst state and measurements
+- `burst_analyzer/web/app.py`: FastAPI server for the browser UI
+- `tests/test_session_smoke.py`: smoke tests on a real local filterbank file
+
+## Measurements
+
+- Fluence (Jy ms), when an SEFD is provided
+- Peak flux density (Jy), when an SEFD is provided
+- Event duration (ms)
+- Spectral extent (MHz)
+- Peak MJD
+- 1D Gaussian fits to selected burst regions

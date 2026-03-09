@@ -1,0 +1,9 @@
+.venv/
+.venv_test/
+.vendor/
+__pycache__/
+*.pyc
+.DS_Store
+*.fil
+*.npz
+burst_properties.csv
