@@ -5,6 +5,18 @@ const state = {
   pending: null,
   detection: null,
   userSelectedPreset: false,
+  busyAction: null,
+}
+
+const modeLabels = {
+  event: "Event Window",
+  crop: "Crop Window",
+  region: "Burst Region",
+  "add-peak": "Add Peak",
+  "remove-peak": "Remove Peak",
+  "mask-channel": "Mask Channel",
+  "mask-range": "Mask Range",
+  "spec-extent": "Spectral Extent",
 }
 
 const modeHelp = {
@@ -22,6 +34,7 @@ const statusChip = document.getElementById("statusChip")
 const modeChip = document.getElementById("modeChip")
 const modeHelpEl = document.getElementById("modeHelp")
 const pendingBox = document.getElementById("pendingBox")
+const loadButton = document.getElementById("loadButton")
 const fileSelect = document.getElementById("fileSelect")
 const fileInput = document.getElementById("fileInput")
 const dmInput = document.getElementById("dmInput")
@@ -31,11 +44,27 @@ const readStartInput = document.getElementById("readStartInput")
 const initialCropInput = document.getElementById("initialCropInput")
 const detectionHint = document.getElementById("detectionHint")
 const resolutionLabel = document.getElementById("resolutionLabel")
+const sessionSummary = document.getElementById("sessionSummary")
 const sessionFacts = document.getElementById("sessionFacts")
+const sessionBadge = document.getElementById("sessionBadge")
+const hero = document.querySelector(".hero")
 const burstTitle = document.getElementById("burstTitle")
+const heroTags = document.getElementById("heroTags")
 const burstSubtitle = document.getElementById("burstSubtitle")
 const heroMetrics = document.getElementById("heroMetrics")
 const resultsContent = document.getElementById("resultsContent")
+const setDmButton = document.getElementById("setDmButton")
+const resetViewButton = document.getElementById("resetViewButton")
+const clearRegionsButton = document.getElementById("clearRegionsButton")
+const computeButton = document.getElementById("computeButton")
+const undoMaskButton = document.getElementById("undoMaskButton")
+const resetMaskButton = document.getElementById("resetMaskButton")
+const jessButton = document.getElementById("jessButton")
+const timeDownButton = document.getElementById("timeDownButton")
+const timeUpButton = document.getElementById("timeUpButton")
+const freqDownButton = document.getElementById("freqDownButton")
+const freqUpButton = document.getElementById("freqUpButton")
+const toastStack = document.getElementById("toastStack")
 const presetDefaults = new Map()
 let syncingPresetSelection = false
 const viewerDomains = {
@@ -43,28 +72,54 @@ const viewerDomains = {
   time: { x: [0.0, 0.78], y: [0.82, 1.0] },
   spectrum: { x: [0.82, 1.0], y: [0.0, 0.78] },
 }
+const modeButtons = Array.from(document.querySelectorAll(".mode-button"))
+const sessionControls = [
+  setDmButton,
+  resetViewButton,
+  clearRegionsButton,
+  computeButton,
+  undoMaskButton,
+  resetMaskButton,
+  jessButton,
+  timeDownButton,
+  timeUpButton,
+  freqDownButton,
+  freqUpButton,
+  ...modeButtons,
+]
+const busyLockControls = [loadButton, fileSelect, fileInput, dmInput, telescopeInput, sefdInput, readStartInput, initialCropInput]
 
 document.addEventListener("DOMContentLoaded", async () => {
+  rememberButtonLabels()
   bindControls()
+  setMode(state.mode)
+  setStatus("Idle", "neutral")
+  updateControlStates()
   await loadPresets()
   await loadFiles()
   if (fileSelect.options.length > 0) {
     fileInput.value = fileSelect.value
     await detectSelectedFile()
-    await loadSession()
+    await loadSession({ silent: true })
   }
 })
 
 function bindControls() {
+  fileInput.addEventListener("input", () => {
+    updateControlStates()
+  })
+
   fileSelect.addEventListener("change", async () => {
     fileInput.value = fileSelect.value
     state.userSelectedPreset = false
     await detectSelectedFile()
+    updateControlStates()
   })
 
   fileInput.addEventListener("change", async () => {
     state.userSelectedPreset = false
     await detectSelectedFile()
+    updateControlStates()
   })
 
   telescopeInput.addEventListener("change", () => {
@@ -75,23 +130,23 @@ function bindControls() {
     renderDetectionHint()
   })
 
-  document.getElementById("loadButton").addEventListener("click", loadSession)
-  document.getElementById("setDmButton").addEventListener("click", () => {
+  loadButton.addEventListener("click", () => loadSession())
+  setDmButton.addEventListener("click", () => {
     postAction("set_dm", { dm: Number(dmInput.value) })
   })
-  document.getElementById("resetViewButton").addEventListener("click", () => postAction("reset_view"))
-  document.getElementById("clearRegionsButton").addEventListener("click", () => postAction("clear_regions"))
-  document.getElementById("computeButton").addEventListener("click", () => postAction("compute_properties"))
-  document.getElementById("undoMaskButton").addEventListener("click", () => postAction("undo_mask"))
-  document.getElementById("resetMaskButton").addEventListener("click", () => postAction("reset_mask"))
-  document.getElementById("jessButton").addEventListener("click", () => postAction("auto_mask_jess"))
+  resetViewButton.addEventListener("click", () => postAction("reset_view"))
+  clearRegionsButton.addEventListener("click", () => postAction("clear_regions"))
+  computeButton.addEventListener("click", () => postAction("compute_properties"))
+  undoMaskButton.addEventListener("click", () => postAction("undo_mask"))
+  resetMaskButton.addEventListener("click", () => postAction("reset_mask"))
+  jessButton.addEventListener("click", () => postAction("auto_mask_jess"))
 
-  document.getElementById("timeDownButton").addEventListener("click", () => scaleFactor("time", 0.5))
-  document.getElementById("timeUpButton").addEventListener("click", () => scaleFactor("time", 2))
-  document.getElementById("freqDownButton").addEventListener("click", () => scaleFactor("freq", 0.5))
-  document.getElementById("freqUpButton").addEventListener("click", () => scaleFactor("freq", 2))
+  timeDownButton.addEventListener("click", () => scaleFactor("time", 0.5))
+  timeUpButton.addEventListener("click", () => scaleFactor("time", 2))
+  freqDownButton.addEventListener("click", () => scaleFactor("freq", 0.5))
+  freqUpButton.addEventListener("click", () => scaleFactor("freq", 2))
 
-  document.querySelectorAll(".mode-button").forEach((button) => {
+  modeButtons.forEach((button) => {
     button.addEventListener("click", () => setMode(button.dataset.mode))
   })
 }
@@ -121,8 +176,10 @@ async function loadPresets() {
     }
     setPresetSelection("generic")
     renderDetectionHint()
+    updateControlStates()
   } catch (error) {
-    setStatus(error.message, true)
+    setStatus(error.message, "error")
+    showToast(error.message, "error")
   }
 }
 
@@ -144,10 +201,12 @@ async function detectSelectedFile() {
       setPresetSelection(payload.detected_preset_key)
     }
     renderDetectionHint()
+    updateControlStates()
     return payload
   } catch (error) {
     state.detection = null
     renderDetectionHint(error.message)
+    updateControlStates()
     throw error
   }
 }
@@ -165,19 +224,26 @@ async function loadFiles() {
     if (payload.files.length > 0) {
       fileSelect.value = payload.files[0]
     }
+    updateControlStates()
   } catch (error) {
-    setStatus(error.message, true)
+    setStatus(error.message, "error")
+    showToast(error.message, "error")
   }
 }
 
-async function loadSession() {
+async function loadSession(options = {}) {
+  const { silent = false } = options
   const bfile = fileInput.value.trim() || fileSelect.value
   if (!bfile) {
-    setStatus("Pick a filterbank first", true)
+    setStatus("Pick a filterbank first", "error")
+    if (!silent) {
+      showToast("Pick a filterbank first", "error")
+    }
     return
   }
 
-  setStatus("Loading", false)
+  setBusy("load")
+  setStatus("Loading", "info")
   clearPending()
   try {
     await detectSelectedFile()
@@ -194,28 +260,45 @@ async function loadSession() {
     })
     state.sessionId = payload.session_id
     applyView(payload.view)
-    setStatus("Loaded", false)
+    setStatus("Loaded", "success")
+    if (!silent) {
+      showToast("Session loaded", "success")
+    }
   } catch (error) {
-    setStatus(error.message, true)
+    setStatus(error.message, "error")
+    if (!silent) {
+      showToast(error.message, "error")
+    }
+  } finally {
+    setBusy(null)
   }
 }
 
 async function postAction(type, payload = {}) {
   if (!state.sessionId) {
-    setStatus("Load a session first", true)
+    setStatus("Load a session first", "error")
+    showToast("Load a session first", "error")
     return
   }
 
-  setStatus("Updating", false)
+  setBusy(type)
+  setStatus(actionBusyText(type), "info")
   try {
     const response = await api(`/api/sessions/${state.sessionId}/actions`, {
       method: "POST",
       body: JSON.stringify({ type, payload }),
     })
     applyView(response.view)
-    setStatus("Ready", false)
+    setStatus("Ready", "success")
+    const message = actionSuccessText(type)
+    if (message) {
+      showToast(message, "success")
+    }
   } catch (error) {
-    setStatus(error.message, true)
+    setStatus(error.message, "error")
+    showToast(error.message, "error")
+  } finally {
+    setBusy(null)
   }
 }
 
@@ -223,19 +306,25 @@ function applyView(view) {
   state.view = view
   resolutionLabel.textContent = `t x${view.state.time_factor} / f x${view.state.freq_factor}`
   burstTitle.textContent = view.meta.burst_name
-  const detectionSummary =
-    view.meta.preset_key === view.meta.detected_preset_key
-      ? `Detected from ${view.meta.detection_basis}.`
-      : `Detected ${view.meta.detected_telescope} from ${view.meta.detection_basis}, loaded with ${view.meta.telescope}.`
-  burstSubtitle.textContent = `${fmt(view.meta.shape[0], 0)} channels x ${fmt(view.meta.shape[1], 0)} time bins loaded with the ${view.meta.telescope} profile. ${detectionSummary}`
+  burstSubtitle.textContent =
+    `${fmt(view.meta.shape[0], 0)} channels x ${fmt(view.meta.shape[1], 0)} time bins. ` +
+    `Refine the event window, burst regions, masking, and spectral extent directly in the viewer.`
   renderHero(view)
   renderSessionFacts(view)
   renderResults(view.results)
   renderPlots(view)
+  updateControlStates()
 }
 
 function renderHero(view) {
   const maskedCount = view.state.masked_channels.length
+  const usesDetectedProfile = view.meta.preset_key === view.meta.detected_preset_key
+  hero.classList.toggle("is-loaded", true)
+  heroTags.innerHTML = [
+    infoChip("Detected", view.meta.detected_telescope, "neutral"),
+    infoChip("Using", view.meta.telescope, usesDetectedProfile ? "success" : "warning"),
+    infoChip(usesDetectedProfile ? "Profile" : "Override", usesDetectedProfile ? "Auto" : "Manual", usesDetectedProfile ? "neutral" : "warning"),
+  ].join("")
   heroMetrics.innerHTML = `
     <div class="metric-card">
       <span>Time Resolution</span>
@@ -253,6 +342,15 @@ function renderHero(view) {
 }
 
 function renderSessionFacts(view) {
+  sessionSummary.innerHTML = [
+    summaryCard("Profile", view.meta.telescope),
+    summaryCard("Detection", view.meta.detected_telescope),
+    summaryCard("Crop", `${fmt(view.state.crop_ms[0], 2)} to ${fmt(view.state.crop_ms[1], 2)} ms`),
+    summaryCard("Mask", `${view.state.masked_channels.length} channel${view.state.masked_channels.length === 1 ? "" : "s"}`),
+  ].join("")
+  sessionBadge.textContent = "Loaded"
+  sessionBadge.dataset.tone = "success"
+
   const facts = [
     ["File", view.meta.burst_name],
     ["Selected profile", view.meta.telescope],
@@ -285,15 +383,17 @@ function renderResults(results) {
     return
   }
 
-  const tiles = [
-    tile("Fluence", results.fluence_jyms === null ? "n/a" : `${fmt(results.fluence_jyms, 3)} Jy ms`),
-    tile("Peak Flux", results.peak_flux_jy === null ? "n/a" : `${fmt(results.peak_flux_jy, 3)} Jy`),
-    tile("Duration", `${fmt(results.event_duration_ms, 3)} ms`),
-    tile("MJD @ Peak", fmt(results.mjd_at_peak, 8)),
-    tile("Spectral Extent", `${fmt(results.spectral_extent_mhz, 2)} MHz`),
-    tile("Peak Positions", results.peak_positions_ms.length ? results.peak_positions_ms.map((value) => `${fmt(value, 2)} ms`).join(", ") : "n/a"),
-    tile("Mask Count", String(results.mask_count)),
-    tile("Gaussian Fits", `${results.gaussian_fits.length} region(s)`),
+  const primaryTiles = [
+    resultTile("Fluence", results.fluence_jyms === null ? "n/a" : `${fmt(results.fluence_jyms, 3)} Jy ms`, "primary"),
+    resultTile("Peak Flux", results.peak_flux_jy === null ? "n/a" : `${fmt(results.peak_flux_jy, 3)} Jy`, "primary"),
+    resultTile("Duration", `${fmt(results.event_duration_ms, 3)} ms`, "primary"),
+  ]
+
+  const secondaryTiles = [
+    resultTile("MJD @ Peak", fmt(results.mjd_at_peak, 8), "secondary"),
+    resultTile("Spectral Extent", `${fmt(results.spectral_extent_mhz, 2)} MHz`, "secondary"),
+    resultTile("Mask Count", String(results.mask_count), "secondary"),
+    resultTile("Peak Positions", results.peak_positions_ms.length ? results.peak_positions_ms.map((value) => `${fmt(value, 2)} ms`).join(", ") : "n/a", "secondary"),
   ]
 
   const fitList = results.gaussian_fits.length
@@ -306,16 +406,23 @@ function renderResults(results) {
     : "<div class=\"empty-state\">No Gaussian fits were produced for the current burst-region selection.</div>"
 
   resultsContent.innerHTML = `
-    ${tiles.join("")}
-    <div class="result-tile code">
-      <span class="results-label">Gaussian Fit Summary</span>
-      ${fitList}
+    <div class="results-primary">
+      ${primaryTiles.join("")}
     </div>
+    <div class="results-secondary">
+      ${secondaryTiles.join("")}
+    </div>
+    <details class="details-card results-details">
+      <summary>Gaussian fit details (${results.gaussian_fits.length} region${results.gaussian_fits.length === 1 ? "" : "s"})</summary>
+      <div class="results-fit-panel">
+        ${fitList}
+      </div>
+    </details>
   `
 }
 
-function tile(label, value) {
-  return `<div class="result-tile"><span class="results-label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
+function resultTile(label, value, variant) {
+  return `<div class="result-tile ${variant}"><span class="results-label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
 }
 
 async function renderPlots(view) {
@@ -485,6 +592,7 @@ function handlePair(action, value, unit) {
   if (!state.pending || state.pending.action !== action) {
     state.pending = { action, value, unit }
     pendingBox.textContent = `First point set at ${fmt(value, 3)} ${unit}. Click the second point.`
+    pendingBox.classList.add("is-active")
     return
   }
 
@@ -501,14 +609,15 @@ function handlePair(action, value, unit) {
 function clearPending() {
   state.pending = null
   pendingBox.textContent = "Waiting for first click."
+  pendingBox.classList.remove("is-active")
 }
 
 function setMode(mode) {
   state.mode = mode
   clearPending()
-  modeChip.textContent = `Mode: ${mode}`
+  modeChip.textContent = `Mode: ${modeLabels[mode]}`
   modeHelpEl.textContent = modeHelp[mode]
-  document.querySelectorAll(".mode-button").forEach((button) => {
+  modeButtons.forEach((button) => {
     button.classList.toggle("active", button.dataset.mode === mode)
   })
 }
@@ -634,10 +743,144 @@ function horizontalLine(y, x0, x1, color, dash = "solid", xref = "x", yref = "y"
   }
 }
 
-function setStatus(text, isError) {
+function rememberButtonLabels() {
+  document.querySelectorAll("button").forEach((button) => {
+    button.dataset.idleText = button.textContent
+  })
+}
+
+function setBusy(action) {
+  state.busyAction = action
+  updateControlStates()
+}
+
+function updateControlStates() {
+  const hasSession = Boolean(state.sessionId && state.view)
+  const isBusy = Boolean(state.busyAction)
+  const hasBurstPath = Boolean(fileInput.value.trim() || fileSelect.value)
+
+  for (const control of sessionControls) {
+    control.disabled = !hasSession || isBusy
+  }
+
+  for (const control of busyLockControls) {
+    control.disabled = isBusy
+  }
+
+  loadButton.disabled = isBusy || !hasBurstPath
+  hero.classList.toggle("is-loaded", hasSession)
+
+  if (!hasSession) {
+    sessionBadge.textContent = "Not loaded"
+    sessionBadge.dataset.tone = "neutral"
+  }
+
+  syncBusyButtons()
+}
+
+function syncBusyButtons() {
+  document.querySelectorAll("button").forEach((button) => {
+    button.classList.remove("is-busy")
+    if (button.dataset.idleText) {
+      button.textContent = button.dataset.idleText
+    }
+  })
+
+  const button = busyButtonForAction(state.busyAction)
+  if (!button) {
+    return
+  }
+
+  button.classList.add("is-busy")
+  button.textContent = busyButtonText(state.busyAction)
+}
+
+function busyButtonForAction(action) {
+  if (action === "load") return loadButton
+  if (action === "compute_properties") return computeButton
+  if (action === "auto_mask_jess") return jessButton
+  if (action === "set_dm") return setDmButton
+  if (action === "reset_view") return resetViewButton
+  return null
+}
+
+function busyButtonText(action) {
+  if (action === "load") return "Loading..."
+  if (action === "compute_properties") return "Computing..."
+  if (action === "auto_mask_jess") return "Masking..."
+  if (action === "set_dm") return "Applying DM..."
+  if (action === "reset_view") return "Resetting..."
+  return actionBusyText(action)
+}
+
+function actionBusyText(action) {
+  const labels = {
+    time_factor: "Updating resolution",
+    freq_factor: "Updating resolution",
+    reset_view: "Resetting view",
+    set_crop: "Updating crop window",
+    set_event: "Updating event window",
+    add_region: "Adding burst region",
+    clear_regions: "Clearing regions",
+    add_peak: "Adding peak",
+    remove_peak: "Removing peak",
+    mask_channel: "Masking channel",
+    mask_range: "Masking range",
+    undo_mask: "Undoing mask",
+    reset_mask: "Resetting masks",
+    set_spectral_extent: "Setting spectral extent",
+    auto_mask_jess: "Auto masking",
+    set_dm: "Applying DM",
+    compute_properties: "Computing",
+  }
+  return labels[action] || "Updating"
+}
+
+function actionSuccessText(action) {
+  const labels = {
+    reset_view: "View reset",
+    clear_regions: "Burst regions cleared",
+    undo_mask: "Last mask removed",
+    reset_mask: "All masks cleared",
+    auto_mask_jess: "Auto mask applied",
+    set_dm: "Dispersion measure updated",
+    compute_properties: "Derived properties updated",
+  }
+  return labels[action] || null
+}
+
+function showToast(message, tone = "info") {
+  if (!toastStack || !message) {
+    return
+  }
+
+  const toast = document.createElement("div")
+  toast.className = "toast"
+  toast.dataset.tone = tone
+  toast.textContent = String(message)
+  toastStack.appendChild(toast)
+
+  window.requestAnimationFrame(() => {
+    toast.classList.add("is-visible")
+  })
+
+  window.setTimeout(() => {
+    toast.classList.remove("is-visible")
+    toast.classList.add("is-leaving")
+  }, 3200)
+
+  window.setTimeout(() => {
+    toast.remove()
+  }, 3600)
+
+  while (toastStack.children.length > 4) {
+    toastStack.firstElementChild?.remove()
+  }
+}
+
+function setStatus(text, tone = "info") {
   statusChip.textContent = text
-  statusChip.style.background = isError ? "rgba(192, 86, 33, 0.12)" : "rgba(15, 118, 110, 0.1)"
-  statusChip.style.color = isError ? "#c05621" : "#0f766e"
+  statusChip.dataset.tone = tone
 }
 
 function setPresetSelection(presetKey) {
@@ -649,30 +892,46 @@ function setPresetSelection(presetKey) {
 
 function renderDetectionHint(errorMessage = null) {
   if (errorMessage) {
-    detectionHint.textContent = `Detection error: ${errorMessage}`
+    detectionHint.innerHTML = `
+      <div class="badge-row">
+        ${infoChip("Detection", "Error", "error")}
+      </div>
+      <div class="detection-copy">Detection error: ${escapeHtml(errorMessage)}</div>
+    `
     return
   }
 
   if (!state.detection) {
-    detectionHint.textContent = "Detection: waiting for a filterbank."
+    detectionHint.innerHTML = `
+      <div class="badge-row">
+        ${infoChip("Detection", "Waiting", "neutral")}
+      </div>
+      <div class="detection-copy">Select or enter a filterbank path to inspect its telescope metadata.</div>
+    `
     return
   }
 
   const detectedLabel = state.detection.detected_preset_label
   const selectedLabel = presetDefaults.get(telescopeInput.value)?.label || telescopeInput.value
-  let text = `Detection: ${detectedLabel} (${state.detection.detection_basis}).`
+  const overrideActive = state.userSelectedPreset && telescopeInput.value !== state.detection.detected_preset_key
+  const detectedTone = state.detection.detected_preset_key === "generic" ? "warning" : "success"
+  const selectedTone = overrideActive ? "warning" : "success"
+  let copy = `${escapeHtml(state.detection.detection_basis)}. ${overrideActive ? "Manual override active." : "You can override this before loading."}`
 
   if (state.detection.detected_preset_key === "generic") {
-    text = `Detection: no known telescope match (${state.detection.detection_basis}). Using Generic Filterbank by default.`
+    copy =
+      `No known telescope match (${escapeHtml(state.detection.detection_basis)}). ` +
+      `${overrideActive ? `Manual preset selected: ${escapeHtml(selectedLabel)}.` : "Generic Filterbank will be used by default."}`
   }
 
-  if (state.userSelectedPreset && telescopeInput.value !== state.detection.detected_preset_key) {
-    text += ` Manual override active: ${selectedLabel}.`
-  } else {
-    text += " You can override this before loading."
-  }
-
-  detectionHint.textContent = text
+  detectionHint.innerHTML = `
+    <div class="badge-row">
+      ${infoChip("Detected", detectedLabel, detectedTone)}
+      ${infoChip("Using", selectedLabel, selectedTone)}
+      ${infoChip("Mode", overrideActive ? "Manual override" : "Auto profile", overrideActive ? "warning" : "neutral")}
+    </div>
+    <div class="detection-copy">${copy}</div>
+  `
 }
 
 function syncPresetDefaults() {
@@ -686,6 +945,24 @@ function syncPresetDefaults() {
 function parseOptionalNumber(value) {
   const trimmed = value.trim()
   return trimmed === "" ? null : Number(trimmed)
+}
+
+function infoChip(label, value, tone = "neutral") {
+  return (
+    `<span class="info-chip" data-tone="${escapeHtml(tone)}">` +
+    `<span>${escapeHtml(label)}</span>` +
+    `<strong>${escapeHtml(String(value))}</strong>` +
+    `</span>`
+  )
+}
+
+function summaryCard(label, value) {
+  return (
+    `<div class="summary-card">` +
+    `<span>${escapeHtml(label)}</span>` +
+    `<strong>${escapeHtml(String(value))}</strong>` +
+    `</div>`
+  )
 }
 
 function fmt(value, digits = 2) {
