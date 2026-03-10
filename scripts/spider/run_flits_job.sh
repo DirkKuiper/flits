@@ -127,6 +127,7 @@ srun "${srun_args[@]}" --pty bash -i -l -c '
 set -euo pipefail
 
 worker_host=$(hostname)
+worker_host_short=${worker_host%%.*}
 
 if ! command -v apptainer >/dev/null 2>&1; then
   echo "apptainer is not available in the worker-node environment." >&2
@@ -134,17 +135,20 @@ if ! command -v apptainer >/dev/null 2>&1; then
 fi
 
 echo "Worker host: ${worker_host}"
+echo "Tunnel host: ${worker_host_short}"
 echo "FLITS image: ${FLITS_JOB_IMAGE}"
 echo "Bound data dir: ${FLITS_JOB_DATA_DIR}"
-echo "Health check on Spider:"
+echo "Worker-local health check on Spider:"
 echo "  curl http://127.0.0.1:${FLITS_JOB_PORT}/api/health"
+echo "Login-node reachability check on Spider:"
+echo "  curl http://${worker_host_short}:${FLITS_JOB_PORT}/api/health"
 
 if [[ -n "${FLITS_JOB_SSH_TARGET:-}" ]]; then
   echo "Open a local tunnel from your laptop with:"
-  echo "  ssh -N -L ${FLITS_JOB_PORT}:${worker_host}:${FLITS_JOB_PORT} ${FLITS_JOB_SSH_TARGET}"
+  echo "  ssh -N -o ExitOnForwardFailure=yes -L ${FLITS_JOB_PORT}:${worker_host_short}:${FLITS_JOB_PORT} ${FLITS_JOB_SSH_TARGET}"
 else
   echo "Open a local tunnel from your laptop with:"
-  echo "  ssh -N -L ${FLITS_JOB_PORT}:${worker_host}:${FLITS_JOB_PORT} <your-spider-ssh-target>"
+  echo "  ssh -N -o ExitOnForwardFailure=yes -L ${FLITS_JOB_PORT}:${worker_host_short}:${FLITS_JOB_PORT} <your-spider-ssh-target>"
 fi
 
 echo "Then browse to http://127.0.0.1:${FLITS_JOB_PORT}"

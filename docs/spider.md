@@ -32,6 +32,12 @@ apptainer pull ~/containers/flits_latest.sif docker://ghcr.io/dirkkuiper/flits:l
 
 Then jump to [Run FLITS On A Worker Node](#run-flits-on-a-worker-node).
 
+If the GHCR package is still private, authenticate first with a GitHub token that has `read:packages`:
+
+```bash
+apptainer registry login --username DirkKuiper docker://ghcr.io
+```
+
 ## Option 2: Build Locally And Import On SPIDER
 
 If your laptop is Apple Silicon, do not ship an `arm64` image to SPIDER. Build explicitly for `linux/amd64`.
@@ -69,32 +75,44 @@ Defaults:
 - walltime: `04:00:00`
 - port: `8123`
 
-The launcher prints the worker hostname and the exact SSH tunnel command to run from your laptop.
+Important:
+
+- FLITS must listen on `0.0.0.0`, not `127.0.0.1`, so the login node can reach the worker node
+- use the short worker hostname in the tunnel command, for example `wn-la-01`, not the full `wn-la-01.spider.surfsara.nl`
+
+The launcher prints the worker hostname, a worker-local health check, and the SSH tunnel command to run from your laptop.
 
 ## Open The Tunnel From Your Laptop
 
 Run this in a local terminal, not inside the SPIDER shell:
 
 ```bash
-scripts/spider/open_local_tunnel.sh <your-spider-ssh-target> <worker-hostname> 8123
+scripts/spider/open_local_tunnel.sh <your-spider-ssh-target> <worker-hostname> 9000 8123
 ```
 
 Equivalent raw command:
 
 ```bash
-ssh -N -L 8123:<worker-hostname>:8123 <your-spider-ssh-target>
+ssh -N -o ExitOnForwardFailure=yes -L 9000:<worker-hostname>:8123 <your-spider-ssh-target>
 ```
 
-Then open `http://127.0.0.1:8123`.
+If local port `8123` is free you can use that instead of `9000`. Then open `http://127.0.0.1:9000`.
 
 ## Verify And Shut Down
 
-On the SPIDER worker node:
+On the SPIDER worker node, verify that FLITS is serving locally:
 
 ```bash
 curl http://127.0.0.1:8123/api/health
-curl http://127.0.0.1:8123/api/files
 ```
+
+From a separate SPIDER login-node shell, verify that the login node can reach the worker:
+
+```bash
+curl http://<worker-hostname>:8123/api/health
+```
+
+If that second check fails, the local SSH tunnel from your laptop will fail too.
 
 When you are done:
 
@@ -107,3 +125,4 @@ When you are done:
 - This workflow is intended for personal ad-hoc use, not a shared public service.
 - FLITS currently has no authentication and allows permissive CORS, so do not expose the port beyond your SSH tunnel.
 - Once a GHCR image is routinely published, direct `apptainer pull` is the simplest SPIDER path.
+- This follows the same access model as the SPIDER Jupyter documentation: app on worker node, SSH tunnel from laptop to login node, forwarded onward to the worker hostname.

@@ -28,8 +28,9 @@ fi
 
 ssh_target="$1"
 worker_host="$2"
+worker_host="${worker_host%%.*}"
 local_port="${3:-8123}"
 remote_port="${4:-${local_port}}"
 
 echo "Forwarding http://127.0.0.1:${local_port} to ${worker_host}:${remote_port} via ${ssh_target}"
-exec ssh -N -L "${local_port}:${worker_host}:${remote_port}" "${ssh_target}"
+exec ssh -N -o ExitOnForwardFailure=yes -L "${local_port}:${worker_host}:${remote_port}" "${ssh_target}"
