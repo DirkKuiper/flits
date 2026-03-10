@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - spider-usage
     tags:
       - "v*"
   workflow_dispatch:

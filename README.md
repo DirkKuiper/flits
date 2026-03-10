@@ -84,10 +84,10 @@ If the published GHCR image is available:
 apptainer pull flits.sif docker://ghcr.io/dirkkuiper/flits:latest
 APPTAINERENV_FLITS_DATA_DIR=/data \
   apptainer exec --bind /path/to/filterbanks:/data flits.sif \
-  python -m flits --host 127.0.0.1 --port 8123
+  flits --data-dir /data --host 127.0.0.1 --port 8123
 ```
 
-If you are on an HPC system where pulling from GHCR is inconvenient, you can still build or export the Docker image elsewhere and convert it to `.sif` with Apptainer. The SPIDER-specific version of that workflow is documented in [docs/spider.md](/Users/dirk/Desktop/PhD/Code/analyzer/docs/spider.md).
+If you are on an HPC system where pulling from GHCR is inconvenient, you can still build or export the Docker image elsewhere and convert it to `.sif` with Apptainer.
 
 ## Run With Docker Compose
 
@@ -125,7 +125,6 @@ ssh -L 8123:127.0.0.1:8123 user@remote-host
 Then open `http://127.0.0.1:8123` locally in your browser.
 
 - On many HPC clusters, Docker itself is not permitted. Apptainer is usually the right runtime there.
-- The SPIDER-specific workflow, helper scripts, and Slurm examples live in [docs/spider.md](/Users/dirk/Desktop/PhD/Code/analyzer/docs/spider.md).
 - The GitHub Actions workflow in [.github/workflows/publish-image.yml](/Users/dirk/Desktop/PhD/Code/analyzer/.github/workflows/publish-image.yml) is the intended way to publish the canonical OCI image to GHCR.
 
 ## Code Structure
