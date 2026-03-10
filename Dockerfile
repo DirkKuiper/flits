@@ -7,13 +7,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY README.md .
+COPY pyproject.toml README.md requirements.txt MANIFEST.in ./
 COPY flits ./flits
-COPY web_static ./web_static
+
+RUN pip install --no-cache-dir .
 
 EXPOSE 8123
 
-CMD ["python", "-m", "flits", "--host", "0.0.0.0", "--port", "8123"]
+CMD ["flits", "--host", "0.0.0.0", "--port", "8123"]

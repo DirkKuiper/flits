@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -16,8 +18,11 @@ from flits.web.app import (
     ActionRequest,
     DetectFilterbankRequest,
     SESSIONS,
+    STATIC_DIR,
+    data_dir,
     detect_filterbank,
     list_filterbank_files,
+    main,
     resolve_burst_path,
     session_action,
 )
@@ -119,6 +124,35 @@ class WebApiTest(unittest.TestCase):
             with patch.dict("os.environ", {"FLITS_DATA_DIR": str(tmp_path)}):
                 self.assertEqual(list_filterbank_files(), ["nested/example.fil"])
                 self.assertEqual(resolve_burst_path("nested/example.fil"), filterbank.resolve())
+
+    def test_data_dir_defaults_to_current_working_directory(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            (tmp_path / "cwd-example.fil").write_bytes(b"")
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(tmp_path)
+                with patch.dict("os.environ", {}, clear=True):
+                    self.assertEqual(data_dir(), tmp_path.resolve())
+                    self.assertEqual(list_filterbank_files(), ["cwd-example.fil"])
+            finally:
+                os.chdir(original_cwd)
+
+    @patch("flits.web.app.uvicorn.run")
+    def test_main_accepts_data_dir_flag(self, mock_run: object) -> None:
+        with TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir).resolve()
+            with patch.dict("os.environ", {}, clear=True):
+                with patch.object(sys, "argv", ["flits", "--data-dir", str(tmp_path), "--port", "9000"]):
+                    main()
+                    self.assertEqual(os.environ.get("FLITS_DATA_DIR"), str(tmp_path))
+
+            mock_run.assert_called_once_with("flits.web.app:app", host="127.0.0.1", port=9000, reload=False)
+
+    def test_packaged_static_assets_exist(self) -> None:
+        self.assertTrue((STATIC_DIR / "index.html").exists())
+        self.assertTrue((STATIC_DIR / "app.js").exists())
+        self.assertTrue((STATIC_DIR / "styles.css").exists())
 
     def test_session_action_optimize_dm_returns_dm_optimization_payload(self) -> None:
         session_id = "synthetic-dm"

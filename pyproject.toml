@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flits"
+dynamic = ["version", "dependencies"]
+description = "Fast-Look Interactive Transient Suite"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Dirk Kuiper" },
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "License :: Other/Proprietary License",
+  "Operating System :: OS Independent",
+]
+
+[project.scripts]
+flits = "flits.web.app:main"
+
+[project.urls]
+Homepage = "https://github.com/DirkKuiper/flits"
+Repository = "https://github.com/DirkKuiper/flits"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["flits*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "flits.__version__" }
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.package-data]
+flits = [
+  "web_static/*.html",
+  "web_static/*.css",
+  "web_static/*.js",
+  "web_static/vendor/*.js",
+]

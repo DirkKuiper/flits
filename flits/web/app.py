@@ -18,8 +18,8 @@ from flits.session import BurstSession
 from flits.settings import available_presets, get_preset
 
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
-STATIC_DIR = ROOT_DIR / "web_static"
+PACKAGE_DIR = Path(__file__).resolve().parents[1]
+STATIC_DIR = PACKAGE_DIR / "web_static"
 SESSIONS: dict[str, BurstSession] = {}
 
 
@@ -55,7 +55,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 def data_dir() -> Path:
     configured = os.environ.get("FLITS_DATA_DIR")
-    base = ROOT_DIR if configured is None else Path(configured).expanduser()
+    base = Path.cwd() if configured is None else Path(configured).expanduser()
     return base.resolve()
 
 
@@ -207,9 +207,16 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run FLITS.")
+    parser.add_argument(
+        "--data-dir",
+        default=None,
+        help="Directory used for relative filterbank paths and known-file discovery.",
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
+    if args.data_dir is not None:
+        os.environ["FLITS_DATA_DIR"] = str(Path(args.data_dir).expanduser().resolve())
     uvicorn.run("flits.web.app:app", host=args.host, port=args.port, reload=False)
 
 
