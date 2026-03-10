@@ -8,7 +8,13 @@ import warnings
 
 import numpy as np
 
-from flits.measurements import build_measurement_context, compute_burst_measurements, event_snr
+from flits.measurements import (
+    MeasurementContext,
+    build_measurement_context,
+    compute_burst_measurements,
+    compute_subband_arrival_residuals,
+    event_snr,
+)
 from flits.models import BurstMeasurements, DmOptimizationResult, FilterbankMetadata
 from flits.settings import ObservationConfig, get_auto_mask_profile, get_preset
 from flits.signal import block_reduce_mean, dedisperse
@@ -329,7 +335,10 @@ class BurstSession:
         rel_end = max(rel_start + 1, min(time_bins, self.event_end - self.crop_start))
         return rel_start, rel_end
 
-    def _compute_profiles_for_data(self, data: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
+    def _build_measurement_context_for_data(
+        self,
+        data: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, MeasurementContext]:
         masked = self.get_masked_crop(data)
         rel_start, rel_end = self._event_bounds_in_crop(masked.shape[1])
         spec_lo, spec_hi = self._selected_channel_bounds()
@@ -343,10 +352,33 @@ class BurstSession:
             spec_hi=spec_hi,
             freqres_mhz=self.freqres,
         )
-        return masked, context.time_profile_sn, context.selected_profile_sn, rel_start, rel_end
+        return masked, context
 
-    def _score_event_sn(self, burst_only_profile: np.ndarray, rel_start: int, rel_end: int) -> float:
-        return event_snr(burst_only_profile, rel_start, rel_end)
+    def _score_event_sn(self, context: MeasurementContext) -> float:
+        return event_snr(
+            context.selected_profile_sn,
+            context.event_rel_start,
+            context.event_rel_end,
+        )
+
+    def _subband_residuals_for_data(self, data: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, str]:
+        masked, context = self._build_measurement_context_for_data(data)
+        diagnostics = compute_subband_arrival_residuals(
+            masked=masked,
+            time_axis_ms=context.time_axis_ms,
+            freqs_mhz=self.freqs,
+            event_rel_start=context.event_rel_start,
+            event_rel_end=context.event_rel_end,
+            spec_lo=context.spec_lo,
+            spec_hi=context.spec_hi,
+            freqres_mhz=self.freqres,
+        )
+        return (
+            diagnostics.center_freqs_mhz,
+            diagnostics.arrival_times_ms,
+            diagnostics.residuals_ms,
+            diagnostics.status,
+        )
 
     def get_view(self) -> dict[str, Any]:
         display = self.get_display_crop()
@@ -660,7 +692,7 @@ class BurstSession:
         delta_dm = new_dm - self.dm
         self.data = dedisperse(self.data, delta_dm, self.freqs, self.tsamp)
         self.config = replace(self.config, dm=new_dm)
-        self.invalidate_results()
+        self.invalidate_selection_state()
 
     def _effective_selected_bandwidth_mhz(self, masked: np.ndarray | None = None) -> float:
         masked = self.get_masked_crop() if masked is None else masked
@@ -768,8 +800,8 @@ class BurstSession:
                 trial_data = self.data
             else:
                 trial_data = dedisperse(self.data, float(trial_dm - self.dm), self.freqs, self.tsamp)
-            _, _, burst_only, rel_start, rel_end = self._compute_profiles_for_data(trial_data)
-            snr[idx] = self._score_event_sn(burst_only, rel_start, rel_end)
+            _, context = self._build_measurement_context_for_data(trial_data)
+            snr[idx] = self._score_event_sn(context)
 
         if not np.isfinite(snr).any():
             raise ValueError("Unable to compute DM sweep for the current selection.")
@@ -778,6 +810,37 @@ class BurstSession:
         sampled_best_dm = float(trial_dms[peak_index])
         sampled_best_sn = float(snr[peak_index])
         best_dm, best_sn, best_dm_uncertainty, fit_status = self._fit_dm_peak(trial_dms, snr, peak_index)
+        applied_dm = float(self.dm)
+
+        applied_freqs, applied_arrivals, applied_residuals, applied_status = self._subband_residuals_for_data(self.data)
+        best_freqs = np.array([], dtype=float)
+        best_arrivals = np.array([], dtype=float)
+        best_residuals = np.array([], dtype=float)
+        if np.isclose(best_dm, applied_dm):
+            best_freqs = applied_freqs
+            best_arrivals = applied_arrivals
+            best_residuals = applied_residuals
+            residual_status = applied_status
+        else:
+            best_data = dedisperse(self.data, float(best_dm - applied_dm), self.freqs, self.tsamp)
+            best_freqs, best_arrivals, best_residuals, best_status = self._subband_residuals_for_data(best_data)
+            if applied_status == "ok" and best_status == "ok":
+                residual_status = "ok"
+            else:
+                residual_status = applied_status if applied_status != "ok" else best_status
+
+        subband_freqs = applied_freqs if applied_freqs.size else best_freqs
+        arrival_times_applied = applied_arrivals if residual_status == "ok" and applied_freqs.size else np.array([], dtype=float)
+        residuals_applied = applied_residuals if residual_status == "ok" and applied_freqs.size else np.array([], dtype=float)
+        arrival_times_best = best_arrivals if residual_status == "ok" and best_freqs.size else np.array([], dtype=float)
+        residuals_best = best_residuals if residual_status == "ok" and best_freqs.size else np.array([], dtype=float)
+
+        if residual_status != "ok":
+            subband_freqs = np.array([], dtype=float)
+            arrival_times_applied = np.array([], dtype=float)
+            arrival_times_best = np.array([], dtype=float)
+            residuals_applied = np.array([], dtype=float)
+            residuals_best = np.array([], dtype=float)
 
         self.dm_optimization = DmOptimizationResult(
             center_dm=center_dm,
@@ -786,12 +849,20 @@ class BurstSession:
             step=step,
             trial_dms=trial_dms,
             snr=snr,
+            snr_metric="integrated_event_snr",
+            applied_dm=applied_dm,
             sampled_best_dm=sampled_best_dm,
             sampled_best_sn=sampled_best_sn,
             best_dm=best_dm,
             best_dm_uncertainty=best_dm_uncertainty,
             best_sn=best_sn,
             fit_status=fit_status,
+            subband_freqs_mhz=subband_freqs,
+            arrival_times_applied_ms=arrival_times_applied,
+            arrival_times_best_ms=arrival_times_best,
+            residuals_applied_ms=residuals_applied,
+            residuals_best_ms=residuals_best,
+            residual_status=residual_status,
         )
         return self.dm_optimization
 

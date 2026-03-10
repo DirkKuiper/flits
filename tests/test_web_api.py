@@ -169,6 +169,17 @@ class WebApiTest(unittest.TestCase):
         self.assertTrue((STATIC_DIR / "app.js").exists())
         self.assertTrue((STATIC_DIR / "styles.css").exists())
 
+    def test_static_workspace_uses_analysis_tabs_and_dm_residual_plot(self) -> None:
+        index_html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn('data-analysis-tab="primary"', index_html)
+        self.assertIn('data-analysis-tab="diagnostics"', index_html)
+        self.assertIn('data-analysis-tab="dm"', index_html)
+        self.assertIn('id="dmResidualPlot"', index_html)
+        self.assertIn("activeAnalysisTab", app_js)
+        self.assertIn("syncDmPlots", app_js)
+
     @patch("flits.web.app.BurstSession.from_file")
     @patch("flits.web.app.resolve_burst_path")
     def test_create_session_passes_selected_auto_mask_profile(self, mock_resolve_path: object, mock_from_file: object) -> None:
@@ -241,6 +252,14 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("trial_dms", optimization)
         self.assertIn("best_dm", optimization)
         self.assertEqual(len(optimization["trial_dms"]), len(optimization["snr"]))
+        self.assertEqual(optimization["snr_metric"], "integrated_event_snr")
+        self.assertIn("applied_dm", optimization)
+        self.assertIn("subband_freqs_mhz", optimization)
+        self.assertIn("arrival_times_applied_ms", optimization)
+        self.assertIn("arrival_times_best_ms", optimization)
+        self.assertIn("residuals_applied_ms", optimization)
+        self.assertIn("residuals_best_ms", optimization)
+        self.assertIn("residual_status", optimization)
 
     def test_session_action_compute_properties_returns_nested_science_payload(self) -> None:
         session_id = "synthetic-measurements"

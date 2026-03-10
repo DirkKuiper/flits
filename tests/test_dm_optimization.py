@@ -13,8 +13,8 @@ from flits.settings import ObservationConfig
 DM_CONST = 1 / (2.41 * 10 ** -4)
 
 
-def _synthetic_dm_session(true_dm: float = 50.0) -> BurstSession:
-    freqs = np.linspace(1100.0, 1000.0, 8)
+def _synthetic_dm_session(true_dm: float = 50.0, *, num_channels: int = 8) -> BurstSession:
+    freqs = np.linspace(1100.0, 1000.0, num_channels)
     tsamp = 1e-3
     num_time_bins = 256
     aligned_bin = 120
@@ -96,7 +96,7 @@ class DmOptimizationTest(unittest.TestCase):
         self.assertEqual(result.best_dm, result.sampled_best_dm)
         self.assertIsNone(result.best_dm_uncertainty)
 
-    def test_dm_optimization_survives_non_scoring_changes_and_clears_on_selection_changes(self) -> None:
+    def test_dm_optimization_survives_non_scoring_changes_and_clears_on_data_or_selection_changes(self) -> None:
         session = _synthetic_dm_session(true_dm=50.0)
         session.optimize_dm(center_dm=50.0, half_range=4.0, step=0.5)
 
@@ -113,7 +113,7 @@ class DmOptimizationTest(unittest.TestCase):
         self.assertIsNotNone(session.dm_optimization)
 
         session.set_dm(51.0)
-        self.assertIsNotNone(session.dm_optimization)
+        self.assertIsNone(session.dm_optimization)
 
         for action in (
             lambda current: current.set_crop_ms(10.0, 180.0),
@@ -125,6 +125,47 @@ class DmOptimizationTest(unittest.TestCase):
             current.optimize_dm(center_dm=50.0, half_range=4.0, step=0.5)
             action(current)
             self.assertIsNone(current.dm_optimization)
+
+    def test_optimize_dm_reports_metric_and_underdedispersed_residual_slope(self) -> None:
+        session = _synthetic_dm_session(true_dm=50.0, num_channels=24)
+        session.set_dm(25.0)
+
+        result = session.optimize_dm(center_dm=50.0, half_range=8.0, step=0.5)
+
+        self.assertEqual(result.snr_metric, "integrated_event_snr")
+        self.assertEqual(result.applied_dm, 25.0)
+        self.assertEqual(result.residual_status, "ok")
+        self.assertGreaterEqual(result.subband_freqs_mhz.size, 3)
+        self.assertEqual(result.subband_freqs_mhz.size, result.arrival_times_applied_ms.size)
+        self.assertEqual(result.subband_freqs_mhz.size, result.arrival_times_best_ms.size)
+        self.assertEqual(result.subband_freqs_mhz.size, result.residuals_applied_ms.size)
+        self.assertEqual(result.subband_freqs_mhz.size, result.residuals_best_ms.size)
+        slope_under = float(np.polyfit(result.subband_freqs_mhz, result.residuals_applied_ms, 1)[0])
+        slope_best = float(np.polyfit(result.subband_freqs_mhz, result.residuals_best_ms, 1)[0])
+        self.assertLess(slope_under, 0.0)
+        self.assertLess(abs(slope_best), abs(slope_under))
+
+    def test_optimize_dm_reports_overdedispersed_residual_slope(self) -> None:
+        session = _synthetic_dm_session(true_dm=50.0, num_channels=24)
+        session.set_dm(75.0)
+
+        result = session.optimize_dm(center_dm=50.0, half_range=8.0, step=0.5)
+
+        self.assertEqual(result.residual_status, "ok")
+        slope_over = float(np.polyfit(result.subband_freqs_mhz, result.residuals_applied_ms, 1)[0])
+        self.assertGreater(slope_over, 0.0)
+
+    def test_optimize_dm_marks_residuals_unavailable_when_band_is_too_narrow(self) -> None:
+        session = _synthetic_dm_session(true_dm=50.0, num_channels=10)
+
+        result = session.optimize_dm(center_dm=50.0, half_range=4.0, step=0.5)
+
+        self.assertEqual(result.residual_status, "insufficient_active_channels")
+        self.assertEqual(result.subband_freqs_mhz.size, 0)
+        self.assertEqual(result.arrival_times_applied_ms.size, 0)
+        self.assertEqual(result.arrival_times_best_ms.size, 0)
+        self.assertEqual(result.residuals_applied_ms.size, 0)
+        self.assertEqual(result.residuals_best_ms.size, 0)
 
 
 if __name__ == "__main__":

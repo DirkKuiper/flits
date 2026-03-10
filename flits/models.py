@@ -84,12 +84,20 @@ class DmOptimizationResult:
     step: float
     trial_dms: np.ndarray
     snr: np.ndarray
+    snr_metric: str
+    applied_dm: float
     sampled_best_dm: float
     sampled_best_sn: float
     best_dm: float
     best_dm_uncertainty: float | None
     best_sn: float
     fit_status: str
+    subband_freqs_mhz: np.ndarray
+    arrival_times_applied_ms: np.ndarray
+    arrival_times_best_ms: np.ndarray
+    residuals_applied_ms: np.ndarray
+    residuals_best_ms: np.ndarray
+    residual_status: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -99,12 +107,20 @@ class DmOptimizationResult:
             "step": self.step,
             "trial_dms": _jsonable_1d(self.trial_dms, digits=6),
             "snr": _jsonable_1d(self.snr, digits=6),
+            "snr_metric": self.snr_metric,
+            "applied_dm": self.applied_dm,
             "sampled_best_dm": self.sampled_best_dm,
             "sampled_best_sn": self.sampled_best_sn,
             "best_dm": self.best_dm,
             "best_dm_uncertainty": self.best_dm_uncertainty,
             "best_sn": self.best_sn,
             "fit_status": self.fit_status,
+            "subband_freqs_mhz": _jsonable_1d(self.subband_freqs_mhz, digits=6),
+            "arrival_times_applied_ms": _jsonable_1d(self.arrival_times_applied_ms, digits=6),
+            "arrival_times_best_ms": _jsonable_1d(self.arrival_times_best_ms, digits=6),
+            "residuals_applied_ms": _jsonable_1d(self.residuals_applied_ms, digits=6),
+            "residuals_best_ms": _jsonable_1d(self.residuals_best_ms, digits=6),
+            "residual_status": self.residual_status,
         }
 
 

@@ -20,6 +20,9 @@ from flits.signal import acf_1d, gaussian_1d, radiometer
 
 LOW_SN_THRESHOLD = 6.0
 HEAVILY_MASKED_FRACTION = 0.25
+DM_RESIDUAL_MAX_SUBBANDS = 8
+DM_RESIDUAL_MIN_CHANNELS = 4
+DM_RESIDUAL_MIN_SUBBANDS = 3
 
 
 def _nanmean_profile(values: np.ndarray, axis: int) -> np.ndarray:
@@ -210,6 +213,14 @@ class MeasurementContext:
     effective_bandwidth_mhz: float
 
 
+@dataclass(frozen=True)
+class SubbandResidualDiagnostics:
+    center_freqs_mhz: np.ndarray
+    arrival_times_ms: np.ndarray
+    residuals_ms: np.ndarray
+    status: str
+
+
 def build_measurement_context(
     *,
     masked: np.ndarray,
@@ -260,6 +271,148 @@ def build_measurement_context(
         active_channel_count=active_channel_count,
         selected_bandwidth_mhz=float(selected_channel_count * abs(float(freqres_mhz))),
         effective_bandwidth_mhz=float(active_channel_count * abs(float(freqres_mhz))),
+    )
+
+
+def _subband_windows(
+    masked: np.ndarray,
+    spec_lo: int,
+    spec_hi: int,
+) -> tuple[list[tuple[int, int]], str]:
+    selected = np.asarray(masked[spec_lo : spec_hi + 1, :], dtype=float)
+    if selected.size == 0:
+        return [], "insufficient_active_channels"
+
+    active_channels = np.isfinite(selected).any(axis=1)
+    active_count = int(active_channels.sum())
+    min_active = DM_RESIDUAL_MIN_CHANNELS * DM_RESIDUAL_MIN_SUBBANDS
+    if active_count < min_active:
+        return [], "insufficient_active_channels"
+
+    max_subbands = min(DM_RESIDUAL_MAX_SUBBANDS, active_count // DM_RESIDUAL_MIN_CHANNELS)
+    if max_subbands < DM_RESIDUAL_MIN_SUBBANDS:
+        return [], "insufficient_subbands"
+
+    channel_indices = np.arange(spec_lo, spec_hi + 1, dtype=int)
+    for num_subbands in range(max_subbands, DM_RESIDUAL_MIN_SUBBANDS - 1, -1):
+        windows: list[tuple[int, int]] = []
+        usable = True
+        for chunk in np.array_split(channel_indices, num_subbands):
+            if chunk.size == 0:
+                usable = False
+                break
+            start = int(chunk[0])
+            end = int(chunk[-1])
+            active_in_window = int(active_channels[start - spec_lo : end - spec_lo + 1].sum())
+            if active_in_window < DM_RESIDUAL_MIN_CHANNELS:
+                usable = False
+                break
+            windows.append((start, end))
+        if usable:
+            return windows, "ok"
+
+    return [], "heavily_masked_subbands"
+
+
+def _arrival_time_ms(context: MeasurementContext) -> float | None:
+    event_times = np.asarray(
+        context.time_axis_ms[context.event_rel_start : context.event_rel_end],
+        dtype=float,
+    )
+    event_profile = np.asarray(
+        context.selected_profile_sn[context.event_rel_start : context.event_rel_end],
+        dtype=float,
+    )
+    if event_times.size == 0 or event_profile.size == 0 or not np.isfinite(event_profile).any():
+        return None
+
+    weights = np.clip(np.where(np.isfinite(event_profile), event_profile, 0.0), a_min=0.0, a_max=None)
+    if np.isfinite(weights).any() and float(np.nansum(weights)) > 0:
+        return float(np.average(event_times, weights=weights))
+
+    try:
+        peak_index = int(np.nanargmax(event_profile))
+    except ValueError:
+        return None
+    return float(event_times[peak_index])
+
+
+def compute_subband_arrival_residuals(
+    *,
+    masked: np.ndarray,
+    time_axis_ms: np.ndarray,
+    freqs_mhz: np.ndarray,
+    event_rel_start: int,
+    event_rel_end: int,
+    spec_lo: int,
+    spec_hi: int,
+    freqres_mhz: float,
+) -> SubbandResidualDiagnostics:
+    windows, status = _subband_windows(masked, spec_lo, spec_hi)
+    if not windows:
+        return SubbandResidualDiagnostics(
+            center_freqs_mhz=np.array([], dtype=float),
+            arrival_times_ms=np.array([], dtype=float),
+            residuals_ms=np.array([], dtype=float),
+            status=status,
+        )
+
+    center_freqs: list[float] = []
+    arrival_times: list[float] = []
+    for start, end in windows:
+        context = build_measurement_context(
+            masked=masked,
+            time_axis_ms=time_axis_ms,
+            freqs_mhz=freqs_mhz,
+            event_rel_start=event_rel_start,
+            event_rel_end=event_rel_end,
+            spec_lo=start,
+            spec_hi=end,
+            freqres_mhz=freqres_mhz,
+        )
+        arrival_time = _arrival_time_ms(context)
+        if arrival_time is None:
+            return SubbandResidualDiagnostics(
+                center_freqs_mhz=np.array([], dtype=float),
+                arrival_times_ms=np.array([], dtype=float),
+                residuals_ms=np.array([], dtype=float),
+                status="insufficient_signal",
+            )
+
+        window = np.asarray(masked[start : end + 1, :], dtype=float)
+        freqs_window = np.asarray(freqs_mhz[start : end + 1], dtype=float)
+        active = np.isfinite(window).any(axis=1)
+        center_freq = float(np.nanmean(freqs_window[active])) if np.any(active) else float(np.nanmean(freqs_window))
+        if not np.isfinite(center_freq):
+            return SubbandResidualDiagnostics(
+                center_freqs_mhz=np.array([], dtype=float),
+                arrival_times_ms=np.array([], dtype=float),
+                residuals_ms=np.array([], dtype=float),
+                status="insufficient_signal",
+            )
+
+        center_freqs.append(center_freq)
+        arrival_times.append(arrival_time)
+
+    if len(arrival_times) < DM_RESIDUAL_MIN_SUBBANDS:
+        return SubbandResidualDiagnostics(
+            center_freqs_mhz=np.array([], dtype=float),
+            arrival_times_ms=np.array([], dtype=float),
+            residuals_ms=np.array([], dtype=float),
+            status="insufficient_subbands",
+        )
+
+    freqs = np.asarray(center_freqs, dtype=float)
+    arrivals = np.asarray(arrival_times, dtype=float)
+    order = np.argsort(freqs)
+    freqs = freqs[order]
+    arrivals = arrivals[order]
+    residuals = arrivals - float(np.mean(arrivals))
+    return SubbandResidualDiagnostics(
+        center_freqs_mhz=freqs,
+        arrival_times_ms=arrivals,
+        residuals_ms=residuals,
+        status="ok",
     )
 
 

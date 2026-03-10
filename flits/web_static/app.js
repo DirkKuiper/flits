@@ -2,6 +2,7 @@ const state = {
   sessionId: null,
   view: null,
   mode: "event",
+  activeAnalysisTab: "primary",
   pending: null,
   detection: null,
   userSelectedPreset: false,
@@ -62,6 +63,8 @@ const resultsContent = document.getElementById("resultsContent")
 const diagnosticsContent = document.getElementById("diagnosticsContent")
 const dmOptimizationContent = document.getElementById("dmOptimizationContent")
 const dmOptimizationPlot = document.getElementById("dmOptimizationPlot")
+const dmResidualContent = document.getElementById("dmResidualContent")
+const dmResidualPlot = document.getElementById("dmResidualPlot")
 const setDmButton = document.getElementById("setDmButton")
 const optimizeDmButton = document.getElementById("optimizeDmButton")
 const applyBestDmButton = document.getElementById("applyBestDmButton")
@@ -84,6 +87,8 @@ const viewerDomains = {
   spectrum: { x: [0.82, 1.0], y: [0.0, 0.78] },
 }
 const modeButtons = Array.from(document.querySelectorAll(".mode-button"))
+const analysisTabButtons = Array.from(document.querySelectorAll("[data-analysis-tab]"))
+const analysisPanels = Array.from(document.querySelectorAll("[data-tab-panel]"))
 const sessionControls = [
   setDmButton,
   optimizeDmButton,
@@ -120,6 +125,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   rememberButtonLabels()
   bindControls()
   setMode(state.mode)
+  setAnalysisTab(state.activeAnalysisTab)
   setStatus("Idle", "neutral")
   updateControlStates()
   await loadPresets()
@@ -193,6 +199,10 @@ function bindControls() {
 
   modeButtons.forEach((button) => {
     button.addEventListener("click", () => setMode(button.dataset.mode))
+  })
+
+  analysisTabButtons.forEach((button) => {
+    button.addEventListener("click", () => setAnalysisTab(button.dataset.analysisTab))
   })
 }
 
@@ -364,6 +374,11 @@ async function postAction(type, payload = {}) {
       method: "POST",
       body: JSON.stringify({ type, payload }),
     })
+    if (type === "optimize_dm") {
+      state.activeAnalysisTab = "dm"
+    } else if (type === "compute_properties") {
+      state.activeAnalysisTab = "primary"
+    }
     applyView(response.view)
     setStatus("Ready", "success")
     const message = type === "auto_mask_jess"
@@ -395,6 +410,7 @@ function applyView(view) {
   renderResults(view.results)
   renderDiagnostics(view.results)
   renderDmOptimization(view)
+  setAnalysisTab(state.activeAnalysisTab)
   renderPlots(view)
   updateControlStates()
 }
@@ -472,8 +488,8 @@ function renderResults(results) {
 
   const primaryTiles = [
     resultTile("TOA (Topo MJD)", results.toa_topo_mjd === null ? "n/a" : fmt(results.toa_topo_mjd, 8), "primary"),
-    resultTile("Peak S/N", results.snr_peak === null ? "n/a" : fmt(results.snr_peak, 3), "primary"),
-    resultTile("Integrated S/N", results.snr_integrated === null ? "n/a" : fmt(results.snr_integrated, 3), "primary"),
+    resultTile("Peak Bin S/N", results.snr_peak === null ? "n/a" : fmt(results.snr_peak, 3), "primary"),
+    resultTile("Integrated Event S/N", results.snr_integrated === null ? "n/a" : fmt(results.snr_integrated, 3), "primary"),
     resultTile("Width (ACF)", results.width_ms_acf === null ? "n/a" : `${fmt(results.width_ms_acf, 3)} ms`, "primary"),
     resultTile("Spectral Width (ACF)", results.spectral_width_mhz_acf === null ? "n/a" : `${fmt(results.spectral_width_mhz_acf, 3)} MHz`, "primary"),
     resultTile("Fluence", results.fluence_jyms === null ? "n/a" : `${fmt(results.fluence_jyms, 3)} Jy ms`, "primary"),
@@ -574,30 +590,39 @@ function renderDmOptimization(view) {
     dmOptimizeBadge.textContent = "Idle"
     dmOptimizeBadge.dataset.tone = "neutral"
     dmOptimizationContent.innerHTML =
-      '<div class="empty-state">No DM sweep yet. Run Optimize DM to inspect the S/N-vs-DM curve.</div>'
+      '<div class="empty-state">No DM sweep yet. Run Optimize DM to inspect the integrated-event S/N curve.</div>'
+    dmResidualContent.innerHTML =
+      '<div class="empty-state">No residual diagnostics yet. Run Optimize DM to compare sub-band arrival times.</div>'
     dmOptimizationPlot.classList.add("is-empty")
+    dmResidualPlot.classList.add("is-empty")
     Plotly.purge(dmOptimizationPlot)
     dmOptimizationPlot.replaceChildren()
+    Plotly.purge(dmResidualPlot)
+    dmResidualPlot.replaceChildren()
     return
   }
 
   const fitTone = fitStatusTone(optimization.fit_status)
   dmOptimizeBadge.textContent = fitTone === "success" ? "Fit Ready" : "Sweep Ready"
   dmOptimizeBadge.dataset.tone = fitTone
+  const snrLabel = snrMetricLabel(optimization.snr_metric)
+  const residualTone = residualStatusTone(optimization.residual_status)
+  const residualBandCount = Array.isArray(optimization.subband_freqs_mhz) ? optimization.subband_freqs_mhz.length : 0
 
   const primaryTiles = [
     resultTile("Best DM", fmt(optimization.best_dm, 6), "primary"),
     resultTile("Uncertainty", optimization.best_dm_uncertainty === null ? "n/a" : `±${fmt(optimization.best_dm_uncertainty, 6)}`, "primary"),
-    resultTile("Best S/N", fmt(optimization.best_sn, 3), "primary"),
+    resultTile(`Best ${snrLabel}`, fmt(optimization.best_sn, 3), "primary"),
   ]
 
   const secondaryTiles = [
+    resultTile("Scored Metric", snrLabel, "secondary"),
     resultTile("Sweep Center", fmt(optimization.center_dm, 6), "secondary"),
     resultTile("Sampled Best", fmt(optimization.sampled_best_dm, 6), "secondary"),
-    resultTile("Sampled S/N", fmt(optimization.sampled_best_sn, 3), "secondary"),
+    resultTile(`Sampled ${snrLabel}`, fmt(optimization.sampled_best_sn, 3), "secondary"),
     resultTile("Half-range", fmt(optimization.actual_half_range, 3), "secondary"),
     resultTile("Step", fmt(optimization.step, 3), "secondary"),
-    resultTile("Applied DM", fmt(view.meta.dm, 6), "secondary"),
+    resultTile("Sweep Applied DM", fmt(optimization.applied_dm, 6), "secondary"),
   ]
 
   dmOptimizationContent.innerHTML = `
@@ -612,9 +637,25 @@ function renderDmOptimization(view) {
       <span>${escapeHtml(fitStatusCopy(optimization.fit_status))}</span>
     </div>
   `
+  const residualSummaryTiles = [
+    resultTile("Residual Status", residualStatusLabel(optimization.residual_status), "secondary"),
+    resultTile("Usable Sub-bands", String(residualBandCount), "secondary"),
+    resultTile("Current Applied DM", fmt(view.meta.dm, 6), "secondary"),
+    resultTile("Best-fit DM", fmt(optimization.best_dm, 6), "secondary"),
+  ]
 
-  dmOptimizationPlot.classList.remove("is-empty")
-  renderDmOptimizationPlot(optimization, view.meta.dm)
+  dmResidualContent.innerHTML = `
+    <div class="results-section">
+      <div class="results-secondary">
+        ${residualSummaryTiles.join("")}
+      </div>
+      <div class="dm-fit-note" data-tone="${escapeHtml(residualTone)}">
+        <strong>${escapeHtml(residualStatusLabel(optimization.residual_status))}</strong>
+        <span>${escapeHtml(residualStatusCopy(optimization.residual_status))}</span>
+      </div>
+      ${renderResidualTable(optimization)}
+    </div>
+  `
 }
 
 function resultTile(label, value, variant) {
@@ -723,6 +764,7 @@ async function renderPlots(view) {
 async function renderDmOptimizationPlot(optimization, appliedDm) {
   const yRange = dmOptimizationYRange(optimization.snr)
   const traces = []
+  const snrLabel = snrMetricLabel(optimization.snr_metric)
 
   if (optimization.best_dm_uncertainty !== null) {
     traces.push({
@@ -750,8 +792,8 @@ async function renderDmOptimizationPlot(optimization, appliedDm) {
     type: "scattergl",
     line: { color: "#0f766e", width: 2.5 },
     marker: { color: "#0c5f58", size: 8 },
-    hovertemplate: "DM %{x:.6f}<br>S/N %{y:.3f}<extra></extra>",
-    name: "S/N sweep",
+    hovertemplate: `DM %{x:.6f}<br>${escapeHtml(snrLabel)} %{y:.3f}<extra></extra>`,
+    name: `${snrLabel} sweep`,
   })
 
   await Plotly.react(
@@ -769,7 +811,7 @@ async function renderDmOptimizationPlot(optimization, appliedDm) {
         gridcolor: "rgba(24,33,38,0.08)",
       },
       yaxis: {
-        title: "Event S/N",
+        title: snrLabel,
         automargin: true,
         range: yRange,
         gridcolor: "rgba(24,33,38,0.08)",
@@ -779,6 +821,114 @@ async function renderDmOptimizationPlot(optimization, appliedDm) {
     },
     { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
   )
+}
+
+function syncDmPlots() {
+  const optimization = state.view?.dm_optimization
+  if (!optimization || state.activeAnalysisTab !== "dm") {
+    return
+  }
+  dmOptimizationPlot.classList.toggle("is-empty", !optimization)
+  renderDmOptimizationPlot(optimization, optimization.applied_dm)
+  renderDmResidualPlot(optimization)
+}
+
+async function renderDmResidualPlot(optimization) {
+  if (optimization.residual_status !== "ok") {
+    dmResidualPlot.classList.add("is-empty")
+    Plotly.purge(dmResidualPlot)
+    dmResidualPlot.replaceChildren()
+    return
+  }
+
+  dmResidualPlot.classList.remove("is-empty")
+  await Plotly.react(
+    "dmResidualPlot",
+    [
+      {
+        x: optimization.subband_freqs_mhz,
+        y: optimization.residuals_applied_ms,
+        mode: "lines+markers",
+        type: "scattergl",
+        name: "Sweep applied DM",
+        line: { color: "#b45309", width: 2.2 },
+        marker: { color: "#d97706", size: 8 },
+        hovertemplate: "%{x:.3f} MHz<br>Residual %{y:.4f} ms<extra>Sweep applied DM</extra>",
+      },
+      {
+        x: optimization.subband_freqs_mhz,
+        y: optimization.residuals_best_ms,
+        mode: "lines+markers",
+        type: "scattergl",
+        name: "Best-fit DM",
+        line: { color: "#0f766e", width: 2.4 },
+        marker: { color: "#0c5f58", size: 8 },
+        hovertemplate: "%{x:.3f} MHz<br>Residual %{y:.4f} ms<extra>Best-fit DM</extra>",
+      },
+    ],
+    {
+      margin: { l: 70, r: 24, t: 18, b: 54 },
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(255,255,255,0.55)",
+      showlegend: true,
+      legend: {
+        orientation: "h",
+        yanchor: "bottom",
+        y: 1.02,
+        xanchor: "right",
+        x: 1.0,
+      },
+      hovermode: "closest",
+      xaxis: {
+        title: "Sub-band Center Frequency (MHz)",
+        automargin: true,
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+      yaxis: {
+        title: "Arrival-time Residual (ms)",
+        automargin: true,
+        zeroline: true,
+        zerolinecolor: "rgba(24,33,38,0.25)",
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+    },
+    { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
+  )
+}
+
+function renderResidualTable(optimization) {
+  if (optimization.residual_status !== "ok") {
+    return ""
+  }
+
+  const rows = optimization.subband_freqs_mhz.map((freq, index) => (
+    `<tr>` +
+    `<td>${escapeHtml(`${fmt(freq, 3)} MHz`)}</td>` +
+    `<td>${escapeHtml(`${fmt(optimization.arrival_times_applied_ms[index], 4)} ms`)}</td>` +
+    `<td>${escapeHtml(`${fmt(optimization.residuals_applied_ms[index], 4)} ms`)}</td>` +
+    `<td>${escapeHtml(`${fmt(optimization.arrival_times_best_ms[index], 4)} ms`)}</td>` +
+    `<td>${escapeHtml(`${fmt(optimization.residuals_best_ms[index], 4)} ms`)}</td>` +
+    `</tr>`
+  )).join("")
+
+  return `
+    <div class="residual-table-wrap">
+      <table class="residual-table">
+        <thead>
+          <tr>
+            <th>Sub-band</th>
+            <th>Applied Arrival</th>
+            <th>Applied Residual</th>
+            <th>Best-fit Arrival</th>
+            <th>Best-fit Residual</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    </div>
+  `
 }
 
 function bindPlotEvents() {
@@ -877,6 +1027,23 @@ function setMode(mode) {
   modeButtons.forEach((button) => {
     button.classList.toggle("active", button.dataset.mode === mode)
   })
+}
+
+function setAnalysisTab(tab) {
+  state.activeAnalysisTab = tab
+  analysisTabButtons.forEach((button) => {
+    const isActive = button.dataset.analysisTab === tab
+    button.classList.toggle("active", isActive)
+    button.setAttribute("aria-selected", String(isActive))
+  })
+  analysisPanels.forEach((panel) => {
+    const isActive = panel.dataset.tabPanel === tab
+    panel.classList.toggle("active", isActive)
+    panel.hidden = !isActive
+  })
+  if (tab === "dm") {
+    syncDmPlots()
+  }
 }
 
 function scaleFactor(axis, multiplier) {
@@ -1320,6 +1487,13 @@ function formatToaUncertainty(daysValue) {
   return `±${fmt(microseconds, 3)} us`
 }
 
+function snrMetricLabel(metric) {
+  const labels = {
+    integrated_event_snr: "Integrated Event S/N",
+  }
+  return labels[metric] || "Event S/N"
+}
+
 function minFinite(values) {
   const finite = values.map(Number).filter(Number.isFinite)
   return finite.length ? Math.min(...finite) : 0
@@ -1342,6 +1516,33 @@ function fitStatusTone(status) {
   if (status === "quadratic_peak_fit") return "success"
   if (status === "quadratic_peak_fit_uncertainty_unavailable") return "warning"
   return "warning"
+}
+
+function residualStatusTone(status) {
+  if (status === "ok") return "success"
+  return "warning"
+}
+
+function residualStatusLabel(status) {
+  const labels = {
+    ok: "Residual diagnostics ready",
+    insufficient_active_channels: "Insufficient active channels",
+    insufficient_subbands: "Insufficient usable sub-bands",
+    heavily_masked_subbands: "Sub-bands too heavily masked",
+    insufficient_signal: "Sub-band arrival times are unstable",
+  }
+  return labels[status] || "Residual diagnostics unavailable"
+}
+
+function residualStatusCopy(status) {
+  const labels = {
+    ok: "Residuals are referenced to the band-mean arrival time. A monotonic slope indicates under- or over-dedispersion across the selected band.",
+    insufficient_active_channels: "Keep at least 12 unmasked channels in the selected spectral extent so three sub-bands can each contribute four channels.",
+    insufficient_subbands: "Widen the selected spectral extent or reduce masking so the active band can be partitioned into at least three contiguous sub-bands.",
+    heavily_masked_subbands: "The current masking pattern breaks the selected band into unreliable sub-bands. Relax the mask or widen the spectral extent before interpreting residuals.",
+    insufficient_signal: "At least one sub-band does not contain a stable arrival-time estimate inside the active event window.",
+  }
+  return labels[status] || "Review the selected band, masking, and event window before trusting the residual diagnostic."
 }
 
 function fitStatusLabel(status) {

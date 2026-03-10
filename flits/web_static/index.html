@@ -232,41 +232,53 @@
             </div>
           </div>
 
-          <div class="card results-card">
-            <div class="card-head">
+          <div class="card results-card analysis-card">
+            <div class="card-head analysis-card-head">
               <div>
-                <h3>Primary Measurements</h3>
+                <h3>Analysis Workspace</h3>
+                <p>Stay in one live session and switch between primary science products, diagnostics, and DM analysis.</p>
+              </div>
+              <div class="analysis-tabs" role="tablist" aria-label="Analysis views">
+                <button class="analysis-tab active" type="button" role="tab" aria-selected="true" data-analysis-tab="primary">Primary</button>
+                <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="diagnostics">Diagnostics</button>
+                <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="dm">DM</button>
+              </div>
+            </div>
+
+            <section class="analysis-panel active" id="analysisPrimaryPanel" data-tab-panel="primary" role="tabpanel">
+              <div class="analysis-panel-head">
+                <h4>Primary Measurements</h4>
                 <p>Primary science metrics computed from the current crop, mask, event window, and spectral extent.</p>
               </div>
-            </div>
-            <div id="resultsContent" class="results-content">
-              <div class="empty-state">No measurements yet. Click Compute after marking the burst.</div>
-            </div>
-          </div>
+              <div id="resultsContent" class="results-content">
+                <div class="empty-state">No measurements yet. Click Compute after marking the burst.</div>
+              </div>
+            </section>
 
-          <div class="card results-card">
-            <div class="card-head">
-              <div>
-                <h3>Diagnostics</h3>
+            <section class="analysis-panel" id="analysisDiagnosticsPanel" data-tab-panel="diagnostics" role="tabpanel" hidden>
+              <div class="analysis-panel-head">
+                <h4>Diagnostics</h4>
                 <p>Flags, uncertainties, provenance, and secondary Gaussian diagnostics.</p>
               </div>
-            </div>
-            <div id="diagnosticsContent" class="results-content">
-              <div class="empty-state">No diagnostics yet. Compute measurements to inspect provenance and secondary fits.</div>
-            </div>
-          </div>
-
-          <div class="card results-card">
-            <div class="card-head">
-              <div>
-                <h3>DM Optimization</h3>
-                <p>S/N sweep around the current trial DM using the active crop, mask, event window, and spectral extent.</p>
+              <div id="diagnosticsContent" class="results-content">
+                <div class="empty-state">No diagnostics yet. Compute measurements to inspect provenance and secondary fits.</div>
               </div>
-            </div>
-            <div id="dmOptimizationContent" class="results-content">
-              <div class="empty-state">No DM sweep yet. Run Optimize DM to inspect the S/N-vs-DM curve.</div>
-            </div>
-            <div class="plot dm-optimization-plot is-empty" id="dmOptimizationPlot"></div>
+            </section>
+
+            <section class="analysis-panel" id="analysisDmPanel" data-tab-panel="dm" role="tabpanel" hidden>
+              <div class="analysis-panel-head">
+                <h4>DM Optimization</h4>
+                <p>Integrated-event S/N sweep and sub-band arrival-time residuals from the active crop, mask, event window, and spectral extent.</p>
+              </div>
+              <div id="dmOptimizationContent" class="results-content">
+                <div class="empty-state">No DM sweep yet. Run Optimize DM to inspect the integrated-event S/N curve.</div>
+              </div>
+              <div class="plot dm-optimization-plot is-empty" id="dmOptimizationPlot"></div>
+              <div id="dmResidualContent" class="results-content">
+                <div class="empty-state">No residual diagnostics yet. Run Optimize DM to compare sub-band arrival times.</div>
+              </div>
+              <div class="plot dm-optimization-plot is-empty" id="dmResidualPlot"></div>
+            </section>
           </div>
         </section>
       </main>
