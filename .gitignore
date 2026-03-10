@@ -1,6 +1,7 @@
 .venv/
 .venv_test/
 .vendor/
+dist/
 __pycache__/
 *.pyc
 .DS_Store

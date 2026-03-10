@@ -92,10 +92,9 @@ def load_filterbank_data(
         bw = float(abs(header.bw))
         header_npol = max(1, int(header.npol))
 
-        freq_lo = float(header.fch1)
-        freq_hi = float(header.fch1 + (header.foff * (header.nchans - 1)))
-        freq_lo, freq_hi = min(freq_lo, freq_hi), max(freq_lo, freq_hi)
-        freqs_mhz = np.linspace(freq_lo, freq_hi, header.nchans)
+        freqs_mhz = float(header.fch1) + (float(header.foff) * np.arange(header.nchans, dtype=float))
+        freq_lo = float(np.min(freqs_mhz))
+        freq_hi = float(np.max(freqs_mhz))
         sefd_jy = config.sefd_jy
         if sefd_jy is None:
             sefd_jy = resolve_default_sefd_jy(config.preset_key, freq_lo, freq_hi)
