@@ -78,6 +78,13 @@ def get_session(session_id: str) -> BurstSession:
     return session
 
 
+def drop_session(session_id: str) -> BurstSession:
+    session = SESSIONS.pop(session_id, None)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Unknown session id")
+    return session
+
+
 def list_filterbank_files() -> list[str]:
     base = data_dir()
     return sorted(str(path.relative_to(base)) for path in base.rglob("*.fil"))
@@ -153,6 +160,12 @@ def create_session(request: CreateSessionRequest) -> dict[str, Any]:
 def session_view(session_id: str) -> dict[str, Any]:
     session = get_session(session_id)
     return {"session_id": session_id, "view": session.get_view()}
+
+
+@app.delete("/api/sessions/{session_id}")
+def delete_session(session_id: str) -> dict[str, str]:
+    drop_session(session_id)
+    return {"status": "deleted"}
 
 
 @app.post("/api/sessions/{session_id}/actions")

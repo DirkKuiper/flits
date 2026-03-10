@@ -7,9 +7,10 @@ from scipy.signal import fftconvolve
 
 
 def normalize(ds: np.ndarray, offpulse: np.ndarray) -> np.ndarray:
-    ds = ds.copy().astype(float)
-    offpulse = offpulse.copy().astype(float)
-    normalized = np.zeros_like(ds)
+    dtype = np.result_type(ds.dtype, np.float32)
+    ds = ds.astype(dtype, copy=True)
+    offpulse = offpulse.astype(dtype, copy=True)
+    normalized = np.empty_like(ds)
 
     for chan in range(ds.shape[0]):
         channel = ds[chan, :]
@@ -54,7 +55,7 @@ def block_reduce_mean(arr: np.ndarray, tfac: int = 1, ffac: int = 1) -> np.ndarr
     tfac = max(1, int(tfac))
     ffac = max(1, int(ffac))
     if tfac == 1 and ffac == 1:
-        return arr.copy()
+        return arr
 
     splicet = arr.shape[1] - (arr.shape[1] % tfac)
     splicef = arr.shape[0] - (arr.shape[0] % ffac)

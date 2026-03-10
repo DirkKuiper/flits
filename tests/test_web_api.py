@@ -23,6 +23,7 @@ from flits.web.app import (
     auto_mask_profiles,
     create_session,
     data_dir,
+    delete_session,
     detect_filterbank,
     list_filterbank_files,
     main,
@@ -238,6 +239,15 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("trial_dms", optimization)
         self.assertIn("best_dm", optimization)
         self.assertEqual(len(optimization["trial_dms"]), len(optimization["snr"]))
+
+    def test_delete_session_removes_session(self) -> None:
+        session_id = "synthetic-delete"
+        SESSIONS[session_id] = _synthetic_session()
+
+        payload = delete_session(session_id)
+
+        self.assertEqual(payload, {"status": "deleted"})
+        self.assertNotIn(session_id, SESSIONS)
 
 
 if __name__ == "__main__":

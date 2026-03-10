@@ -93,16 +93,6 @@ def _offpulse_window(series: np.ndarray, rel_start: int, rel_end: int) -> np.nda
     return np.concatenate(valid_parts)
 
 
-def _flatten_display_channels(values: np.ndarray) -> np.ndarray:
-    if values.size == 0:
-        return values.copy()
-
-    flattened = values.astype(float, copy=True)
-    row_means = np.nanmean(flattened, axis=1, keepdims=True)
-    row_means = np.where(np.isfinite(row_means), row_means, 0.0)
-    return flattened - row_means
-
-
 def _adaptive_jess_time_bin_limit(
     eligible_channels: int,
     memory_budget_mb: int,
@@ -328,11 +318,11 @@ class BurstSession:
     def _frequency_range_mhz(self) -> tuple[float, float]:
         return float(np.min(self.freqs)), float(np.max(self.freqs))
 
-    def _current_peak_positions(self) -> list[int]:
+    def _current_peak_positions(self, display: np.ndarray | None = None) -> list[int]:
         if self.manual_peaks and self.peak_positions:
             return sorted(p for p in self.peak_positions if self.crop_start <= p < self.crop_end)
 
-        display = self.get_display_crop()
+        display = self.get_display_crop() if display is None else display
         if display.size == 0:
             return []
         profile = np.nansum(display, axis=0)
@@ -343,13 +333,24 @@ class BurstSession:
 
     def get_masked_crop(self, data: np.ndarray | None = None) -> np.ndarray:
         source = self.data if data is None else data
-        arr = source[:, self.crop_start:self.crop_end].astype(float, copy=True)
+        arr = np.array(source[:, self.crop_start:self.crop_end], copy=True)
+        if not np.issubdtype(arr.dtype, np.floating):
+            arr = arr.astype(np.float32, copy=False)
         if self.channel_mask is not None and self.channel_mask.any():
             arr[self.channel_mask, :] = np.nan
         return arr
 
     def get_display_crop(self, data: np.ndarray | None = None) -> np.ndarray:
-        return _flatten_display_channels(self.get_masked_crop(data))
+        display = self.get_masked_crop(data)
+        if display.size == 0:
+            return display
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            row_means = np.nanmean(display, axis=1, keepdims=True)
+        row_means = np.where(np.isfinite(row_means), row_means, 0.0).astype(display.dtype, copy=False)
+        display -= row_means
+        return display
 
     def _event_bounds_in_crop(self, time_bins: int) -> tuple[int, int]:
         rel_start = max(0, self.event_start - self.crop_start)
@@ -392,7 +393,7 @@ class BurstSession:
 
         time_profile = np.nansum(reduced, axis=0) if reduced.size else np.array([], dtype=float)
         spectrum = np.nansum(reduced, axis=1) if reduced.size else np.array([], dtype=float)
-        peak_positions = self._current_peak_positions()
+        peak_positions = self._current_peak_positions(display=display)
         zmin, zmax = robust_color_limits(reduced)
 
         return {

@@ -71,6 +71,7 @@ class ViewerAndMaskingTest(unittest.TestCase):
         tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
         offpulse_start = min(stokes_i.shape[1] - 1, int((1 - tail_fraction) * stokes_i.shape[1]))
         expected = normalize(stokes_i, stokes_i[:, offpulse_start:])
+        self.assertEqual(data.dtype, np.float32)
         np.testing.assert_allclose(data, expected)
 
     def test_view_flattens_static_channel_offsets_for_display(self) -> None:

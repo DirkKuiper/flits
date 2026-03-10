@@ -294,6 +294,7 @@ async function loadFiles() {
 async function loadSession(options = {}) {
   const { silent = false } = options
   const bfile = fileInput.value.trim() || fileSelect.value
+  const previousSessionId = state.sessionId
   if (!bfile) {
     setStatus("Pick a filterbank first", "error")
     if (!silent) {
@@ -321,6 +322,13 @@ async function loadSession(options = {}) {
     })
     state.sessionId = payload.session_id
     applyView(payload.view)
+    if (previousSessionId && previousSessionId !== payload.session_id) {
+      try {
+        await api(`/api/sessions/${previousSessionId}`, { method: "DELETE" })
+      } catch (cleanupError) {
+        console.warn("Failed to delete previous session", cleanupError)
+      }
+    }
     setStatus("Loaded", "success")
     if (!silent) {
       showToast("Session loaded", "success")

@@ -114,7 +114,7 @@ def load_filterbank_data(
         tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
         offpulse_start = min(stokes_i.shape[1] - 1, int((1 - tail_fraction) * stokes_i.shape[1]))
         offpulse = stokes_i[:, offpulse_start:]
-        stokes_i = normalize(stokes_i, offpulse)
+        stokes_i = normalize(stokes_i, offpulse).astype(np.float32, copy=False)
 
         metadata = FilterbankMetadata(
             source_path=source_path,
