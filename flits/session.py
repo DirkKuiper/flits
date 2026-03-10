@@ -8,6 +8,7 @@ import warnings
 
 import numpy as np
 
+from flits.exports import MAX_EXPORT_SNAPSHOTS, StoredExportSnapshot, create_export_snapshot
 from flits.measurements import (
     MeasurementContext,
     build_measurement_context,
@@ -15,7 +16,7 @@ from flits.measurements import (
     compute_subband_arrival_residuals,
     event_snr,
 )
-from flits.models import BurstMeasurements, DmOptimizationResult, FilterbankMetadata
+from flits.models import BurstMeasurements, DmOptimizationResult, ExportArtifact, ExportManifest, FilterbankMetadata
 from flits.settings import ObservationConfig, get_auto_mask_profile, get_preset
 from flits.signal import block_reduce_mean, dedisperse
 
@@ -144,6 +145,8 @@ class BurstSession:
     last_auto_mask: AutoMaskRunSummary | None = None
     results: BurstMeasurements | None = None
     dm_optimization: DmOptimizationResult | None = None
+    export_snapshots: dict[str, StoredExportSnapshot] = field(default_factory=dict)
+    export_order: list[str] = field(default_factory=list)
 
     @classmethod
     def from_file(
@@ -895,3 +898,43 @@ class BurstSession:
             masked_channels=np.flatnonzero(self.channel_mask).astype(int).tolist(),
         )
         return self.results
+
+    def export_results(
+        self,
+        *,
+        session_id: str,
+        include: list[str] | tuple[str, ...] | None = None,
+        plot_formats: list[str] | tuple[str, ...] | None = None,
+    ) -> ExportManifest:
+        snapshot = create_export_snapshot(
+            self,
+            session_id=session_id,
+            include=include,
+            plot_formats=plot_formats,
+        )
+        self.export_snapshots[snapshot.manifest.export_id] = snapshot
+        self.export_order.append(snapshot.manifest.export_id)
+        while len(self.export_order) > MAX_EXPORT_SNAPSHOTS:
+            evicted_id = self.export_order.pop(0)
+            self.export_snapshots.pop(evicted_id, None)
+        return snapshot.manifest
+
+    def get_export_manifest(self, export_id: str) -> ExportManifest:
+        snapshot = self.export_snapshots.get(export_id)
+        if snapshot is None:
+            raise KeyError(export_id)
+        return snapshot.manifest
+
+    def get_export_artifact(self, export_id: str, artifact_name: str) -> tuple[ExportArtifact, bytes]:
+        snapshot = self.export_snapshots.get(export_id)
+        if snapshot is None:
+            raise KeyError(export_id)
+
+        artifact = next((item for item in snapshot.manifest.artifacts if item.name == artifact_name), None)
+        if artifact is None or artifact.status != "ready":
+            raise KeyError(artifact_name)
+
+        content = snapshot.contents.get(artifact_name)
+        if content is None:
+            raise KeyError(artifact_name)
+        return artifact, content

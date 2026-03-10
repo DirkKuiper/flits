@@ -11,6 +11,8 @@ __all__ = [
     "BurstMeasurements",
     "BurstSession",
     "DmOptimizationResult",
+    "ExportArtifact",
+    "ExportManifest",
     "FilterbankMetadata",
     "GaussianFit1D",
     "MeasurementDiagnostics",
@@ -28,6 +30,8 @@ if TYPE_CHECKING:
     from flits.models import (
         BurstMeasurements,
         DmOptimizationResult,
+        ExportArtifact,
+        ExportManifest,
         FilterbankMetadata,
         GaussianFit1D,
         MeasurementDiagnostics,
@@ -42,6 +46,8 @@ def __getattr__(name: str):
     if name in {
         "BurstMeasurements",
         "DmOptimizationResult",
+        "ExportArtifact",
+        "ExportManifest",
         "FilterbankMetadata",
         "GaussianFit1D",
         "MeasurementDiagnostics",

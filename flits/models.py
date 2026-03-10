@@ -278,3 +278,43 @@ class BurstMeasurements:
             "mask_count": self.mask_count,
             "masked_channels": self.masked_channels,
         }
+
+
+@dataclass(frozen=True)
+class ExportArtifact:
+    name: str
+    kind: str
+    content_type: str
+    size_bytes: int | None
+    url: str | None
+    status: str
+    reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "kind": self.kind,
+            "content_type": self.content_type,
+            "size_bytes": self.size_bytes,
+            "url": self.url,
+            "status": self.status,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class ExportManifest:
+    export_id: str
+    bundle_name: str
+    schema_version: str
+    created_at_utc: str
+    artifacts: list[ExportArtifact]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "export_id": self.export_id,
+            "bundle_name": self.bundle_name,
+            "schema_version": self.schema_version,
+            "created_at_utc": self.created_at_utc,
+            "artifacts": [artifact.to_dict() for artifact in self.artifacts],
+        }

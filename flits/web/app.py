@@ -9,7 +9,7 @@ from uuid import uuid4
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -168,11 +168,36 @@ def delete_session(session_id: str) -> dict[str, str]:
     return {"status": "deleted"}
 
 
+@app.get("/api/sessions/{session_id}/exports/{export_id}")
+def session_export_manifest(session_id: str, export_id: str) -> dict[str, Any]:
+    session = get_session(session_id)
+    try:
+        manifest = session.get_export_manifest(export_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown export id") from exc
+    return manifest.to_dict()
+
+
+@app.get("/api/sessions/{session_id}/exports/{export_id}/{artifact_name}")
+def session_export_artifact(session_id: str, export_id: str, artifact_name: str) -> Response:
+    session = get_session(session_id)
+    try:
+        artifact, content = session.get_export_artifact(export_id, artifact_name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown export artifact") from exc
+    return Response(
+        content=content,
+        media_type=artifact.content_type,
+        headers={"Content-Disposition": f'attachment; filename="{artifact.name}"'},
+    )
+
+
 @app.post("/api/sessions/{session_id}/actions")
 def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
     session = get_session(session_id)
     action = request.type
     payload = request.payload
+    export_manifest: dict[str, Any] | None = None
 
     try:
         if action == "time_factor":
@@ -215,6 +240,13 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
             )
         elif action == "compute_properties":
             session.compute_properties()
+        elif action == "export_results":
+            manifest = session.export_results(
+                session_id=session_id,
+                include=payload.get("include"),
+                plot_formats=payload.get("plot_formats"),
+            )
+            export_manifest = manifest.to_dict()
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
     except HTTPException:
@@ -222,7 +254,7 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return {"session_id": session_id, "view": session.get_view()}
+    return {"session_id": session_id, "view": session.get_view(), "export_manifest": export_manifest}
 
 
 def main() -> None:

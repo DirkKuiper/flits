@@ -723,6 +723,11 @@ button.is-busy::after {
   gap: 14px;
 }
 
+.export-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .results-section {
   display: grid;
   gap: 12px;
@@ -769,6 +774,68 @@ button.is-busy::after {
 
 .results-details {
   grid-column: 1 / -1;
+}
+
+.analysis-panel-head.compact {
+  gap: 2px;
+}
+
+.analysis-panel-head.compact h5 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.artifact-group {
+  display: grid;
+  gap: 10px;
+}
+
+.artifact-list {
+  display: grid;
+  gap: 10px;
+}
+
+.artifact-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(24, 33, 38, 0.08);
+}
+
+.artifact-row[data-status="omitted"] {
+  background: rgba(255, 248, 239, 0.72);
+  border-color: rgba(180, 83, 9, 0.16);
+}
+
+.artifact-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.artifact-copy strong,
+.artifact-copy span {
+  overflow-wrap: anywhere;
+}
+
+.artifact-copy span {
+  color: var(--muted);
+}
+
+.artifact-link {
+  flex: 0 0 auto;
+  text-decoration: none;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.82rem;
+  color: var(--accent);
+}
+
+.artifact-link.is-disabled {
+  color: var(--muted);
 }
 
 .dm-fit-note {

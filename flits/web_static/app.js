@@ -1,6 +1,7 @@
 const state = {
   sessionId: null,
   view: null,
+  exportManifest: null,
   mode: "event",
   activeAnalysisTab: "primary",
   pending: null,
@@ -65,9 +66,11 @@ const dmOptimizationContent = document.getElementById("dmOptimizationContent")
 const dmOptimizationPlot = document.getElementById("dmOptimizationPlot")
 const dmResidualContent = document.getElementById("dmResidualContent")
 const dmResidualPlot = document.getElementById("dmResidualPlot")
+const exportManifestContent = document.getElementById("exportManifestContent")
 const setDmButton = document.getElementById("setDmButton")
 const optimizeDmButton = document.getElementById("optimizeDmButton")
 const applyBestDmButton = document.getElementById("applyBestDmButton")
+const buildExportButton = document.getElementById("buildExportButton")
 const resetViewButton = document.getElementById("resetViewButton")
 const clearRegionsButton = document.getElementById("clearRegionsButton")
 const computeButton = document.getElementById("computeButton")
@@ -93,6 +96,7 @@ const sessionControls = [
   setDmButton,
   optimizeDmButton,
   applyBestDmButton,
+  buildExportButton,
   resetViewButton,
   clearRegionsButton,
   computeButton,
@@ -183,6 +187,7 @@ function bindControls() {
     dmInput.value = String(bestDm)
     postAction("set_dm", { dm: Number(bestDm) })
   })
+  buildExportButton.addEventListener("click", () => postAction("export_results"))
   resetViewButton.addEventListener("click", () => postAction("reset_view"))
   clearRegionsButton.addEventListener("click", () => postAction("clear_regions"))
   computeButton.addEventListener("click", () => postAction("compute_properties"))
@@ -338,6 +343,7 @@ async function loadSession(options = {}) {
       }),
     })
     state.sessionId = payload.session_id
+    state.exportManifest = null
     applyView(payload.view)
     if (previousSessionId && previousSessionId !== payload.session_id) {
       try {
@@ -378,6 +384,11 @@ async function postAction(type, payload = {}) {
       state.activeAnalysisTab = "dm"
     } else if (type === "compute_properties") {
       state.activeAnalysisTab = "primary"
+    } else if (type === "export_results") {
+      state.activeAnalysisTab = "export"
+    }
+    if (response.export_manifest) {
+      state.exportManifest = response.export_manifest
     }
     applyView(response.view)
     setStatus("Ready", "success")
@@ -410,6 +421,7 @@ function applyView(view) {
   renderResults(view.results)
   renderDiagnostics(view.results)
   renderDmOptimization(view)
+  renderExportManifest()
   setAnalysisTab(state.activeAnalysisTab)
   renderPlots(view)
   updateControlStates()
@@ -655,6 +667,44 @@ function renderDmOptimization(view) {
       </div>
       ${renderResidualTable(optimization)}
     </div>
+  `
+}
+
+function renderExportManifest() {
+  if (!state.sessionId || !state.view) {
+    exportManifestContent.innerHTML =
+      '<div class="empty-state">Load a session before building export products.</div>'
+    return
+  }
+
+  const manifest = state.exportManifest
+  if (!manifest) {
+    exportManifestContent.innerHTML =
+      '<div class="empty-state">No export bundle yet. Build one from the current measurements, masking, event window, and DM state.</div>'
+    return
+  }
+
+  const artifacts = Array.isArray(manifest.artifacts) ? manifest.artifacts : []
+  const groupedArtifacts = {
+    structured: artifacts.filter((artifact) => artifact.kind === "structured"),
+    catalog: artifacts.filter((artifact) => artifact.kind === "catalog"),
+    arrays: artifacts.filter((artifact) => artifact.kind === "arrays"),
+    plots: artifacts.filter((artifact) => artifact.kind === "plot"),
+  }
+
+  exportManifestContent.innerHTML = `
+    <div class="export-summary">
+      <div class="results-secondary">
+        ${resultTile("Bundle", manifest.bundle_name || "n/a", "secondary")}
+        ${resultTile("Export ID", manifest.export_id || "n/a", "secondary")}
+        ${resultTile("Schema", manifest.schema_version || "n/a", "secondary")}
+        ${resultTile("Created", formatUtcTimestamp(manifest.created_at_utc), "secondary")}
+      </div>
+    </div>
+    ${renderArtifactGroup("Structured", groupedArtifacts.structured)}
+    ${renderArtifactGroup("Catalog", groupedArtifacts.catalog)}
+    ${renderArtifactGroup("Arrays", groupedArtifacts.arrays)}
+    ${renderArtifactGroup("Plots", groupedArtifacts.plots)}
   `
 }
 
@@ -1268,6 +1318,7 @@ function busyButtonForAction(action) {
   if (action === "compute_properties") return computeButton
   if (action === "auto_mask_jess") return jessButton
   if (action === "optimize_dm") return optimizeDmButton
+  if (action === "export_results") return buildExportButton
   if (action === "set_dm") return setDmButton
   if (action === "reset_view") return resetViewButton
   return null
@@ -1278,6 +1329,7 @@ function busyButtonText(action) {
   if (action === "compute_properties") return "Computing..."
   if (action === "auto_mask_jess") return "Masking..."
   if (action === "optimize_dm") return "Sweeping DM..."
+  if (action === "export_results") return "Building..."
   if (action === "set_dm") return "Applying DM..."
   if (action === "reset_view") return "Resetting..."
   return actionBusyText(action)
@@ -1301,6 +1353,7 @@ function actionBusyText(action) {
     set_spectral_extent: "Setting spectral extent",
     auto_mask_jess: "Auto masking",
     optimize_dm: "Sweeping DM",
+    export_results: "Building export bundle",
     set_dm: "Applying DM",
     compute_properties: "Computing",
   }
@@ -1314,6 +1367,7 @@ function actionSuccessText(action) {
     undo_mask: "Last mask removed",
     reset_mask: "All masks cleared",
     optimize_dm: "DM sweep completed",
+    export_results: "Export bundle built",
     set_dm: "Dispersion measure updated",
     compute_properties: "Derived properties updated",
   }
@@ -1472,6 +1526,17 @@ function formatScientific(value, digits = 3) {
   return Number(value).toExponential(digits)
 }
 
+function formatUtcTimestamp(value) {
+  if (!value) {
+    return "n/a"
+  }
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.valueOf())) {
+    return value
+  }
+  return parsed.toISOString().replace(".000Z", "Z")
+}
+
 function formatIsoEnergy(value, unit = "erg") {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return "n/a"
@@ -1622,8 +1687,75 @@ function compactList(values) {
   return `${values.slice(0, 10).join(", ")} ... (+${values.length - 10})`
 }
 
+function renderArtifactGroup(title, artifacts) {
+  if (!artifacts.length) {
+    return `
+      <section class="artifact-group">
+        <div class="analysis-panel-head compact">
+          <h5>${escapeHtml(title)}</h5>
+        </div>
+        <div class="empty-state">No ${escapeHtml(title.toLowerCase())} artifacts in this bundle.</div>
+      </section>
+    `
+  }
+
+  return `
+    <section class="artifact-group">
+      <div class="analysis-panel-head compact">
+        <h5>${escapeHtml(title)}</h5>
+      </div>
+      <div class="artifact-list">
+        ${artifacts.map((artifact) => renderArtifactRow(artifact)).join("")}
+      </div>
+    </section>
+  `
+}
+
+function renderArtifactRow(artifact) {
+  const isReady = artifact.status === "ready" && artifact.url
+  const detail = isReady
+    ? `${formatBytes(artifact.size_bytes)} · ${artifact.content_type}`
+    : formatArtifactReason(artifact.reason)
+  const action = isReady
+    ? `<a class="artifact-link" href="${escapeHtml(artifact.url)}" download="${escapeHtml(artifact.name)}">Download</a>`
+    : `<span class="artifact-link is-disabled">Unavailable</span>`
+  return `
+    <div class="artifact-row" data-status="${escapeHtml(artifact.status || "unknown")}">
+      <div class="artifact-copy">
+        <strong>${escapeHtml(artifact.name || "artifact")}</strong>
+        <span>${escapeHtml(detail)}</span>
+      </div>
+      ${action}
+    </div>
+  `
+}
+
+function formatArtifactReason(reason) {
+  const labels = {
+    dm_optimization_unavailable: "Run Optimize DM to add this plot.",
+    residual_diagnostics_unavailable: "Residual diagnostics are unavailable for the current sweep.",
+    acf_diagnostics_unavailable: "ACF diagnostics are unavailable for the current selection.",
+    plot_unavailable: "This plot could not be generated for the current session state.",
+  }
+  return labels[reason] || "Unavailable for the current session state."
+}
+
+function formatBytes(value) {
+  const size = Number(value)
+  if (!Number.isFinite(size) || size <= 0) {
+    return "size unknown"
+  }
+  if (size < 1024) {
+    return `${size} B`
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`
+  }
+  return `${(size / (1024 * 1024)).toFixed(2)} MB`
+}
+
 function escapeHtml(text) {
-  return text
+  return String(text)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")

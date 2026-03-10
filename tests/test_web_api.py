@@ -169,16 +169,19 @@ class WebApiTest(unittest.TestCase):
         self.assertTrue((STATIC_DIR / "app.js").exists())
         self.assertTrue((STATIC_DIR / "styles.css").exists())
 
-    def test_static_workspace_uses_analysis_tabs_and_dm_residual_plot(self) -> None:
+    def test_static_workspace_uses_analysis_tabs_and_export_panel(self) -> None:
         index_html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
         app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
 
         self.assertIn('data-analysis-tab="primary"', index_html)
         self.assertIn('data-analysis-tab="diagnostics"', index_html)
         self.assertIn('data-analysis-tab="dm"', index_html)
+        self.assertIn('data-analysis-tab="export"', index_html)
         self.assertIn('id="dmResidualPlot"', index_html)
+        self.assertIn('id="buildExportButton"', index_html)
         self.assertIn("activeAnalysisTab", app_js)
         self.assertIn("syncDmPlots", app_js)
+        self.assertIn("exportManifest", app_js)
 
     @patch("flits.web.app.BurstSession.from_file")
     @patch("flits.web.app.resolve_burst_path")

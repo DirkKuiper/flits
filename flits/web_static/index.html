@@ -242,6 +242,7 @@
                 <button class="analysis-tab active" type="button" role="tab" aria-selected="true" data-analysis-tab="primary">Primary</button>
                 <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="diagnostics">Diagnostics</button>
                 <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="dm">DM</button>
+                <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="export">Export</button>
               </div>
             </div>
 
@@ -278,6 +279,19 @@
                 <div class="empty-state">No residual diagnostics yet. Run Optimize DM to compare sub-band arrival times.</div>
               </div>
               <div class="plot dm-optimization-plot is-empty" id="dmResidualPlot"></div>
+            </section>
+
+            <section class="analysis-panel" id="analysisExportPanel" data-tab-panel="export" role="tabpanel" hidden>
+              <div class="analysis-panel-head">
+                <h4>Export Results</h4>
+                <p>Build an immutable science bundle from the current session state, then download structured outputs, diagnostic arrays, and publication plots.</p>
+              </div>
+              <div class="export-actions">
+                <button class="primary-button" id="buildExportButton">Build Export Bundle</button>
+              </div>
+              <div id="exportManifestContent" class="results-content">
+                <div class="empty-state">No export bundle yet. Build one from the current measurements, masking, event window, and DM state.</div>
+              </div>
             </section>
           </div>
         </section>
