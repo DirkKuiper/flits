@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 import warnings
@@ -11,13 +11,18 @@ from scipy.optimize import curve_fit
 
 from flits.io import inspect_filterbank, load_filterbank_data
 from flits.models import BurstMeasurements, DmOptimizationResult, FilterbankMetadata, GaussianFit1D
-from flits.settings import ObservationConfig, get_preset
+from flits.settings import ObservationConfig, get_auto_mask_profile, get_preset
 from flits.signal import block_reduce_mean, dedisperse, gaussian_1d, radiometer
 
 try:
     import jess.channel_masks
 except ImportError:  # pragma: no cover - optional dependency
     jess = None
+
+
+JESS_MASK_DTYPE = np.float32
+JESS_WORKING_COPY_FACTOR = 6
+JESS_TEST_SEQUENCE = ("skew", "stand-dev")
 
 
 def _safe_normalize(series: np.ndarray, offpulse: np.ndarray) -> np.ndarray:
@@ -88,6 +93,70 @@ def _offpulse_window(series: np.ndarray, rel_start: int, rel_end: int) -> np.nda
     return np.concatenate(valid_parts)
 
 
+def _flatten_display_channels(values: np.ndarray) -> np.ndarray:
+    if values.size == 0:
+        return values.copy()
+
+    flattened = values.astype(float, copy=True)
+    row_means = np.nanmean(flattened, axis=1, keepdims=True)
+    row_means = np.where(np.isfinite(row_means), row_means, 0.0)
+    return flattened - row_means
+
+
+def _adaptive_jess_time_bin_limit(
+    eligible_channels: int,
+    memory_budget_mb: int,
+    *,
+    dtype: np.dtype[Any] = np.dtype(JESS_MASK_DTYPE),
+    working_copy_factor: int = JESS_WORKING_COPY_FACTOR,
+) -> int:
+    eligible_channels = max(0, int(eligible_channels))
+    if eligible_channels == 0:
+        return 0
+    budget_bytes = max(1, int(float(memory_budget_mb) * 1024 * 1024))
+    bytes_per_time_bin = eligible_channels * int(dtype.itemsize) * max(1, int(working_copy_factor))
+    return max(1, budget_bytes // bytes_per_time_bin)
+
+
+def _sample_time_bins_evenly(candidate_bins: np.ndarray, max_samples: int) -> np.ndarray:
+    if candidate_bins.size == 0 or max_samples <= 0:
+        return np.array([], dtype=int)
+    if candidate_bins.size <= max_samples:
+        return candidate_bins.astype(int, copy=False)
+    sample_positions = np.linspace(0, candidate_bins.size - 1, num=max_samples, dtype=int)
+    return candidate_bins[sample_positions]
+
+
+@dataclass(frozen=True)
+class AutoMaskRunSummary:
+    profile: str
+    profile_label: str
+    memory_budget_mb: int
+    candidate_time_bins: int
+    sampled_time_bins: int
+    eligible_channels: int
+    constant_channel_count: int
+    detected_channel_count: int
+    added_channel_count: int
+    test_used: str | None
+    tests_tried: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "profile": self.profile,
+            "profile_label": self.profile_label,
+            "memory_budget_mb": self.memory_budget_mb,
+            "candidate_time_bins": self.candidate_time_bins,
+            "sampled_time_bins": self.sampled_time_bins,
+            "eligible_channels": self.eligible_channels,
+            "constant_channel_count": self.constant_channel_count,
+            "detected_channel_count": self.detected_channel_count,
+            "added_channel_count": self.added_channel_count,
+            "test_used": self.test_used,
+            "tests_tried": list(self.tests_tried),
+        }
+
+
 @dataclass
 class BurstSession:
     config: ObservationConfig
@@ -106,6 +175,7 @@ class BurstSession:
     manual_peaks: bool = False
     channel_mask: np.ndarray | None = None
     mask_history: list[list[int]] = field(default_factory=list)
+    last_auto_mask: AutoMaskRunSummary | None = None
     results: BurstMeasurements | None = None
     dm_optimization: DmOptimizationResult | None = None
 
@@ -119,6 +189,7 @@ class BurstSession:
         sefd_jy: float | None = None,
         read_start_sec: float | None = None,
         initial_crop_sec: float | None = None,
+        auto_mask_profile: str | None = "auto",
         distance_mpc: float | None = None,
         redshift: float | None = None,
     ) -> "BurstSession":
@@ -130,6 +201,7 @@ class BurstSession:
             sefd_jy=sefd_jy,
             read_start_sec=read_start_sec,
             initial_crop_sec=initial_crop_sec,
+            auto_mask_profile=auto_mask_profile,
             distance_mpc=distance_mpc,
             redshift=redshift,
         )
@@ -260,10 +332,10 @@ class BurstSession:
         if self.manual_peaks and self.peak_positions:
             return sorted(p for p in self.peak_positions if self.crop_start <= p < self.crop_end)
 
-        masked = self.get_masked_crop()
-        if masked.size == 0:
+        display = self.get_display_crop()
+        if display.size == 0:
             return []
-        profile = np.nansum(masked, axis=0)
+        profile = np.nansum(display, axis=0)
         if not np.isfinite(profile).any():
             return []
         peak_local = int(np.nanargmax(profile))
@@ -275,6 +347,9 @@ class BurstSession:
         if self.channel_mask is not None and self.channel_mask.any():
             arr[self.channel_mask, :] = np.nan
         return arr
+
+    def get_display_crop(self, data: np.ndarray | None = None) -> np.ndarray:
+        return _flatten_display_channels(self.get_masked_crop(data))
 
     def _event_bounds_in_crop(self, time_bins: int) -> tuple[int, int]:
         rel_start = max(0, self.event_start - self.crop_start)
@@ -301,8 +376,8 @@ class BurstSession:
         return float(np.nansum(finite) / np.sqrt(finite.size))
 
     def get_view(self) -> dict[str, Any]:
-        masked = self.get_masked_crop()
-        reduced = block_reduce_mean(masked, tfac=self.time_factor, ffac=self.freq_factor)
+        display = self.get_display_crop()
+        reduced = block_reduce_mean(display, tfac=self.time_factor, ffac=self.freq_factor)
         freq_lo_mhz, freq_hi_mhz = self._frequency_range_mhz()
         spec_lo_mhz, spec_hi_mhz = self._selected_frequency_bounds_mhz()
 
@@ -334,6 +409,8 @@ class BurstSession:
                 "machine_id": self.metadata.machine_id,
                 "source_name": self.metadata.source_name,
                 "sefd_jy": self.sefd,
+                "auto_mask_profile": self.config.auto_mask_profile,
+                "auto_mask_profile_label": get_auto_mask_profile(self.config.auto_mask_profile).label,
                 "tsamp_us": self.tsamp * 1e6,
                 "freqres_mhz": self.freqres,
                 "npol": self.npol,
@@ -353,6 +430,7 @@ class BurstSession:
                 "manual_peaks": self.manual_peaks,
                 "spectral_extent_mhz": [spec_lo_mhz, spec_hi_mhz],
                 "masked_channels": np.flatnonzero(self.channel_mask).astype(int).tolist(),
+                "last_auto_mask": self.last_auto_mask.to_dict() if self.last_auto_mask is not None else None,
             },
             "plot": {
                 "heatmap": {
@@ -495,26 +573,110 @@ class BurstSession:
         self.spec_ex_lo, self.spec_ex_hi = low, high
         self.invalidate_selection_state()
 
-    def auto_mask_jess(self) -> None:
+    def auto_mask_jess(self, profile: str | None = None) -> None:
         if jess is None:
             raise RuntimeError("Jess is not installed in the active environment.")
 
+        mask_profile = get_auto_mask_profile(self.config.auto_mask_profile if profile is None else profile)
+        if mask_profile.key != self.config.auto_mask_profile:
+            self.config = replace(self.config, auto_mask_profile=mask_profile.key)
         masked = self.get_masked_crop()
+        if masked.size == 0:
+            self.last_auto_mask = AutoMaskRunSummary(
+                profile=mask_profile.key,
+                profile_label=mask_profile.label,
+                memory_budget_mb=mask_profile.memory_budget_mb,
+                candidate_time_bins=0,
+                sampled_time_bins=0,
+                eligible_channels=0,
+                constant_channel_count=0,
+                detected_channel_count=0,
+                added_channel_count=0,
+                test_used=None,
+                tests_tried=(),
+            )
+            return
+
         rel_start, rel_end = self._event_bounds_in_crop(masked.shape[1])
-        offburst_parts = [masked[:, :rel_start], masked[:, rel_end:]]
-        valid_offburst_parts = [part for part in offburst_parts if part.size]
-        offburst = np.concatenate(valid_offburst_parts, axis=1) if valid_offburst_parts else masked
-        if offburst.size == 0:
-            offburst = masked
-        filled = np.nan_to_num(offburst, nan=float(np.nanmedian(offburst)))
-        bool_mask = jess.channel_masks.channel_masker(
-            dynamic_spectra=filled.T,
-            test="skew",
-            sigma=3,
-            show_plots=False,
+        candidate_bins = np.concatenate(
+            [
+                np.arange(0, rel_start, dtype=int),
+                np.arange(rel_end, masked.shape[1], dtype=int),
+            ]
         )
-        channels = [idx for idx, flag in enumerate(bool_mask) if flag]
+        if candidate_bins.size == 0:
+            candidate_bins = np.arange(masked.shape[1], dtype=int)
+
+        eligible_channels = np.flatnonzero(~self.channel_mask) if self.channel_mask is not None else np.arange(masked.shape[0], dtype=int)
+        max_samples = _adaptive_jess_time_bin_limit(eligible_channels.size, mask_profile.memory_budget_mb)
+        sampled_bins = _sample_time_bins_evenly(candidate_bins, max_samples)
+        if eligible_channels.size == 0 or sampled_bins.size == 0:
+            self.last_auto_mask = AutoMaskRunSummary(
+                profile=mask_profile.key,
+                profile_label=mask_profile.label,
+                memory_budget_mb=mask_profile.memory_budget_mb,
+                candidate_time_bins=int(candidate_bins.size),
+                sampled_time_bins=int(sampled_bins.size),
+                eligible_channels=int(eligible_channels.size),
+                constant_channel_count=0,
+                detected_channel_count=0,
+                added_channel_count=0,
+                test_used=None,
+                tests_tried=(),
+            )
+            return
+
+        offburst = masked[eligible_channels][:, sampled_bins]
+        fill_value = float(np.nanmedian(offburst)) if np.isfinite(offburst).any() else 0.0
+        filled = np.nan_to_num(offburst.astype(JESS_MASK_DTYPE, copy=False), nan=fill_value)
+
+        channel_sigma = np.nanstd(filled, axis=1)
+        variable_local = np.isfinite(channel_sigma) & (channel_sigma > 0)
+        constant_channels = eligible_channels[~variable_local].astype(int)
+        active_channels = eligible_channels[variable_local].astype(int)
+
+        tests_tried: list[str] = []
+        detected_channels = constant_channels.tolist()
+        test_used: str | None = "constant" if constant_channels.size else None
+        if active_channels.size:
+            active_spectra = filled[variable_local, :].T
+            for test_name in JESS_TEST_SEQUENCE:
+                tests_tried.append(test_name)
+                bool_mask = np.atleast_1d(
+                    np.asarray(
+                        jess.channel_masks.channel_masker(
+                            dynamic_spectra=active_spectra,
+                            test=test_name,
+                            sigma=3,
+                            show_plots=False,
+                        ),
+                        dtype=bool,
+                    )
+                )
+                if bool_mask.shape != (active_channels.size,):
+                    raise RuntimeError("Jess returned an unexpected mask shape.")
+                detected_channels.extend(active_channels[bool_mask].astype(int).tolist())
+                test_used = test_name
+                if bool_mask.any():
+                    break
+
+        previous_mask = self.channel_mask.copy() if self.channel_mask is not None else np.zeros(self.total_channels, dtype=bool)
+        channels = sorted(set(detected_channels))
         self._mask_batch(channels)
+        added_channel_count = int(np.count_nonzero(self.channel_mask & ~previous_mask)) if self.channel_mask is not None else 0
+        self.last_auto_mask = AutoMaskRunSummary(
+            profile=mask_profile.key,
+            profile_label=mask_profile.label,
+            memory_budget_mb=mask_profile.memory_budget_mb,
+            candidate_time_bins=int(candidate_bins.size),
+            sampled_time_bins=int(sampled_bins.size),
+            eligible_channels=int(eligible_channels.size),
+            constant_channel_count=int(constant_channels.size),
+            detected_channel_count=len(channels),
+            added_channel_count=added_channel_count,
+            test_used=test_used,
+            tests_tried=tuple(tests_tried),
+        )
 
     def set_dm(self, new_dm: float) -> None:
         new_dm = float(new_dm)
@@ -522,17 +684,7 @@ class BurstSession:
             return
         delta_dm = new_dm - self.dm
         self.data = dedisperse(self.data, delta_dm, self.freqs, self.tsamp)
-        self.config = ObservationConfig(
-            dm=new_dm,
-            preset_key=self.config.preset_key,
-            telescope_label=self.config.telescope_label,
-            sefd_jy=self.config.sefd_jy,
-            read_start_sec=self.config.read_start_sec,
-            initial_crop_sec=self.config.initial_crop_sec,
-            normalization_tail_fraction=self.config.normalization_tail_fraction,
-            distance_mpc=self.config.distance_mpc,
-            redshift=self.config.redshift,
-        )
+        self.config = replace(self.config, dm=new_dm)
         self.invalidate_results()
 
     def _effective_selected_bandwidth_mhz(self, masked: np.ndarray | None = None) -> float:

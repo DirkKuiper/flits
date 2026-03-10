@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from flits.io import inspect_filterbank
 from flits.session import BurstSession
-from flits.settings import available_presets, get_preset
+from flits.settings import available_auto_mask_profiles, available_presets, get_preset
 
 
 PACKAGE_DIR = Path(__file__).resolve().parents[1]
@@ -30,6 +30,7 @@ class CreateSessionRequest(BaseModel):
     sefd_jy: float | None = None
     read_start_sec: float | None = None
     initial_crop_sec: float | None = None
+    auto_mask_profile: str | None = "auto"
     distance_mpc: float | None = None
     redshift: float | None = None
 
@@ -102,6 +103,11 @@ def presets() -> dict[str, list[dict[str, Any]]]:
     return {"presets": [preset.to_dict() for preset in available_presets()]}
 
 
+@app.get("/api/auto-mask-profiles")
+def auto_mask_profiles() -> dict[str, list[dict[str, Any]]]:
+    return {"profiles": [profile.to_dict() for profile in available_auto_mask_profiles()]}
+
+
 @app.post("/api/detect")
 def detect_filterbank(request: DetectFilterbankRequest) -> dict[str, Any]:
     burst_path = resolve_burst_path(request.bfile)
@@ -134,6 +140,7 @@ def create_session(request: CreateSessionRequest) -> dict[str, Any]:
         sefd_jy=request.sefd_jy,
         read_start_sec=request.read_start_sec,
         initial_crop_sec=request.initial_crop_sec,
+        auto_mask_profile=request.auto_mask_profile,
         distance_mpc=request.distance_mpc,
         redshift=request.redshift,
     )
@@ -184,7 +191,7 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
         elif action == "set_spectral_extent":
             session.set_spectral_extent_freq(float(payload["start_freq_mhz"]), float(payload["end_freq_mhz"]))
         elif action == "auto_mask_jess":
-            session.auto_mask_jess()
+            session.auto_mask_jess(payload.get("profile"))
         elif action == "set_dm":
             session.set_dm(float(payload["dm"]))
         elif action == "optimize_dm":

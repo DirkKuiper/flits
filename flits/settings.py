@@ -5,6 +5,22 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class AutoMaskProfile:
+    key: str
+    label: str
+    memory_budget_mb: int
+    description: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "key": self.key,
+            "label": self.label,
+            "memory_budget_mb": self.memory_budget_mb,
+            "description": self.description,
+        }
+
+
+@dataclass(frozen=True)
 class TelescopePreset:
     key: str
     label: str
@@ -85,6 +101,27 @@ PRESETS: dict[str, TelescopePreset] = {
     ),
 }
 
+AUTO_MASK_PROFILES: dict[str, AutoMaskProfile] = {
+    "fast": AutoMaskProfile(
+        key="fast",
+        label="Fast",
+        memory_budget_mb=32,
+        description="Lower memory use and quicker masking on large files.",
+    ),
+    "auto": AutoMaskProfile(
+        key="auto",
+        label="Auto",
+        memory_budget_mb=96,
+        description="Balanced default for typical interactive masking.",
+    ),
+    "thorough": AutoMaskProfile(
+        key="thorough",
+        label="Thorough",
+        memory_budget_mb=192,
+        description="Use more off-burst data when memory headroom allows.",
+    ),
+}
+
 GBT_BAND_CALIBRATIONS: tuple[ReceiverBandCalibration, ...] = (
     ReceiverBandCalibration(label="L-band", freq_lo_mhz=1150.0, freq_hi_mhz=1730.0, sefd_jy=10.0),
     ReceiverBandCalibration(label="S-band", freq_lo_mhz=1730.0, freq_hi_mhz=2600.0, sefd_jy=11.0),
@@ -98,6 +135,10 @@ def available_presets() -> list[TelescopePreset]:
     return list(PRESETS.values())
 
 
+def available_auto_mask_profiles() -> list[AutoMaskProfile]:
+    return list(AUTO_MASK_PROFILES.values())
+
+
 def get_preset(preset_key: str | None = None) -> TelescopePreset:
     key = "generic" if preset_key is None else str(preset_key).lower()
     preset = PRESETS.get(key)
@@ -105,6 +146,15 @@ def get_preset(preset_key: str | None = None) -> TelescopePreset:
         valid = ", ".join(sorted(PRESETS))
         raise ValueError(f"Unknown preset '{preset_key}'. Valid presets: {valid}.")
     return preset
+
+
+def get_auto_mask_profile(profile_key: str | None = None) -> AutoMaskProfile:
+    key = "auto" if profile_key is None else str(profile_key).lower()
+    profile = AUTO_MASK_PROFILES.get(key)
+    if profile is None:
+        valid = ", ".join(sorted(AUTO_MASK_PROFILES))
+        raise ValueError(f"Unknown auto-mask profile '{profile_key}'. Valid profiles: {valid}.")
+    return profile
 
 
 def detect_preset(telescope_id: int | None, machine_id: int | None) -> tuple[str, str]:
@@ -174,6 +224,7 @@ class ObservationConfig:
     read_start_sec: float = 0.0
     initial_crop_sec: float | None = None
     normalization_tail_fraction: float = 0.25
+    auto_mask_profile: str = "auto"
     distance_mpc: float | None = None
     redshift: float | None = None
 
@@ -186,10 +237,12 @@ class ObservationConfig:
         sefd_jy: float | None = None,
         read_start_sec: float | None = None,
         initial_crop_sec: float | None = None,
+        auto_mask_profile: str | None = "auto",
         distance_mpc: float | None = None,
         redshift: float | None = None,
     ) -> "ObservationConfig":
         preset = get_preset(preset_key)
+        mask_profile = get_auto_mask_profile(auto_mask_profile)
 
         return cls(
             dm=float(dm),
@@ -199,6 +252,7 @@ class ObservationConfig:
             read_start_sec=preset.read_start_sec if read_start_sec is None else float(read_start_sec),
             initial_crop_sec=preset.initial_crop_sec if initial_crop_sec is None else float(initial_crop_sec),
             normalization_tail_fraction=preset.normalization_tail_fraction,
+            auto_mask_profile=mask_profile.key,
             distance_mpc=distance_mpc,
             redshift=redshift,
         )

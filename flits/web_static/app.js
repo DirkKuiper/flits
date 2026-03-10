@@ -42,6 +42,7 @@ const telescopeInput = document.getElementById("telescopeInput")
 const sefdInput = document.getElementById("sefdInput")
 const readStartInput = document.getElementById("readStartInput")
 const initialCropInput = document.getElementById("initialCropInput")
+const autoMaskProfileInput = document.getElementById("autoMaskProfileInput")
 const dmHalfRangeInput = document.getElementById("dmHalfRangeInput")
 const dmStepInput = document.getElementById("dmStepInput")
 const detectionHint = document.getElementById("detectionHint")
@@ -105,6 +106,7 @@ const busyLockControls = [
   sefdInput,
   readStartInput,
   initialCropInput,
+  autoMaskProfileInput,
   dmHalfRangeInput,
   dmStepInput,
 ]
@@ -116,6 +118,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setStatus("Idle", "neutral")
   updateControlStates()
   await loadPresets()
+  await loadAutoMaskProfiles()
   await loadFiles()
   if (fileSelect.options.length > 0) {
     fileInput.value = fileSelect.value
@@ -174,7 +177,9 @@ function bindControls() {
   computeButton.addEventListener("click", () => postAction("compute_properties"))
   undoMaskButton.addEventListener("click", () => postAction("undo_mask"))
   resetMaskButton.addEventListener("click", () => postAction("reset_mask"))
-  jessButton.addEventListener("click", () => postAction("auto_mask_jess"))
+  jessButton.addEventListener("click", () =>
+    postAction("auto_mask_jess", { profile: autoMaskProfileInput.value || "auto" }),
+  )
 
   timeDownButton.addEventListener("click", () => scaleFactor("time", 0.5))
   timeUpButton.addEventListener("click", () => scaleFactor("time", 2))
@@ -212,6 +217,26 @@ async function loadPresets() {
     setPresetSelection("generic")
     renderDetectionHint()
     updateControlStates()
+  } catch (error) {
+    setStatus(error.message, "error")
+    showToast(error.message, "error")
+  }
+}
+
+async function loadAutoMaskProfiles() {
+  try {
+    const payload = await api("/api/auto-mask-profiles")
+    autoMaskProfileInput.innerHTML = ""
+    for (const profile of payload.profiles) {
+      const option = document.createElement("option")
+      option.value = profile.key
+      option.textContent = profile.label
+      option.title = `${profile.description} (${profile.memory_budget_mb} MB budget)`
+      autoMaskProfileInput.appendChild(option)
+    }
+    autoMaskProfileInput.value = payload.profiles.some((profile) => profile.key === "auto")
+      ? "auto"
+      : payload.profiles[0]?.key || ""
   } catch (error) {
     setStatus(error.message, "error")
     showToast(error.message, "error")
@@ -291,6 +316,7 @@ async function loadSession(options = {}) {
         sefd_jy: parseOptionalNumber(sefdInput.value),
         read_start_sec: parseOptionalNumber(readStartInput.value),
         initial_crop_sec: parseOptionalNumber(initialCropInput.value),
+        auto_mask_profile: autoMaskProfileInput.value || "auto",
       }),
     })
     state.sessionId = payload.session_id
@@ -325,7 +351,9 @@ async function postAction(type, payload = {}) {
     })
     applyView(response.view)
     setStatus("Ready", "success")
-    const message = actionSuccessText(type)
+    const message = type === "auto_mask_jess"
+      ? autoMaskToastText(response.view.state.last_auto_mask)
+      : actionSuccessText(type)
     if (message) {
       showToast(message, "success")
     }
@@ -339,6 +367,9 @@ async function postAction(type, payload = {}) {
 
 function applyView(view) {
   state.view = view
+  if (view.meta.auto_mask_profile) {
+    autoMaskProfileInput.value = view.meta.auto_mask_profile
+  }
   resolutionLabel.textContent = `t x${view.state.time_factor} / f x${view.state.freq_factor}`
   burstTitle.textContent = view.meta.burst_name
   burstSubtitle.textContent =
@@ -391,6 +422,7 @@ function renderSessionFacts(view) {
     ["File", view.meta.burst_name],
     ["Selected profile", view.meta.telescope],
     ["Detected profile", view.meta.detected_telescope],
+    ["Auto mask profile", view.meta.auto_mask_profile_label],
     ["Telescope ID", view.meta.telescope_id === null ? "missing" : String(view.meta.telescope_id)],
     ["Machine ID", view.meta.machine_id === null ? "missing" : String(view.meta.machine_id)],
     ["Detection", view.meta.detection_basis],
@@ -401,6 +433,7 @@ function renderSessionFacts(view) {
     ["Event", `${fmt(view.state.event_ms[0], 2)} to ${fmt(view.state.event_ms[1], 2)} ms`],
     ["Spectral extent", `${fmt(view.state.spectral_extent_mhz[0], 1)} to ${fmt(view.state.spectral_extent_mhz[1], 1)} MHz`],
     ["Peaks", view.state.peak_ms.length ? view.state.peak_ms.map((value) => `${fmt(value, 2)} ms`).join(", ") : "auto"],
+    ["Last auto mask", formatAutoMaskSummary(view.state.last_auto_mask)],
     ["Masked channels", compactList(view.state.masked_channels)],
   ]
 
@@ -1035,12 +1068,33 @@ function actionSuccessText(action) {
     clear_regions: "Burst regions cleared",
     undo_mask: "Last mask removed",
     reset_mask: "All masks cleared",
-    auto_mask_jess: "Auto mask applied",
     optimize_dm: "DM sweep completed",
     set_dm: "Dispersion measure updated",
     compute_properties: "Derived properties updated",
   }
   return labels[action] || null
+}
+
+function autoMaskToastText(summary) {
+  if (!summary) {
+    return "Auto mask applied"
+  }
+  const channelLabel = summary.added_channel_count === 1 ? "channel" : "channels"
+  const sampleLabel = `${fmt(summary.sampled_time_bins, 0)}/${fmt(summary.candidate_time_bins, 0)} bins`
+  const testLabel = summary.test_used ? `, ${summary.test_used}` : ""
+  return `Auto mask added ${summary.added_channel_count} ${channelLabel} with ${summary.profile_label} (${sampleLabel}${testLabel})`
+}
+
+function formatAutoMaskSummary(summary) {
+  if (!summary) {
+    return "not run"
+  }
+  const sampleLabel = summary.candidate_time_bins
+    ? `${fmt(summary.sampled_time_bins, 0)} / ${fmt(summary.candidate_time_bins, 0)} bins`
+    : "no off-burst bins"
+  const constantLabel = summary.constant_channel_count ? `, ${summary.constant_channel_count} constant` : ""
+  const testLabel = summary.test_used ? `, ${summary.test_used}` : ""
+  return `${summary.profile_label}, ${sampleLabel}, +${summary.added_channel_count}${constantLabel}${testLabel}`
 }
 
 function showToast(message, tone = "info") {

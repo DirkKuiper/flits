@@ -5,7 +5,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 from fastapi import HTTPException
@@ -16,9 +16,12 @@ from flits.session import BurstSession
 from flits.settings import ObservationConfig
 from flits.web.app import (
     ActionRequest,
+    CreateSessionRequest,
     DetectFilterbankRequest,
     SESSIONS,
     STATIC_DIR,
+    auto_mask_profiles,
+    create_session,
     data_dir,
     detect_filterbank,
     list_filterbank_files,
@@ -33,7 +36,7 @@ SAMPLE = ROOT / "blc_s_guppi_60385_53711_DIAG_FRB20240114A_0057_40.265_41.518_b3
 DM_CONST = 1 / (2.41 * 10 ** -4)
 
 
-def _synthetic_session() -> BurstSession:
+def _synthetic_session(*, auto_mask_profile: str = "auto") -> BurstSession:
     freqs = np.linspace(1100.0, 1000.0, 8)
     tsamp = 1e-3
     num_time_bins = 256
@@ -63,7 +66,12 @@ def _synthetic_session() -> BurstSession:
         detected_preset_key="generic",
         detection_basis="synthetic",
     )
-    config = ObservationConfig.from_preset(dm=0.0, preset_key="generic", sefd_jy=10.0)
+    config = ObservationConfig.from_preset(
+        dm=0.0,
+        preset_key="generic",
+        sefd_jy=10.0,
+        auto_mask_profile=auto_mask_profile,
+    )
     return BurstSession(
         config=config,
         metadata=metadata,
@@ -79,6 +87,12 @@ def _synthetic_session() -> BurstSession:
 
 
 class WebApiTest(unittest.TestCase):
+    def test_auto_mask_profiles_endpoint_lists_expected_profiles(self) -> None:
+        payload = auto_mask_profiles()
+
+        self.assertEqual([profile["key"] for profile in payload["profiles"]], ["fast", "auto", "thorough"])
+        self.assertEqual(payload["profiles"][1]["label"], "Auto")
+
     @unittest.skipUnless(SAMPLE.exists(), "Sample filterbank file is not available")
     def test_detect_endpoint_reports_gbt_for_sample_filterbank(self) -> None:
         payload = detect_filterbank(DetectFilterbankRequest(bfile=str(SAMPLE)))
@@ -153,6 +167,55 @@ class WebApiTest(unittest.TestCase):
         self.assertTrue((STATIC_DIR / "index.html").exists())
         self.assertTrue((STATIC_DIR / "app.js").exists())
         self.assertTrue((STATIC_DIR / "styles.css").exists())
+
+    @patch("flits.web.app.BurstSession.from_file")
+    @patch("flits.web.app.resolve_burst_path")
+    def test_create_session_passes_selected_auto_mask_profile(self, mock_resolve_path: object, mock_from_file: object) -> None:
+        mock_resolve_path.return_value = Path("/tmp/synthetic.fil")
+        mock_from_file.return_value = _synthetic_session(auto_mask_profile="thorough")
+
+        payload = create_session(
+            CreateSessionRequest(
+                bfile="synthetic.fil",
+                dm=50.0,
+                auto_mask_profile="thorough",
+            )
+        )
+
+        try:
+            self.assertEqual(payload["view"]["meta"]["auto_mask_profile"], "thorough")
+            self.assertEqual(payload["view"]["meta"]["auto_mask_profile_label"], "Thorough")
+            mock_from_file.assert_called_once_with(
+                "/tmp/synthetic.fil",
+                dm=50.0,
+                telescope=None,
+                sefd_jy=None,
+                read_start_sec=None,
+                initial_crop_sec=None,
+                auto_mask_profile="thorough",
+                distance_mpc=None,
+                redshift=None,
+            )
+        finally:
+            SESSIONS.pop(payload["session_id"], None)
+
+    def test_session_action_auto_mask_jess_passes_profile_override(self) -> None:
+        session_id = "synthetic-mask-profile"
+        session = _synthetic_session()
+        session.auto_mask_jess = Mock()
+        SESSIONS[session_id] = session
+        try:
+            session_action(
+                session_id,
+                ActionRequest(
+                    type="auto_mask_jess",
+                    payload={"profile": "fast"},
+                ),
+            )
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        session.auto_mask_jess.assert_called_once_with("fast")
 
     def test_session_action_optimize_dm_returns_dm_optimization_payload(self) -> None:
         session_id = "synthetic-dm"
