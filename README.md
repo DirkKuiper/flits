@@ -4,14 +4,6 @@ Fast-Look Interactive Transient Suite.
 
 Browser-based scientific software for interactive burst inspection, masking, and measurement on filterbank data.
 
-## Run Locally
-
-```bash
-.venv_test/bin/python -m flits --host 127.0.0.1 --port 8123
-```
-
-Then open `http://127.0.0.1:8123`.
-
 Known presets can supply a default SEFD when the observing setup is identifiable from the file metadata and band coverage. Today that means:
 
 - `NRT` uses its preset SEFD
@@ -19,17 +11,54 @@ Known presets can supply a default SEFD when the observing setup is identifiable
 
 For data without a known default calibration, use the `Generic Filterbank` preset or provide an explicit `SEFD` override if you want calibrated flux and fluence values.
 
+## Install With Python
+
+Install from a local checkout:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install .
+```
+
+You can also install directly from GitHub:
+
+```bash
+pip install "git+https://github.com/DirkKuiper/flits.git"
+```
+
+Then run FLITS against a directory of filterbanks:
+
+```bash
+flits --data-dir /path/to/filterbanks --host 127.0.0.1 --port 8123
+```
+
+Open `http://127.0.0.1:8123`.
+
+Notes:
+
+- Relative file paths in the UI are resolved against `FLITS_DATA_DIR` when set, otherwise against the current working directory.
+- The `--data-dir` flag is the easiest way to point FLITS at a specific directory without exporting environment variables.
+- The known-filterbanks dropdown lists `.fil` files recursively under that data directory.
+
 ## Run With Docker
 
-Build the image:
+The canonical container image is intended to live at `ghcr.io/dirkkuiper/flits`.
+
+If you have a published image available, run:
+
+```bash
+docker run --rm -p 8123:8123 \
+  -e FLITS_DATA_DIR=/data \
+  -v /path/to/filterbanks:/data \
+  ghcr.io/dirkkuiper/flits:latest
+```
+
+If you want to build locally instead:
 
 ```bash
 docker build -t flits .
-```
-
-Run it with a directory of filterbanks mounted into the container:
-
-```bash
 docker run --rm -p 8123:8123 \
   -e FLITS_DATA_DIR=/data \
   -v /path/to/filterbanks:/data \
@@ -44,6 +73,21 @@ Notes:
 - Relative file paths in the UI are resolved against `FLITS_DATA_DIR`.
 - The known-filterbanks dropdown lists `.fil` files recursively under `FLITS_DATA_DIR`.
 - Absolute paths inside the container still work if you prefer to type them manually.
+
+## Run With Apptainer
+
+Apptainer users should consume the same OCI image rather than maintain a separate container recipe.
+
+If the published GHCR image is available:
+
+```bash
+apptainer pull flits.sif docker://ghcr.io/dirkkuiper/flits:latest
+APPTAINERENV_FLITS_DATA_DIR=/data \
+  apptainer exec --bind /path/to/filterbanks:/data flits.sif \
+  python -m flits --host 127.0.0.1 --port 8123
+```
+
+If you are on an HPC system where pulling from GHCR is inconvenient, you can still build or export the Docker image elsewhere and convert it to `.sif` with Apptainer. The SPIDER-specific version of that workflow is documented in [docs/spider.md](/Users/dirk/Desktop/PhD/Code/analyzer/docs/spider.md).
 
 ## Run With Docker Compose
 
@@ -69,10 +113,10 @@ Then open `http://127.0.0.1:8123` or `http://127.0.0.1:9000` respectively.
 
 ## Remote And HPC Use
 
-This setup is portable across machines that have a compatible container runtime and can run the Python dependencies for the target CPU architecture. In practice:
+FLITS is portable across local workstations, remote servers, and HPC systems:
 
-- On a normal workstation or server with Docker, `docker run` or `docker compose` is enough.
-- On a remote Linux machine you access over SSH, start the container remotely and forward the port:
+- On a normal workstation, `pip install .`, `docker run`, or `docker compose` are all fine.
+- On a remote Linux machine you access over SSH, start FLITS remotely and forward the port:
 
 ```bash
 ssh -L 8123:127.0.0.1:8123 user@remote-host
@@ -80,138 +124,9 @@ ssh -L 8123:127.0.0.1:8123 user@remote-host
 
 Then open `http://127.0.0.1:8123` locally in your browser.
 
-- On many HPC clusters, Docker itself is not permitted because it requires a daemon with elevated privileges.
-- If the cluster provides Apptainer/Singularity or rootless Podman, the Docker image is still useful as the container source, but you will usually run it through the cluster-supported runtime instead of `docker`.
-- If the cluster does not allow any container runtime, you will need a standard Python environment there instead.
-
-## Run On SPIDER Via VS Code SSH
-
-The recommended SPIDER workflow is:
-
-- build the FLITS image on your workstation for `linux/amd64`
-- copy the exported Docker archive to SPIDER once
-- convert that archive to an Apptainer `.sif`
-- launch FLITS inside an interactive Slurm job on a worker node
-- open a second SSH tunnel from your laptop to the worker node port
-
-This keeps the browser local, the web server on the worker node, and the software stack reproducible.
-
-Reference docs used for this workflow:
-
-- SPIDER compute guidance: <https://doc.spider.surfsara.nl/en/latest/Pages/compute_on_spider.html>
-- SPIDER software guidance: <https://doc.spider.surfsara.nl/en/latest/Pages/software_on_spider.html>
-- SPIDER notebook tunnel pattern: <https://doc.spider.surfsara.nl/en/latest/Pages/jupyter_notebooks.html>
-- Apptainer Docker archive support: <https://apptainer.org/docs/user/latest/docker_and_oci.html>
-
-### 1. Build A SPIDER-Compatible Image Locally
-
-If your laptop is Apple Silicon, do not ship an `arm64` image to SPIDER. Build explicitly for `linux/amd64`.
-
-Helper script:
-
-```bash
-scripts/spider/build_spider_image.sh
-```
-
-Equivalent raw commands:
-
-```bash
-docker buildx build --platform linux/amd64 --load -t flits:spider .
-docker save flits:spider | gzip > dist/flits_spider.tar.gz
-```
-
-By default the helper writes `dist/flits_spider.tar.gz`.
-
-### 2. Copy The Archive To SPIDER And Convert It To SIF
-
-Copy the archive from your workstation:
-
-```bash
-scp dist/flits_spider.tar.gz <your-spider-ssh-target>:~/containers/
-```
-
-Then, on SPIDER:
-
-```bash
-scripts/spider/import_spider_sif.sh \
-  --archive ~/containers/flits_spider.tar.gz \
-  --output ~/containers/flits_spider.sif
-```
-
-Equivalent raw command:
-
-```bash
-apptainer build ~/containers/flits_spider.sif docker-archive:~/containers/flits_spider.tar.gz
-```
-
-The resulting `.sif` is a single portable file you can keep in `~/containers` for personal use.
-
-### 3. Start FLITS On A SPIDER Worker Node
-
-From your VS Code SSH terminal on SPIDER, launch FLITS through Slurm and Apptainer:
-
-```bash
-scripts/spider/run_flits_job.sh \
-  --data-dir /project/<project>/filterbanks \
-  --image ~/containers/flits_spider.sif \
-  --ssh-target <your-spider-ssh-target>
-```
-
-Defaults:
-
-- partition: `interactive`
-- cores: `2`
-- walltime: `04:00:00`
-- port: `8123`
-
-The script prints the worker hostname and the exact tunnel command you should run on your laptop. It then starts:
-
-```bash
-apptainer exec --bind /project/<project>/filterbanks:/data \
-  ~/containers/flits_spider.sif \
-  python -m flits --host 0.0.0.0 --port 8123
-```
-
-Inside the container, `FLITS_DATA_DIR` is set to `/data`, so relative `.fil` paths resolve against the bound SPIDER project directory.
-
-### 4. Open The Tunnel From Your Laptop
-
-Run this in a local terminal, not inside the SPIDER shell:
-
-```bash
-scripts/spider/open_local_tunnel.sh <your-spider-ssh-target> <worker-hostname> 8123
-```
-
-Equivalent raw command:
-
-```bash
-ssh -N -L 8123:<worker-hostname>:8123 <your-spider-ssh-target>
-```
-
-Then open `http://127.0.0.1:8123`.
-
-### 5. Verify And Shut Down
-
-On the SPIDER worker node:
-
-```bash
-curl http://127.0.0.1:8123/api/health
-curl http://127.0.0.1:8123/api/files
-```
-
-Then load a known filterbank in the browser.
-
-When you are done:
-
-- stop FLITS with `Ctrl-C`
-- exit the Slurm shell
-- close the local tunnel terminal
-
-### Notes
-
-- This is intended for personal ad-hoc use, not a shared public service.
-- FLITS currently has no authentication and allows permissive CORS, so do not expose the port beyond your SSH tunnel.
-- If you later want faster day-to-day use, keep the `.sif` in `~/containers` and only repeat the Slurm launch plus tunnel steps.
+- On many HPC clusters, Docker itself is not permitted. Apptainer is usually the right runtime there.
+- The SPIDER-specific workflow, helper scripts, and Slurm examples live in [docs/spider.md](/Users/dirk/Desktop/PhD/Code/analyzer/docs/spider.md).
+- The GitHub Actions workflow in [.github/workflows/publish-image.yml](/Users/dirk/Desktop/PhD/Code/analyzer/.github/workflows/publish-image.yml) is the intended way to publish the canonical OCI image to GHCR.
 
 ## Code Structure
 
@@ -221,6 +136,7 @@ When you are done:
 - `flits/models.py`: typed metadata and measurement containers
 - `flits/session.py`: interactive burst state and measurements
 - `flits/web/app.py`: FastAPI server for the browser UI
+- `flits/web_static/`: packaged frontend assets served by the app
 - `tests/test_session_smoke.py`: smoke tests on a real local filterbank file
 
 ## Measurements
