@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 from fastapi import HTTPException
 
-from flits.io.filterbank import FilterbankInspection
+from flits.io.filterbank import FilterbankInspection, your
 from flits.models import FilterbankMetadata
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
@@ -94,7 +94,7 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual([profile["key"] for profile in payload["profiles"]], ["fast", "auto", "thorough"])
         self.assertEqual(payload["profiles"][1]["label"], "Auto")
 
-    @unittest.skipUnless(SAMPLE.exists(), "Sample filterbank file is not available")
+    @unittest.skipUnless(SAMPLE.exists() and your.Your is not None, "Sample filterbank reader is not available")
     def test_detect_endpoint_reports_gbt_for_sample_filterbank(self) -> None:
         payload = detect_filterbank(DetectFilterbankRequest(bfile=str(SAMPLE)))
 
@@ -103,7 +103,7 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(payload["telescope_id"], 6)
         self.assertEqual(payload["detection_basis"], "matched telescope_id=6")
 
-    @unittest.skipUnless(SAMPLE.exists(), "Sample filterbank file is not available")
+    @unittest.skipUnless(SAMPLE.exists() and your.Your is not None, "Sample filterbank reader is not available")
     @patch("flits.web.app.inspect_filterbank")
     def test_detect_endpoint_unknown_id_falls_back_to_generic(self, mock_inspect: object) -> None:
         mock_inspect.return_value = FilterbankInspection(
@@ -180,6 +180,8 @@ class WebApiTest(unittest.TestCase):
                 bfile="synthetic.fil",
                 dm=50.0,
                 auto_mask_profile="thorough",
+                distance_mpc=123.0,
+                redshift=0.12,
             )
         )
 
@@ -194,8 +196,8 @@ class WebApiTest(unittest.TestCase):
                 read_start_sec=None,
                 initial_crop_sec=None,
                 auto_mask_profile="thorough",
-                distance_mpc=None,
-                redshift=None,
+                distance_mpc=123.0,
+                redshift=0.12,
             )
         finally:
             SESSIONS.pop(payload["session_id"], None)
@@ -239,6 +241,31 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("trial_dms", optimization)
         self.assertIn("best_dm", optimization)
         self.assertEqual(len(optimization["trial_dms"]), len(optimization["snr"]))
+
+    def test_session_action_compute_properties_returns_nested_science_payload(self) -> None:
+        session_id = "synthetic-measurements"
+        session = _synthetic_session()
+        session.add_region_ms(session.bin_to_ms(116), session.bin_to_ms(124))
+        SESSIONS[session_id] = session
+        try:
+            payload = session_action(
+                session_id,
+                ActionRequest(
+                    type="compute_properties",
+                    payload={},
+                ),
+            )
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        results = payload["view"]["results"]
+        self.assertIsNotNone(results)
+        self.assertIn("toa_topo_mjd", results)
+        self.assertIn("measurement_flags", results)
+        self.assertIn("uncertainties", results)
+        self.assertIn("provenance", results)
+        self.assertIn("diagnostics", results)
+        self.assertIn("mjd_at_peak", results)
 
     def test_delete_session_removes_session(self) -> None:
         session_id = "synthetic-delete"

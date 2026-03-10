@@ -2,38 +2,27 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 import warnings
 
 import numpy as np
-from astropy import units as u
-from scipy.optimize import curve_fit
 
-from flits.io import inspect_filterbank, load_filterbank_data
-from flits.models import BurstMeasurements, DmOptimizationResult, FilterbankMetadata, GaussianFit1D
+from flits.measurements import build_measurement_context, compute_burst_measurements, event_snr
+from flits.models import BurstMeasurements, DmOptimizationResult, FilterbankMetadata
 from flits.settings import ObservationConfig, get_auto_mask_profile, get_preset
-from flits.signal import block_reduce_mean, dedisperse, gaussian_1d, radiometer
+from flits.signal import block_reduce_mean, dedisperse
 
 try:
-    import jess.channel_masks
-except ImportError:  # pragma: no cover - optional dependency
-    jess = None
+    import jess.channel_masks as _jess_channel_masks
+    jess = SimpleNamespace(channel_masks=_jess_channel_masks)
+except Exception:  # pragma: no cover - optional dependency
+    jess = SimpleNamespace(channel_masks=SimpleNamespace(channel_masker=None))
 
 
 JESS_MASK_DTYPE = np.float32
 JESS_WORKING_COPY_FACTOR = 6
 JESS_TEST_SEQUENCE = ("skew", "stand-dev")
-
-
-def _safe_normalize(series: np.ndarray, offpulse: np.ndarray) -> np.ndarray:
-    if series.size == 0:
-        return np.array([], dtype=float)
-    offpulse = offpulse[np.isfinite(offpulse)]
-    baseline = float(np.nanmean(offpulse)) if offpulse.size else float(np.nanmean(series))
-    sigma = float(np.nanstd(offpulse)) if offpulse.size else float(np.nanstd(series))
-    if not np.isfinite(sigma) or sigma == 0:
-        sigma = 1.0
-    return (series - baseline) / sigma
 
 
 def _jsonable_array(values: np.ndarray, digits: int = 4) -> list[Any]:
@@ -51,15 +40,6 @@ def _power_of_two_ceiling(value: float) -> int:
     while factor < value:
         factor *= 2
     return factor
-
-
-def _nanmean_profile(values: np.ndarray) -> np.ndarray:
-    if values.size == 0:
-        return np.array([], dtype=float)
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", category=RuntimeWarning)
-        return np.nanmean(values, axis=0)
 
 
 def default_time_factor(num_time_bins: int, target_points: int = 1800) -> int:
@@ -81,16 +61,6 @@ def robust_color_limits(values: np.ndarray) -> tuple[float, float]:
     if vmax <= vmin:
         vmax = vmin + 1.0
     return vmin, vmax
-
-
-def _offpulse_window(series: np.ndarray, rel_start: int, rel_end: int) -> np.ndarray:
-    if series.size == 0:
-        return np.array([], dtype=float)
-    parts = [series[:rel_start], series[rel_end:]]
-    valid_parts = [part for part in parts if part.size]
-    if not valid_parts:
-        return np.array([], dtype=float)
-    return np.concatenate(valid_parts)
 
 
 def _adaptive_jess_time_bin_limit(
@@ -183,6 +153,8 @@ class BurstSession:
         distance_mpc: float | None = None,
         redshift: float | None = None,
     ) -> "BurstSession":
+        from flits.io import inspect_filterbank, load_filterbank_data
+
         inspection = inspect_filterbank(bfile)
         preset_key = telescope if telescope is not None else inspection.detected_preset_key
         config = ObservationConfig.from_preset(
@@ -361,20 +333,20 @@ class BurstSession:
         masked = self.get_masked_crop(data)
         rel_start, rel_end = self._event_bounds_in_crop(masked.shape[1])
         spec_lo, spec_hi = self._selected_channel_bounds()
-
-        prof = _nanmean_profile(masked)
-        prof = _safe_normalize(prof, _offpulse_window(prof, rel_start, rel_end))
-
-        burst_only = _nanmean_profile(masked[spec_lo : spec_hi + 1, :])
-        burst_only = _safe_normalize(burst_only, _offpulse_window(burst_only, rel_start, rel_end))
-        return masked, prof, burst_only, rel_start, rel_end
+        context = build_measurement_context(
+            masked=masked,
+            time_axis_ms=(self.crop_start + np.arange(masked.shape[1], dtype=float)) * self.tsamp_ms,
+            freqs_mhz=self.freqs,
+            event_rel_start=rel_start,
+            event_rel_end=rel_end,
+            spec_lo=spec_lo,
+            spec_hi=spec_hi,
+            freqres_mhz=self.freqres,
+        )
+        return masked, context.time_profile_sn, context.selected_profile_sn, rel_start, rel_end
 
     def _score_event_sn(self, burst_only_profile: np.ndarray, rel_start: int, rel_end: int) -> float:
-        event = burst_only_profile[rel_start:rel_end]
-        finite = event[np.isfinite(event)]
-        if finite.size == 0:
-            return float("-inf")
-        return float(np.nansum(finite) / np.sqrt(finite.size))
+        return event_snr(burst_only_profile, rel_start, rel_end)
 
     def get_view(self) -> dict[str, Any]:
         display = self.get_display_crop()
@@ -415,6 +387,8 @@ class BurstSession:
                 "tsamp_us": self.tsamp * 1e6,
                 "freqres_mhz": self.freqres,
                 "npol": self.npol,
+                "distance_mpc": self.config.distance_mpc,
+                "redshift": self.config.redshift,
                 "shape": [self.total_channels, self.total_time_bins],
                 "view_shape": [int(reduced.shape[0]), int(reduced.shape[1])],
                 "freq_range_mhz": [freq_lo_mhz, freq_hi_mhz],
@@ -575,7 +549,7 @@ class BurstSession:
         self.invalidate_selection_state()
 
     def auto_mask_jess(self, profile: str | None = None) -> None:
-        if jess is None:
+        if jess.channel_masks.channel_masker is None:
             raise RuntimeError("Jess is not installed in the active environment.")
 
         mask_profile = get_auto_mask_profile(self.config.auto_mask_profile if profile is None else profile)
@@ -822,89 +796,31 @@ class BurstSession:
         return self.dm_optimization
 
     def compute_properties(self) -> BurstMeasurements:
-        masked, prof, burst_only_prof, event_rel_start, event_rel_end = self._compute_profiles_for_data()
-        zero_time_ms = (self.crop_start + np.arange(masked.shape[1])) * self.tsamp_ms
-
-        gaussian_fits: list[GaussianFit1D] = []
-        for start, end in self.burst_regions:
-            fit_rel_start = max(0, start - self.crop_start)
-            fit_rel_end = min(masked.shape[1], end - self.crop_start)
-            if fit_rel_end - fit_rel_start < 4:
-                continue
-            xdata = zero_time_ms[fit_rel_start:fit_rel_end]
-            ydata = prof[fit_rel_start:fit_rel_end]
-            initial_guess = (
-                float(np.nanmax(ydata)),
-                float(xdata[int(np.nanargmax(ydata))]),
-                float(max(xdata[1] - xdata[0], self.tsamp_ms)),
-                0.0,
-            )
-            bounds = ([0.0, xdata[0], 0.0, -10.0], [np.inf, xdata[-1], xdata[-1] - xdata[0], 10.0])
-            try:
-                popt, _ = curve_fit(
-                    gaussian_1d,
-                    xdata,
-                    ydata,
-                    p0=initial_guess,
-                    bounds=bounds,
-                    maxfev=10000,
-                )
-                gaussian_fits.append(
-                    GaussianFit1D(
-                        amp=float(popt[0]),
-                        mu_ms=float(popt[1]),
-                        sigma_ms=float(popt[2]),
-                        offset=float(popt[3]),
-                    )
-                )
-            except Exception:
-                continue
-
-        peak_positions = self._current_peak_positions()
-        peak_ms = [self.bin_to_ms(peak) for peak in peak_positions]
-        plus_mjd_sec_updated = self.plus_mjd_sec + (peak_positions[0] * self.tsamp if peak_positions else 0.0)
-        mjd_at_peak = self.start_mjd + (plus_mjd_sec_updated / (24 * 3600))
-
-        integrated_sn = burst_only_prof[event_rel_start:event_rel_end]
-        effective_bw_mhz = self._effective_selected_bandwidth_mhz(masked)
-
-        peak_flux_jy = None
-        fluence_jyms = None
-        iso_e = None
-        if self.sefd is not None and effective_bw_mhz > 0:
-            flux_prof = integrated_sn * radiometer(self.tsamp_ms, effective_bw_mhz, self.npol, self.sefd)
-            peak_flux_jy = float(np.nanmax(flux_prof)) if flux_prof.size else 0.0
-            fluence_jyms = float(np.nansum(flux_prof * self.tsamp_ms)) if flux_prof.size else 0.0
-            if self.config.distance_mpc and self.config.redshift:
-                iso_e = (
-                    4
-                    * np.pi
-                    * fluence_jyms
-                    * u.Jy
-                    * u.ms
-                    * effective_bw_mhz
-                    * u.MHz
-                    * (self.config.distance_mpc * u.megaparsec) ** 2
-                    / (1 + self.config.redshift)
-                ).to_value()
-
-        spec_lo_mhz, spec_hi_mhz = self._selected_frequency_bounds_mhz()
-        self.results = BurstMeasurements(
+        masked = self.get_masked_crop()
+        event_rel_start, event_rel_end = self._event_bounds_in_crop(masked.shape[1])
+        spec_lo, spec_hi = self._selected_channel_bounds()
+        self.results = compute_burst_measurements(
             burst_name=Path(self.burst_file).stem,
             dm=self.dm,
-            mjd_at_peak=float(mjd_at_peak),
-            peak_positions_ms=[float(value) for value in peak_ms],
-            peak_flux_jy=peak_flux_jy,
-            fluence_jyms=fluence_jyms,
-            event_duration_ms=float((self.event_end - self.event_start) * self.tsamp_ms),
-            spectral_extent_mhz=float(spec_hi_mhz - spec_lo_mhz),
-            gaussian_fits=gaussian_fits,
-            mask_count=int(self.channel_mask.sum()),
+            start_mjd=self.start_mjd,
+            read_start_sec=self.plus_mjd_sec,
+            crop_start_bin=self.crop_start,
+            tsamp_ms=self.tsamp_ms,
+            freqres_mhz=self.freqres,
+            freqs_mhz=self.freqs,
+            masked=masked,
+            event_rel_start=event_rel_start,
+            event_rel_end=event_rel_end,
+            spec_lo=spec_lo,
+            spec_hi=spec_hi,
+            peak_bins_abs=self._current_peak_positions(),
+            burst_regions_abs=tuple(self.burst_regions),
+            manual_selection=bool(self.manual_peaks or self.burst_regions),
+            manual_peak_selection=bool(self.manual_peaks),
+            sefd_jy=self.sefd,
+            npol=self.npol,
+            distance_mpc=self.config.distance_mpc,
+            redshift=self.config.redshift,
             masked_channels=np.flatnonzero(self.channel_mask).astype(int).tolist(),
-            integrated_sn=np.asarray(integrated_sn),
-            time_profile_sn=np.asarray(prof),
-            burst_only_profile_sn=np.asarray(burst_only_prof),
-            time_axis_ms=np.asarray(zero_time_ms),
-            iso_e=iso_e,
         )
         return self.results

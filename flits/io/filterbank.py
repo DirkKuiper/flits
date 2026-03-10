@@ -2,13 +2,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
-import your
 
 from flits.models import FilterbankMetadata
 from flits.settings import ObservationConfig, detect_preset, resolve_default_sefd_jy
 from flits.signal import dedisperse, normalize
+
+try:
+    import your as _your
+    _YOUR_IMPORT_ERROR: Exception | None = None
+except Exception as exc:  # pragma: no cover - depends on optional runtime stack
+    _your = SimpleNamespace(Your=None)
+    _YOUR_IMPORT_ERROR = exc
+
+your = _your
 
 
 @dataclass(frozen=True)
@@ -66,6 +75,8 @@ def _inspect_reader(reader: your.Your, source_path: Path) -> FilterbankInspectio
 
 def inspect_filterbank(path: str | Path) -> FilterbankInspection:
     source_path = Path(path).expanduser().resolve()
+    if your.Your is None:
+        raise RuntimeError("The 'your' package is unavailable in the active environment.") from _YOUR_IMPORT_ERROR
     reader = your.Your(str(source_path))
     try:
         return _inspect_reader(reader, source_path)
@@ -81,6 +92,8 @@ def load_filterbank_data(
     inspection: FilterbankInspection | None = None,
 ) -> tuple[np.ndarray, FilterbankMetadata]:
     source_path = Path(path).expanduser().resolve()
+    if your.Your is None:
+        raise RuntimeError("The 'your' package is unavailable in the active environment.") from _YOUR_IMPORT_ERROR
     reader = your.Your(str(source_path))
     try:
         header = reader.your_header

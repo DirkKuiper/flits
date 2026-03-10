@@ -1,16 +1,21 @@
 """FLITS: Fast-Look Interactive Transient Suite."""
 
-from flits.models import BurstMeasurements, FilterbankMetadata, GaussianFit1D
-from flits.settings import ObservationConfig, TelescopePreset, available_presets, detect_preset, get_preset
-from flits.session import BurstSession
+from __future__ import annotations
+
+import importlib
+from typing import TYPE_CHECKING
 
 __version__ = "0.1.0"
 
 __all__ = [
     "BurstMeasurements",
     "BurstSession",
+    "DmOptimizationResult",
     "FilterbankMetadata",
     "GaussianFit1D",
+    "MeasurementDiagnostics",
+    "MeasurementProvenance",
+    "MeasurementUncertainties",
     "ObservationConfig",
     "TelescopePreset",
     "__version__",
@@ -18,3 +23,43 @@ __all__ = [
     "detect_preset",
     "get_preset",
 ]
+
+if TYPE_CHECKING:
+    from flits.models import (
+        BurstMeasurements,
+        DmOptimizationResult,
+        FilterbankMetadata,
+        GaussianFit1D,
+        MeasurementDiagnostics,
+        MeasurementProvenance,
+        MeasurementUncertainties,
+    )
+    from flits.session import BurstSession
+    from flits.settings import ObservationConfig, TelescopePreset, available_presets, detect_preset, get_preset
+
+
+def __getattr__(name: str):
+    if name in {
+        "BurstMeasurements",
+        "DmOptimizationResult",
+        "FilterbankMetadata",
+        "GaussianFit1D",
+        "MeasurementDiagnostics",
+        "MeasurementProvenance",
+        "MeasurementUncertainties",
+    }:
+        models = importlib.import_module("flits.models")
+
+        return getattr(models, name)
+
+    if name in {"ObservationConfig", "TelescopePreset", "available_presets", "detect_preset", "get_preset"}:
+        settings = importlib.import_module("flits.settings")
+
+        return getattr(settings, name)
+
+    if name == "BurstSession":
+        BurstSession = importlib.import_module("flits.session").BurstSession
+
+        return BurstSession
+
+    raise AttributeError(f"module 'flits' has no attribute {name!r}")

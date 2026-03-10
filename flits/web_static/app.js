@@ -42,6 +42,8 @@ const telescopeInput = document.getElementById("telescopeInput")
 const sefdInput = document.getElementById("sefdInput")
 const readStartInput = document.getElementById("readStartInput")
 const initialCropInput = document.getElementById("initialCropInput")
+const distanceInput = document.getElementById("distanceInput")
+const redshiftInput = document.getElementById("redshiftInput")
 const autoMaskProfileInput = document.getElementById("autoMaskProfileInput")
 const dmHalfRangeInput = document.getElementById("dmHalfRangeInput")
 const dmStepInput = document.getElementById("dmStepInput")
@@ -57,6 +59,7 @@ const heroTags = document.getElementById("heroTags")
 const burstSubtitle = document.getElementById("burstSubtitle")
 const heroMetrics = document.getElementById("heroMetrics")
 const resultsContent = document.getElementById("resultsContent")
+const diagnosticsContent = document.getElementById("diagnosticsContent")
 const dmOptimizationContent = document.getElementById("dmOptimizationContent")
 const dmOptimizationPlot = document.getElementById("dmOptimizationPlot")
 const setDmButton = document.getElementById("setDmButton")
@@ -106,6 +109,8 @@ const busyLockControls = [
   sefdInput,
   readStartInput,
   initialCropInput,
+  distanceInput,
+  redshiftInput,
   autoMaskProfileInput,
   dmHalfRangeInput,
   dmStepInput,
@@ -317,6 +322,8 @@ async function loadSession(options = {}) {
         sefd_jy: parseOptionalNumber(sefdInput.value),
         read_start_sec: parseOptionalNumber(readStartInput.value),
         initial_crop_sec: parseOptionalNumber(initialCropInput.value),
+        distance_mpc: parseOptionalNumber(distanceInput.value),
+        redshift: parseOptionalNumber(redshiftInput.value),
         auto_mask_profile: autoMaskProfileInput.value || "auto",
       }),
     })
@@ -386,6 +393,7 @@ function applyView(view) {
   renderHero(view)
   renderSessionFacts(view)
   renderResults(view.results)
+  renderDiagnostics(view.results)
   renderDmOptimization(view)
   renderPlots(view)
   updateControlStates()
@@ -437,6 +445,8 @@ function renderSessionFacts(view) {
     ["Raw shape", `${view.meta.shape[0]} x ${view.meta.shape[1]}`],
     ["Displayed shape", `${view.meta.view_shape[0]} x ${view.meta.view_shape[1]}`],
     ["SEFD", view.meta.sefd_jy === null ? "not set" : `${fmt(view.meta.sefd_jy, 2)} Jy`],
+    ["Distance", view.meta.distance_mpc === null ? "not set" : `${fmt(view.meta.distance_mpc, 3)} Mpc`],
+    ["Redshift", view.meta.redshift === null ? "not set" : fmt(view.meta.redshift, 5)],
     ["Crop", `${fmt(view.state.crop_ms[0], 2)} to ${fmt(view.state.crop_ms[1], 2)} ms`],
     ["Event", `${fmt(view.state.event_ms[0], 2)} to ${fmt(view.state.event_ms[1], 2)} ms`],
     ["Spectral extent", `${fmt(view.state.spectral_extent_mhz[0], 1)} to ${fmt(view.state.spectral_extent_mhz[1], 1)} MHz`],
@@ -461,26 +471,22 @@ function renderResults(results) {
   }
 
   const primaryTiles = [
+    resultTile("TOA (Topo MJD)", results.toa_topo_mjd === null ? "n/a" : fmt(results.toa_topo_mjd, 8), "primary"),
+    resultTile("Peak S/N", results.snr_peak === null ? "n/a" : fmt(results.snr_peak, 3), "primary"),
+    resultTile("Integrated S/N", results.snr_integrated === null ? "n/a" : fmt(results.snr_integrated, 3), "primary"),
+    resultTile("Width (ACF)", results.width_ms_acf === null ? "n/a" : `${fmt(results.width_ms_acf, 3)} ms`, "primary"),
+    resultTile("Spectral Width (ACF)", results.spectral_width_mhz_acf === null ? "n/a" : `${fmt(results.spectral_width_mhz_acf, 3)} MHz`, "primary"),
     resultTile("Fluence", results.fluence_jyms === null ? "n/a" : `${fmt(results.fluence_jyms, 3)} Jy ms`, "primary"),
-    resultTile("Peak Flux", results.peak_flux_jy === null ? "n/a" : `${fmt(results.peak_flux_jy, 3)} Jy`, "primary"),
-    resultTile("Duration", `${fmt(results.event_duration_ms, 3)} ms`, "primary"),
   ]
 
   const secondaryTiles = [
-    resultTile("MJD @ Peak", fmt(results.mjd_at_peak, 8), "secondary"),
+    resultTile("Peak Flux", results.peak_flux_jy === null ? "n/a" : `${fmt(results.peak_flux_jy, 3)} Jy`, "secondary"),
+    resultTile("Isotropic Energy", formatIsoEnergy(results.iso_e, results.provenance?.energy_unit), "secondary"),
+    resultTile("Event Window", `${fmt(results.event_duration_ms, 3)} ms`, "secondary"),
     resultTile("Spectral Extent", `${fmt(results.spectral_extent_mhz, 2)} MHz`, "secondary"),
     resultTile("Mask Count", String(results.mask_count), "secondary"),
     resultTile("Peak Positions", results.peak_positions_ms.length ? results.peak_positions_ms.map((value) => `${fmt(value, 2)} ms`).join(", ") : "n/a", "secondary"),
   ]
-
-  const fitList = results.gaussian_fits.length
-    ? `<ol class="fit-list">${results.gaussian_fits
-        .map(
-          (fit) =>
-            `<li>mu ${fmt(fit.mu_ms, 3)} ms, sigma ${fmt(fit.sigma_ms, 3)} ms, amp ${fmt(fit.amp, 3)}</li>`,
-        )
-        .join("")}</ol>`
-    : "<div class=\"empty-state\">No Gaussian fits were produced for the current burst-region selection.</div>"
 
   resultsContent.innerHTML = `
     <div class="results-primary">
@@ -489,8 +495,72 @@ function renderResults(results) {
     <div class="results-secondary">
       ${secondaryTiles.join("")}
     </div>
+  `
+}
+
+function renderDiagnostics(results) {
+  if (!results) {
+    diagnosticsContent.innerHTML =
+      '<div class="empty-state">No diagnostics yet. Compute measurements to inspect provenance and secondary fits.</div>'
+    return
+  }
+
+  const uncertainties = results.uncertainties || {}
+  const diagnostics = results.diagnostics || {}
+  const provenance = results.provenance || {}
+  const gaussianFits = diagnostics.gaussian_fits || []
+  const flagMarkup = results.measurement_flags?.length
+    ? results.measurement_flags.map((flag) => infoChip("Flag", formatMeasurementFlag(flag), flagTone(flag))).join("")
+    : infoChip("Flag", "None", "neutral")
+  const uncertaintyTiles = []
+  if (uncertainties.toa_topo_mjd !== null && uncertainties.toa_topo_mjd !== undefined) {
+    uncertaintyTiles.push(resultTile("TOA", formatToaUncertainty(uncertainties.toa_topo_mjd), "secondary"))
+  }
+  if (uncertainties.width_ms_acf !== null && uncertainties.width_ms_acf !== undefined) {
+    uncertaintyTiles.push(resultTile("Width", `±${fmt(uncertainties.width_ms_acf, 3)} ms`, "secondary"))
+  }
+  if (uncertainties.spectral_width_mhz_acf !== null && uncertainties.spectral_width_mhz_acf !== undefined) {
+    uncertaintyTiles.push(resultTile("Spectral Width", `±${fmt(uncertainties.spectral_width_mhz_acf, 3)} MHz`, "secondary"))
+  }
+  if (uncertainties.peak_flux_jy !== null && uncertainties.peak_flux_jy !== undefined) {
+    uncertaintyTiles.push(resultTile("Peak Flux", `±${fmt(uncertainties.peak_flux_jy, 3)} Jy`, "secondary"))
+  }
+  if (uncertainties.fluence_jyms !== null && uncertainties.fluence_jyms !== undefined) {
+    uncertaintyTiles.push(resultTile("Fluence", `±${fmt(uncertainties.fluence_jyms, 3)} Jy ms`, "secondary"))
+  }
+  if (uncertainties.iso_e !== null && uncertainties.iso_e !== undefined) {
+    uncertaintyTiles.push(
+      resultTile(
+        "Isotropic Energy",
+        `±${formatScientific(uncertainties.iso_e, 3)} ${provenance.energy_unit || ""}`.trim(),
+        "secondary",
+      ),
+    )
+  }
+  const fitList = gaussianFits.length
+    ? `<ol class="fit-list">${gaussianFits
+        .map(
+          (fit) =>
+            `<li>mu ${fmt(fit.mu_ms, 3)} ms, sigma ${fmt(fit.sigma_ms, 3)} ms, amp ${fmt(fit.amp, 3)}</li>`,
+        )
+        .join("")}</ol>`
+    : "<div class=\"empty-state\">No Gaussian fits were produced for the current burst-region selection.</div>"
+
+  diagnosticsContent.innerHTML = `
+    <div class="hero-tags">
+      ${flagMarkup}
+    </div>
+    ${uncertaintyTiles.length
+      ? `<div class="results-secondary">${uncertaintyTiles.join("")}</div>`
+      : '<div class="empty-state">No reported uncertainties for the current measurement set.</div>'}
     <details class="details-card results-details">
-      <summary>Gaussian fit details (${results.gaussian_fits.length} region${results.gaussian_fits.length === 1 ? "" : "s"})</summary>
+      <summary>Provenance</summary>
+      <div class="kv-list">
+        ${renderProvenanceItems(provenance)}
+      </div>
+    </details>
+    <details class="details-card results-details">
+      <summary>Gaussian Diagnostics (${gaussianFits.length} region${gaussianFits.length === 1 ? "" : "s"})</summary>
       <div class="results-fit-panel">
         ${fitList}
       </div>
@@ -1228,6 +1298,28 @@ function fmt(value, digits = 2) {
   return Number(value).toFixed(digits)
 }
 
+function formatScientific(value, digits = 3) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "n/a"
+  }
+  return Number(value).toExponential(digits)
+}
+
+function formatIsoEnergy(value, unit = "erg") {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "n/a"
+  }
+  return `${formatScientific(value, 3)} ${unit || ""}`.trim()
+}
+
+function formatToaUncertainty(daysValue) {
+  if (daysValue === null || daysValue === undefined || Number.isNaN(Number(daysValue))) {
+    return "n/a"
+  }
+  const microseconds = Number(daysValue) * 86400 * 1e6
+  return `±${fmt(microseconds, 3)} us`
+}
+
 function minFinite(values) {
   const finite = values.map(Number).filter(Number.isFinite)
   return finite.length ? Math.min(...finite) : 0
@@ -1276,6 +1368,51 @@ function fitStatusCopy(status) {
     fit_vertex_outside_peak_window: "The local quadratic fit shifted the maximum outside the sampled peak window, so the discrete best DM was retained.",
   }
   return labels[status] || "Review the sampled S/N curve before applying a new DM."
+}
+
+function flagTone(flag) {
+  if (flag === "calibrated" || flag === "acf") return "success"
+  if (flag === "manual" || flag === "fit") return "neutral"
+  return "warning"
+}
+
+function formatMeasurementFlag(flag) {
+  const labels = {
+    acf: "ACF",
+    calibrated: "Calibrated",
+    manual: "Manual",
+    fit: "Fit",
+    low_sn: "Low S/N",
+    heavily_masked: "Heavily masked",
+    edge_clipped: "Edge clipped",
+    missing_distance: "Missing distance",
+    missing_sefd: "Missing SEFD",
+  }
+  return labels[flag] || flag
+}
+
+function renderProvenanceItems(provenance) {
+  const items = [
+    ["Peak selection", provenance.peak_selection || "n/a"],
+    ["Width method", provenance.width_method || "n/a"],
+    ["Spectral width method", provenance.spectral_width_method || "n/a"],
+    ["Calibration", provenance.calibration_method || "n/a"],
+    ["Energy unit", provenance.energy_unit || "n/a"],
+    ["Uncertainty basis", provenance.uncertainty_basis || "n/a"],
+    ["Event window", Array.isArray(provenance.event_window_ms) ? `${fmt(provenance.event_window_ms[0], 3)} to ${fmt(provenance.event_window_ms[1], 3)} ms` : "n/a"],
+    ["Spectral extent", Array.isArray(provenance.spectral_extent_mhz) ? `${fmt(provenance.spectral_extent_mhz[0], 3)} to ${fmt(provenance.spectral_extent_mhz[1], 3)} MHz` : "n/a"],
+    ["Effective bandwidth", provenance.effective_bandwidth_mhz === undefined ? "n/a" : `${fmt(provenance.effective_bandwidth_mhz, 3)} MHz`],
+    ["Masked fraction", provenance.masked_fraction === undefined ? "n/a" : fmt(provenance.masked_fraction, 3)],
+    ["Off-pulse bins", provenance.offpulse_bin_count === undefined ? "n/a" : String(provenance.offpulse_bin_count)],
+    ["Deprecated alias", Array.isArray(provenance.deprecated_fields) && provenance.deprecated_fields.length ? provenance.deprecated_fields.join(", ") : "none"],
+  ]
+
+  return items
+    .map(
+      ([label, value]) =>
+        `<div class="kv-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`,
+    )
+    .join("")
 }
 
 function compactList(values) {

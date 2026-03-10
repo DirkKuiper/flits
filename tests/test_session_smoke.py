@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from flits.io.filterbank import your
 from flits.session import BurstSession
 
 
@@ -10,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "blc_s_guppi_60385_53711_DIAG_FRB20240114A_0057_40.265_41.518_b32_I0_D527_851_F192D_K_t30_d1.fil"
 
 
-@unittest.skipUnless(SAMPLE.exists(), "Sample filterbank file is not available")
+@unittest.skipUnless(SAMPLE.exists() and your.Your is not None, "Sample filterbank reader is not available")
 class BurstSessionSmokeTest(unittest.TestCase):
     def test_session_auto_detects_gbt_when_telescope_is_omitted(self) -> None:
         session = BurstSession.from_file(str(SAMPLE), dm=527.851)
@@ -42,10 +43,15 @@ class BurstSessionSmokeTest(unittest.TestCase):
 
         self.assertIsNotNone(measurements.fluence_jyms)
         self.assertIsNotNone(measurements.peak_flux_jy)
-        self.assertGreaterEqual(len(measurements.gaussian_fits), 1)
+        self.assertIsNotNone(measurements.toa_topo_mjd)
+        self.assertIn("calibrated", measurements.measurement_flags)
+        self.assertGreaterEqual(len(measurements.diagnostics.gaussian_fits), 1)
         payload = measurements.to_dict()
         self.assertNotIn("mjd_offset_ms", payload)
         self.assertNotIn("burst_time_from_filename", payload)
+        self.assertIn("uncertainties", payload)
+        self.assertIn("provenance", payload)
+        self.assertIn("diagnostics", payload)
 
 
 if __name__ == "__main__":

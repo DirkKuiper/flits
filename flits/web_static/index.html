@@ -16,7 +16,7 @@
     <div class="app-shell">
       <aside class="sidebar card">
         <div class="brand">
-          <div class="eyebrow">FRB Scientific Software</div>
+          <div class="eyebrow">FLITS</div>
           <h1>FLITS</h1>
           <p class="muted">
             Fast-Look Interactive Transient Suite.
@@ -60,6 +60,16 @@
             <span>Initial Crop (s)</span>
             <input id="initialCropInput" type="number" step="0.001" placeholder="preset default">
           </label>
+          <div class="field-row">
+            <label class="field">
+              <span>Distance (Mpc)</span>
+              <input id="distanceInput" type="number" step="0.001" placeholder="optional">
+            </label>
+            <label class="field">
+              <span>Redshift</span>
+              <input id="redshiftInput" type="number" step="0.0001" placeholder="optional">
+            </label>
+          </div>
           <div class="detection-panel" id="detectionHint">
             <div class="detection-copy">Detection: waiting for a filterbank.</div>
           </div>
@@ -225,12 +235,24 @@
           <div class="card results-card">
             <div class="card-head">
               <div>
-                <h3>Derived Properties</h3>
-                <p>Computed from the current crop, mask, event window, and spectral extent.</p>
+                <h3>Primary Measurements</h3>
+                <p>Primary science metrics computed from the current crop, mask, event window, and spectral extent.</p>
               </div>
             </div>
             <div id="resultsContent" class="results-content">
               <div class="empty-state">No measurements yet. Click Compute after marking the burst.</div>
+            </div>
+          </div>
+
+          <div class="card results-card">
+            <div class="card-head">
+              <div>
+                <h3>Diagnostics</h3>
+                <p>Flags, uncertainties, provenance, and secondary Gaussian diagnostics.</p>
+              </div>
+            </div>
+            <div id="diagnosticsContent" class="results-content">
+              <div class="empty-state">No diagnostics yet. Compute measurements to inspect provenance and secondary fits.</div>
             </div>
           </div>
 
