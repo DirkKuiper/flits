@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import unittest
@@ -11,13 +12,14 @@ import numpy as np
 from fastapi import HTTPException
 
 from flits.io.filterbank import FilterbankInspection, your
-from flits.models import FilterbankMetadata
+from flits.models import FilterbankMetadata, SpectralAnalysisResult
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
 from flits.web.app import (
     ActionRequest,
     CreateSessionRequest,
     DetectFilterbankRequest,
+    ImportSessionRequest,
     SESSIONS,
     STATIC_DIR,
     auto_mask_profiles,
@@ -25,10 +27,12 @@ from flits.web.app import (
     data_dir,
     delete_session,
     detect_filterbank,
+    import_session,
     list_filterbank_files,
     main,
     resolve_burst_path,
     session_action,
+    session_snapshot,
 )
 
 
@@ -173,20 +177,45 @@ class WebApiTest(unittest.TestCase):
         index_html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
         app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
 
-        self.assertIn('data-analysis-tab="primary"', index_html)
-        self.assertIn('data-analysis-tab="diagnostics"', index_html)
+        self.assertIn('data-analysis-tab="prepare"', index_html)
         self.assertIn('data-analysis-tab="dm"', index_html)
         self.assertIn('data-analysis-tab="fitting"', index_html)
+        self.assertIn('data-analysis-tab="spectral"', index_html)
         self.assertIn('data-analysis-tab="export"', index_html)
         self.assertIn('id="dmResidualPlot"', index_html)
         self.assertIn('id="fitScatteringButton"', index_html)
         self.assertIn('id="fittingSpectrumPlot"', index_html)
         self.assertIn('id="fittingProfilePlot"', index_html)
+        self.assertIn('id="spectralContent"', index_html)
+        self.assertIn('id="spectralPlot"', index_html)
+        self.assertIn('id="spectralSegmentInput"', index_html)
+        self.assertIn('id="runSpectralButton"', index_html)
         self.assertIn('id="buildExportButton"', index_html)
+        self.assertIn('data-mode="offpulse"', index_html)
+        self.assertIn('data-mode="region"', index_html)
+        self.assertIn('id="clearOffpulseButton"', index_html)
+        self.assertIn('id="exportSessionButton"', index_html)
+        self.assertIn('id="importSessionInput"', index_html)
+        self.assertIn('id="notesInput"', index_html)
+        self.assertIn('id="dmMetricInput"', index_html)
+        self.assertIn("Component Region", index_html)
+        self.assertIn("Clear Components", index_html)
         self.assertIn("activeAnalysisTab", app_js)
         self.assertIn("syncDmPlots", app_js)
         self.assertIn("syncFittingPlot", app_js)
+        self.assertIn("renderSpectral", app_js)
+        self.assertIn("syncSpectralPlot", app_js)
+        self.assertIn("syncSpectralSegmentInput", app_js)
         self.assertIn("exportManifest", app_js)
+        self.assertIn("compute_widths", app_js)
+        self.assertIn("downloadSessionSnapshot", app_js)
+        self.assertIn("importSessionSnapshot", app_js)
+        self.assertIn("minimal_residual_drift", app_js)
+        self.assertIn("renderDmComponentSummary", app_js)
+        self.assertIn("Metric Definition", app_js)
+        self.assertIn("renderDmMetricDefinition", app_js)
+        self.assertIn("replaceState", app_js)
+        self.assertIn("run_spectral_analysis", app_js)
 
     @patch("flits.web.app.BurstSession.from_file")
     @patch("flits.web.app.resolve_burst_path")
@@ -247,7 +276,7 @@ class WebApiTest(unittest.TestCase):
                 session_id,
                 ActionRequest(
                     type="optimize_dm",
-                    payload={"center_dm": 50.0, "half_range": 4.0, "step": 0.5},
+                    payload={"center_dm": 50.0, "half_range": 4.0, "step": 0.5, "metric": "peak_snr"},
                 ),
             )
         finally:
@@ -260,7 +289,7 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("trial_dms", optimization)
         self.assertIn("best_dm", optimization)
         self.assertEqual(len(optimization["trial_dms"]), len(optimization["snr"]))
-        self.assertEqual(optimization["snr_metric"], "integrated_event_snr")
+        self.assertEqual(optimization["snr_metric"], "peak_snr")
         self.assertIn("applied_dm", optimization)
         self.assertIn("subband_freqs_mhz", optimization)
         self.assertIn("arrival_times_applied_ms", optimization)
@@ -268,6 +297,14 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("residuals_applied_ms", optimization)
         self.assertIn("residuals_best_ms", optimization)
         self.assertIn("residual_status", optimization)
+        self.assertIn("residual_rms_applied_ms", optimization)
+        self.assertIn("residual_rms_best_ms", optimization)
+        self.assertIn("component_results", optimization)
+        metric_defs = payload["view"]["meta"]["dm_metrics"]
+        self.assertTrue(metric_defs)
+        self.assertIn("formula", metric_defs[0])
+        self.assertIn("origin", metric_defs[0])
+        self.assertIn("references", metric_defs[0])
 
     def test_session_action_fit_scattering_dispatches_to_session_method(self) -> None:
         session_id = "synthetic-fit-dispatch"
@@ -283,6 +320,103 @@ class WebApiTest(unittest.TestCase):
             SESSIONS.pop(session_id, None)
 
         session.fit_scattering.assert_called_once_with()
+
+    def test_session_action_run_spectral_analysis_returns_serialized_payload(self) -> None:
+        session_id = "synthetic-spectral-dispatch"
+        session = _synthetic_session()
+        expected = SpectralAnalysisResult(
+            status="ok",
+            message=None,
+            segment_length_ms=16.0,
+            segment_bins=16,
+            segment_count=2,
+            normalization="none",
+            event_window_ms=[112.0, 128.0],
+            spectral_extent_mhz=[1000.0, 1100.0],
+            tsamp_ms=1.0,
+            frequency_resolution_hz=62.5,
+            nyquist_hz=500.0,
+            freq_hz=np.array([62.5, 125.0], dtype=float),
+            power=np.array([1.5, 0.75], dtype=float),
+        )
+
+        def _run(segment_length_ms: float) -> SpectralAnalysisResult:
+            session.spectral_analysis = expected
+            return expected
+
+        session.run_spectral_analysis = Mock(side_effect=_run)
+        SESSIONS[session_id] = session
+        try:
+            payload = session_action(
+                session_id,
+                ActionRequest(type="run_spectral_analysis", payload={"segment_length_ms": 16.0}),
+            )
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        session.run_spectral_analysis.assert_called_once_with(16.0)
+        analysis = payload["view"]["spectral_analysis"]
+        self.assertIsNotNone(analysis)
+        self.assertEqual(analysis["status"], "ok")
+        self.assertEqual(analysis["normalization"], "none")
+        self.assertEqual(analysis["segment_length_ms"], 16.0)
+        self.assertEqual(analysis["segment_bins"], 16)
+        self.assertEqual(analysis["segment_count"], 2)
+        self.assertEqual(analysis["freq_hz"], [62.5, 125.0])
+        self.assertEqual(analysis["power"], [1.5, 0.75])
+
+    def test_session_action_supports_offpulse_width_and_notes_actions(self) -> None:
+        session_id = "synthetic-phase1-actions"
+        session = _synthetic_session()
+        session.add_offpulse_ms = Mock()
+        session.clear_offpulse = Mock()
+        session.compute_widths = Mock()
+        session.accept_width_result = Mock()
+        session.set_notes = Mock()
+        SESSIONS[session_id] = session
+        try:
+            session_action(session_id, ActionRequest(type="add_offpulse", payload={"start_ms": 1.0, "end_ms": 2.0}))
+            session_action(session_id, ActionRequest(type="clear_offpulse", payload={}))
+            session_action(session_id, ActionRequest(type="compute_widths", payload={}))
+            session_action(session_id, ActionRequest(type="accept_width_result", payload={"method": "gaussian_fwhm"}))
+            session_action(session_id, ActionRequest(type="set_notes", payload={"notes": "phase 1"}))
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        session.add_offpulse_ms.assert_called_once_with(1.0, 2.0)
+        session.clear_offpulse.assert_called_once_with()
+        session.compute_widths.assert_called_once_with()
+        session.accept_width_result.assert_called_once_with("gaussian_fwhm")
+        session.set_notes.assert_called_once_with("phase 1")
+
+    def test_session_snapshot_endpoint_returns_portable_json(self) -> None:
+        session_id = "synthetic-snapshot"
+        session = _synthetic_session()
+        SESSIONS[session_id] = session
+        try:
+            response = session_snapshot(session_id)
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        payload = json.loads(response.body.decode("utf-8"))
+        self.assertIn("schema_version", payload)
+        self.assertIn("source", payload)
+        self.assertIn("crop_bins", payload)
+        self.assertIn("noise_settings", payload)
+        self.assertIn("width_settings", payload)
+
+    @patch("flits.web.app.BurstSession.from_snapshot")
+    def test_import_session_endpoint_creates_session_from_snapshot(self, mock_from_snapshot: object) -> None:
+        mock_from_snapshot.return_value = _synthetic_session()
+
+        payload = import_session(ImportSessionRequest(snapshot={"schema_version": "1.0", "source": {"source_path": "synthetic_dm.fil"}}))
+
+        try:
+            self.assertIn("session_id", payload)
+            self.assertIn("view", payload)
+            mock_from_snapshot.assert_called_once()
+        finally:
+            SESSIONS.pop(payload["session_id"], None)
 
     def test_session_action_compute_properties_returns_nested_science_payload(self) -> None:
         session_id = "synthetic-measurements"
@@ -308,6 +442,8 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("provenance", results)
         self.assertIn("diagnostics", results)
         self.assertIn("mjd_at_peak", results)
+        self.assertIn("spectral_analysis", payload["view"])
+        self.assertIsNone(payload["view"]["spectral_analysis"])
 
     def test_delete_session_removes_session(self) -> None:
         session_id = "synthetic-delete"

@@ -9,11 +9,15 @@ from astropy import units as u
 from scipy.optimize import curve_fit
 
 from flits.models import (
+    AcceptedWidthSelection,
     BurstMeasurements,
     GaussianFit1D,
     MeasurementDiagnostics,
     MeasurementProvenance,
     MeasurementUncertainties,
+    NoiseEstimateSettings,
+    NoiseEstimateSummary,
+    WidthResult,
 )
 from flits.signal import acf_1d, gaussian_1d, radiometer
 
@@ -35,7 +39,7 @@ def _nanmean_profile(values: np.ndarray, axis: int) -> np.ndarray:
         return np.nanmean(values, axis=axis)
 
 
-def _offpulse_bins(time_bins: int, event_rel_start: int, event_rel_end: int) -> np.ndarray:
+def _implicit_offpulse_bins(time_bins: int, event_rel_start: int, event_rel_end: int) -> np.ndarray:
     if time_bins <= 0:
         return np.array([], dtype=int)
 
@@ -50,26 +54,97 @@ def _offpulse_bins(time_bins: int, event_rel_start: int, event_rel_end: int) -> 
     return np.arange(time_bins, dtype=int)
 
 
-def _safe_normalize(series: np.ndarray, reference: np.ndarray) -> np.ndarray:
-    series = np.asarray(series, dtype=float)
-    reference = np.asarray(reference, dtype=float)
-    finite_reference = reference[np.isfinite(reference)]
+def _explicit_offpulse_bins(
+    time_bins: int,
+    offpulse_regions: Sequence[tuple[int, int]] | None,
+) -> tuple[np.ndarray, str]:
+    if not offpulse_regions:
+        return np.array([], dtype=int), "implicit_event_complement"
 
-    if series.size == 0:
-        return np.array([], dtype=float)
+    bins: list[int] = []
+    for start, end in offpulse_regions:
+        lo = max(0, min(int(start), time_bins))
+        hi = max(lo, min(int(end), time_bins))
+        if hi > lo:
+            bins.extend(range(lo, hi))
+    if not bins:
+        return np.array([], dtype=int), "implicit_event_complement"
+    return np.asarray(sorted(set(bins)), dtype=int), "explicit"
 
+
+def _reference_stats(reference: np.ndarray) -> tuple[float, float]:
+    finite_reference = np.asarray(reference, dtype=float)
+    finite_reference = finite_reference[np.isfinite(finite_reference)]
     if finite_reference.size == 0:
-        baseline = float(np.nanmean(series)) if np.isfinite(series).any() else 0.0
-        sigma = float(np.nanstd(series)) if np.isfinite(series).any() else 0.0
-    else:
-        baseline = float(np.nanmean(finite_reference))
-        sigma = float(np.nanstd(finite_reference))
-
+        return 0.0, 1.0
+    baseline = float(np.nanmean(finite_reference))
+    sigma = float(np.nanstd(finite_reference))
     if not np.isfinite(baseline):
         baseline = 0.0
     if not np.isfinite(sigma) or sigma <= 0:
         sigma = 1.0
+    return baseline, sigma
+
+
+def _normalize_from_stats(series: np.ndarray, baseline: float, sigma: float) -> np.ndarray:
+    series = np.asarray(series, dtype=float)
+    if series.size == 0:
+        return np.array([], dtype=float)
+    sigma = 1.0 if not np.isfinite(sigma) or sigma <= 0 else float(sigma)
+    baseline = 0.0 if not np.isfinite(baseline) else float(baseline)
     return (series - baseline) / sigma
+
+
+def _noise_summary(
+    *,
+    reference: np.ndarray,
+    basis: str,
+    estimator: str,
+    offpulse_bins: np.ndarray,
+) -> NoiseEstimateSummary:
+    baseline, sigma = _reference_stats(reference)
+    warning_flags: list[str] = []
+    if basis != "explicit":
+        warning_flags.append("implicit_offpulse")
+    if offpulse_bins.size < 4:
+        warning_flags.append("insufficient_offpulse_bins")
+    if sigma <= 0 or not np.isfinite(sigma):
+        warning_flags.append("zero_noise")
+        sigma = 1.0
+    return NoiseEstimateSummary(
+        estimator=estimator,
+        basis=basis,
+        baseline=float(baseline),
+        sigma=float(sigma),
+        offpulse_bin_count=int(offpulse_bins.size),
+        offpulse_bins=np.asarray(offpulse_bins, dtype=int),
+        warning_flags=sorted(set(warning_flags)),
+    )
+
+
+def _offpulse_windows_ms(
+    *,
+    offpulse_bins: np.ndarray,
+    time_axis_ms: np.ndarray,
+    tsamp_ms: float,
+) -> list[list[float]]:
+    bins = np.asarray(offpulse_bins, dtype=int)
+    if bins.size == 0 or time_axis_ms.size == 0:
+        return []
+
+    windows: list[list[float]] = []
+    start = int(bins[0])
+    end = int(bins[0])
+    for current in bins[1:]:
+        current = int(current)
+        if current == end + 1:
+            end = current
+            continue
+        windows.append([float(time_axis_ms[start]), float(time_axis_ms[end] + tsamp_ms)])
+        start = current
+        end = current
+    windows.append([float(time_axis_ms[start]), float(time_axis_ms[end] + tsamp_ms)])
+    return windows
 
 
 def _half_max_crossing(lags: np.ndarray, corr: np.ndarray) -> float | None:
@@ -114,7 +189,6 @@ def _acf_width(series: np.ndarray, spacing: float) -> tuple[float | None, np.nda
     if lag_half is None:
         return None, lags, positive_corr
 
-    # For a Gaussian-like burst, the signal FWHM is the ACF half-max lag scaled by sqrt(2).
     return float(np.sqrt(2.0) * lag_half), lags, positive_corr
 
 
@@ -197,12 +271,19 @@ class MeasurementContext:
     masked: np.ndarray
     time_axis_ms: np.ndarray
     freqs_mhz: np.ndarray
+    selected_profile_raw: np.ndarray
+    selected_profile_baselined: np.ndarray
     selected_profile_sn: np.ndarray
+    event_profile_raw: np.ndarray
+    event_profile_baselined: np.ndarray
     event_profile_sn: np.ndarray
     time_profile_sn: np.ndarray
+    spectrum_raw: np.ndarray
     spectrum_sn: np.ndarray
     spectral_axis_mhz: np.ndarray
     offpulse_bins: np.ndarray
+    offpulse_regions_rel: list[tuple[int, int]]
+    noise_summary: NoiseEstimateSummary
     event_rel_start: int
     event_rel_end: int
     spec_lo: int
@@ -231,38 +312,76 @@ def build_measurement_context(
     spec_lo: int,
     spec_hi: int,
     freqres_mhz: float,
+    offpulse_regions: Sequence[tuple[int, int]] | None = None,
+    noise_settings: NoiseEstimateSettings | None = None,
 ) -> MeasurementContext:
     masked = np.asarray(masked, dtype=float)
     time_axis_ms = np.asarray(time_axis_ms, dtype=float)
     freqs_mhz = np.asarray(freqs_mhz, dtype=float)
+    noise_settings = NoiseEstimateSettings() if noise_settings is None else noise_settings
 
     spec_lo, spec_hi = sorted((int(spec_lo), int(spec_hi)))
     selected = masked[spec_lo : spec_hi + 1, :]
     selected_channel_count = int(max(0, spec_hi - spec_lo + 1))
     active_channel_count = int(np.isfinite(selected).any(axis=1).sum()) if selected.size else 0
-    offpulse_bins = _offpulse_bins(masked.shape[1], event_rel_start, event_rel_end)
+
+    explicit_offpulse, basis = _explicit_offpulse_bins(masked.shape[1], offpulse_regions)
+    offpulse_bins = explicit_offpulse
+    if offpulse_bins.size == 0:
+        offpulse_bins = _implicit_offpulse_bins(masked.shape[1], event_rel_start, event_rel_end)
+        basis = "implicit_event_complement"
 
     full_profile_raw = _nanmean_profile(masked, axis=0)
     selected_profile_raw = _nanmean_profile(selected, axis=0)
     selected_offpulse = selected_profile_raw[offpulse_bins] if offpulse_bins.size else selected_profile_raw
     full_offpulse = full_profile_raw[offpulse_bins] if offpulse_bins.size else full_profile_raw
+    noise_summary = _noise_summary(
+        reference=selected_offpulse,
+        basis=basis,
+        estimator=noise_settings.estimator,
+        offpulse_bins=offpulse_bins,
+    )
 
     event_spectrum_raw = _nanmean_profile(selected[:, event_rel_start:event_rel_end], axis=1) if selected.size else np.array([], dtype=float)
     offpulse_spectrum_raw = _nanmean_profile(selected[:, offpulse_bins], axis=1) if selected.size and offpulse_bins.size else np.array([], dtype=float)
+    spectrum_baseline, spectrum_sigma = _reference_stats(offpulse_spectrum_raw)
+    full_baseline, full_sigma = _reference_stats(full_offpulse)
 
     return MeasurementContext(
         masked=masked,
         time_axis_ms=time_axis_ms,
         freqs_mhz=freqs_mhz,
-        selected_profile_sn=_safe_normalize(selected_profile_raw, selected_offpulse),
-        event_profile_sn=_safe_normalize(
-            selected_profile_raw[event_rel_start:event_rel_end],
-            selected_offpulse,
+        selected_profile_raw=np.asarray(selected_profile_raw, dtype=float),
+        selected_profile_baselined=np.asarray(selected_profile_raw, dtype=float) - float(noise_summary.baseline),
+        selected_profile_sn=_normalize_from_stats(
+            np.asarray(selected_profile_raw, dtype=float),
+            float(noise_summary.baseline),
+            float(noise_summary.sigma),
         ),
-        time_profile_sn=_safe_normalize(full_profile_raw, full_offpulse),
-        spectrum_sn=_safe_normalize(event_spectrum_raw, offpulse_spectrum_raw),
+        event_profile_raw=np.asarray(selected_profile_raw[event_rel_start:event_rel_end], dtype=float),
+        event_profile_baselined=(
+            np.asarray(selected_profile_raw[event_rel_start:event_rel_end], dtype=float) - float(noise_summary.baseline)
+        ),
+        event_profile_sn=_normalize_from_stats(
+            np.asarray(selected_profile_raw[event_rel_start:event_rel_end], dtype=float),
+            float(noise_summary.baseline),
+            float(noise_summary.sigma),
+        ),
+        time_profile_sn=_normalize_from_stats(
+            np.asarray(full_profile_raw, dtype=float),
+            float(full_baseline),
+            float(full_sigma),
+        ),
+        spectrum_raw=np.asarray(event_spectrum_raw, dtype=float),
+        spectrum_sn=_normalize_from_stats(
+            np.asarray(event_spectrum_raw, dtype=float),
+            float(spectrum_baseline),
+            float(spectrum_sigma),
+        ),
         spectral_axis_mhz=np.asarray(freqs_mhz[spec_lo : spec_hi + 1], dtype=float),
         offpulse_bins=offpulse_bins,
+        offpulse_regions_rel=[(int(start), int(end)) for start, end in (offpulse_regions or [])],
+        noise_summary=noise_summary,
         event_rel_start=int(event_rel_start),
         event_rel_end=int(event_rel_end),
         spec_lo=spec_lo,
@@ -347,6 +466,8 @@ def compute_subband_arrival_residuals(
     spec_lo: int,
     spec_hi: int,
     freqres_mhz: float,
+    offpulse_regions: Sequence[tuple[int, int]] | None = None,
+    noise_settings: NoiseEstimateSettings | None = None,
 ) -> SubbandResidualDiagnostics:
     windows, status = _subband_windows(masked, spec_lo, spec_hi)
     if not windows:
@@ -369,6 +490,8 @@ def compute_subband_arrival_residuals(
             spec_lo=start,
             spec_hi=end,
             freqres_mhz=freqres_mhz,
+            offpulse_regions=offpulse_regions,
+            noise_settings=noise_settings,
         )
         arrival_time = _arrival_time_ms(context)
         if arrival_time is None:
@@ -448,6 +571,10 @@ def compute_burst_measurements(
     distance_mpc: float | None,
     redshift: float | None,
     masked_channels: Sequence[int],
+    offpulse_regions_rel: Sequence[tuple[int, int]] | None = None,
+    noise_settings: NoiseEstimateSettings | None = None,
+    width_results: Sequence[WidthResult] | None = None,
+    accepted_width: AcceptedWidthSelection | None = None,
 ) -> BurstMeasurements:
     time_axis_ms = (int(crop_start_bin) + np.arange(masked.shape[1], dtype=float)) * float(tsamp_ms)
     context = build_measurement_context(
@@ -459,6 +586,8 @@ def compute_burst_measurements(
         spec_lo=spec_lo,
         spec_hi=spec_hi,
         freqres_mhz=freqres_mhz,
+        offpulse_regions=offpulse_regions_rel,
+        noise_settings=noise_settings,
     )
 
     peak_bin_abs = _primary_peak_bin(
@@ -517,7 +646,7 @@ def compute_burst_measurements(
     if context.selected_channel_count > 0:
         masked_fraction = 1.0 - (context.active_channel_count / context.selected_channel_count)
 
-    measurement_flags: list[str] = []
+    measurement_flags: list[str] = list(context.noise_summary.warning_flags)
     if manual_selection:
         measurement_flags.append("manual")
     if width_ms_acf is not None or spectral_width_mhz_acf is not None:
@@ -547,8 +676,23 @@ def compute_burst_measurements(
         tau_sc_ms=None,
         peak_flux_jy=flux_scale if peak_flux_jy is not None and flux_scale is not None else None,
         fluence_jyms=fluence_uncertainty,
-        iso_e=(None if iso_e is None or fluence_jyms in (None, 0.0) or not fluence_uncertainty else float(abs(iso_e) * (fluence_uncertainty / abs(fluence_jyms)))),
+        iso_e=(
+            None
+            if iso_e is None or fluence_jyms in (None, 0.0) or not fluence_uncertainty
+            else float(abs(iso_e) * (fluence_uncertainty / abs(fluence_jyms)))
+        ),
     )
+
+    offpulse_windows_ms = _offpulse_windows_ms(
+        offpulse_bins=context.offpulse_bins,
+        time_axis_ms=context.time_axis_ms,
+        tsamp_ms=tsamp_ms,
+    )
+    calibration_assumptions = []
+    if flux_scale is not None:
+        calibration_assumptions.append("Radiometer-noise limited SEFD calibration.")
+    if distance_mpc is not None and redshift is not None and iso_e is not None:
+        calibration_assumptions.append("Isotropic energy assumes bandwidth-limited emission.")
 
     provenance = MeasurementProvenance(
         manual_selection=bool(manual_selection),
@@ -568,6 +712,7 @@ def compute_burst_measurements(
             float(np.min(context.spectral_axis_mhz)) if context.spectral_axis_mhz.size else 0.0,
             float(np.max(context.spectral_axis_mhz)) if context.spectral_axis_mhz.size else 0.0,
         ],
+        offpulse_windows_ms=offpulse_windows_ms,
         offpulse_bin_count=int(context.offpulse_bins.size),
         burst_bin_count=int(max(0, event_rel_end - event_rel_start)),
         selected_channel_count=context.selected_channel_count,
@@ -575,10 +720,16 @@ def compute_burst_measurements(
         selected_bandwidth_mhz=context.selected_bandwidth_mhz,
         effective_bandwidth_mhz=context.effective_bandwidth_mhz,
         masked_fraction=float(max(0.0, masked_fraction)),
+        masked_channels=[int(channel) for channel in masked_channels],
         tsamp_ms=float(tsamp_ms),
         freqres_mhz=float(abs(freqres_mhz)),
         npol=int(npol),
         sefd_jy=None if sefd_jy is None else float(sefd_jy),
+        calibration_assumptions=calibration_assumptions,
+        noise_basis=context.noise_summary.basis,
+        noise_estimator=context.noise_summary.estimator,
+        algorithm_name="compute_burst_measurements",
+        warning_flags=sorted(set(measurement_flags)),
         low_sn_threshold=float(LOW_SN_THRESHOLD),
         heavily_masked_threshold=float(HEAVILY_MASKED_FRACTION),
         deprecated_fields=["mjd_at_peak"],
@@ -626,4 +777,6 @@ def compute_burst_measurements(
         diagnostics=diagnostics,
         mask_count=len(list(masked_channels)),
         masked_channels=[int(channel) for channel in masked_channels],
+        width_results=[result for result in (width_results or [])],
+        accepted_width=accepted_width,
     )

@@ -3,7 +3,7 @@ const state = {
   view: null,
   exportManifest: null,
   mode: "event",
-  activeAnalysisTab: "primary",
+  activeAnalysisTab: "prepare",
   pending: null,
   detection: null,
   userSelectedPreset: false,
@@ -13,23 +13,25 @@ const state = {
 const modeLabels = {
   event: "Event Window",
   crop: "Crop Window",
-  region: "Burst Region",
+  offpulse: "Off-Pulse",
+  region: "Component Region",
   "add-peak": "Add Peak",
   "remove-peak": "Remove Peak",
   "mask-channel": "Mask Channel",
   "mask-range": "Mask Range",
-  "spec-extent": "Spectral Extent",
+  "spec-extent": "Spectral Window",
 }
 
 const modeHelp = {
-  event: "Click twice on the top time profile to mark the start and end of the event window.",
+  event: "Click twice on the top time profile or center dynamic spectrum to mark the start and end of the event window.",
   crop: "Click twice on the top time profile to define the crop window you want to work in.",
-  region: "Click twice on the top time profile to add a burst or sub-burst fitting region.",
+  offpulse: "Click twice on the top time profile to define an explicit off-pulse window for noise estimation.",
+  region: "Click twice on the top time profile to add an optional component region for Gaussian/component-DM work.",
   "add-peak": "Click once on the top time profile to place a peak marker.",
   "remove-peak": "Click once near an existing peak on the top time profile to remove it.",
   "mask-channel": "Click once on the center dynamic spectrum or right frequency profile to mask a single frequency channel.",
   "mask-range": "Click twice on the center dynamic spectrum or right frequency profile to mask a contiguous frequency range.",
-  "spec-extent": "Click twice on the right frequency profile to set the spectral extent used for measurements.",
+  "spec-extent": "Click twice on the center dynamic spectrum or right frequency profile to set the spectral window used for measurements.",
 }
 
 const statusChip = document.getElementById("statusChip")
@@ -47,6 +49,7 @@ const initialCropInput = document.getElementById("initialCropInput")
 const distanceInput = document.getElementById("distanceInput")
 const redshiftInput = document.getElementById("redshiftInput")
 const autoMaskProfileInput = document.getElementById("autoMaskProfileInput")
+const dmMetricInput = document.getElementById("dmMetricInput")
 const dmHalfRangeInput = document.getElementById("dmHalfRangeInput")
 const dmStepInput = document.getElementById("dmStepInput")
 const detectionHint = document.getElementById("detectionHint")
@@ -61,15 +64,23 @@ const heroTags = document.getElementById("heroTags")
 const burstSubtitle = document.getElementById("burstSubtitle")
 const heroMetrics = document.getElementById("heroMetrics")
 const resultsContent = document.getElementById("resultsContent")
-const diagnosticsContent = document.getElementById("diagnosticsContent")
 const dmOptimizationContent = document.getElementById("dmOptimizationContent")
 const dmOptimizationPlot = document.getElementById("dmOptimizationPlot")
 const dmResidualContent = document.getElementById("dmResidualContent")
 const dmResidualPlot = document.getElementById("dmResidualPlot")
+const dmComponentsContent = document.getElementById("dmComponentsContent")
 const fittingContent = document.getElementById("fittingContent")
 const fittingSpectrumPlot = document.getElementById("fittingSpectrumPlot")
 const fittingProfilePlot = document.getElementById("fittingProfilePlot")
+const spectralContent = document.getElementById("spectralContent")
+const spectralPlot = document.getElementById("spectralPlot")
+const spectralSegmentInput = document.getElementById("spectralSegmentInput")
+const runSpectralButton = document.getElementById("runSpectralButton")
 const exportManifestContent = document.getElementById("exportManifestContent")
+const exportSessionButton = document.getElementById("exportSessionButton")
+const importSessionInput = document.getElementById("importSessionInput")
+const notesInput = document.getElementById("notesInput")
+const saveNotesButton = document.getElementById("saveNotesButton")
 const setDmButton = document.getElementById("setDmButton")
 const optimizeDmButton = document.getElementById("optimizeDmButton")
 const applyBestDmButton = document.getElementById("applyBestDmButton")
@@ -77,6 +88,7 @@ const fitScatteringButton = document.getElementById("fitScatteringButton")
 const buildExportButton = document.getElementById("buildExportButton")
 const resetViewButton = document.getElementById("resetViewButton")
 const clearRegionsButton = document.getElementById("clearRegionsButton")
+const clearOffpulseButton = document.getElementById("clearOffpulseButton")
 const computeButton = document.getElementById("computeButton")
 const undoMaskButton = document.getElementById("undoMaskButton")
 const resetMaskButton = document.getElementById("resetMaskButton")
@@ -101,9 +113,13 @@ const sessionControls = [
   optimizeDmButton,
   applyBestDmButton,
   fitScatteringButton,
+  runSpectralButton,
   buildExportButton,
+  exportSessionButton,
+  saveNotesButton,
   resetViewButton,
   clearRegionsButton,
+  clearOffpulseButton,
   computeButton,
   undoMaskButton,
   resetMaskButton,
@@ -118,6 +134,7 @@ const busyLockControls = [
   loadButton,
   fileSelect,
   fileInput,
+  importSessionInput,
   dmInput,
   telescopeInput,
   sefdInput,
@@ -126,15 +143,18 @@ const busyLockControls = [
   distanceInput,
   redshiftInput,
   autoMaskProfileInput,
+  dmMetricInput,
+  notesInput,
   dmHalfRangeInput,
   dmStepInput,
+  spectralSegmentInput,
 ]
 
 document.addEventListener("DOMContentLoaded", async () => {
   rememberButtonLabels()
   bindControls()
   setMode(state.mode)
-  setAnalysisTab(state.activeAnalysisTab)
+  setAnalysisTab(initialAnalysisTab())
   setStatus("Idle", "neutral")
   updateControlStates()
   await loadPresets()
@@ -146,6 +166,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadSession({ silent: true })
   }
 })
+
+function initialAnalysisTab() {
+  const fromHash = window.location.hash.replace(/^#/, "").trim().toLowerCase()
+  const valid = new Set(["prepare", "dm", "fitting", "spectral", "export"])
+  return valid.has(fromHash) ? fromHash : state.activeAnalysisTab
+}
 
 function bindControls() {
   fileInput.addEventListener("input", () => {
@@ -174,6 +200,16 @@ function bindControls() {
   })
 
   loadButton.addEventListener("click", () => loadSession())
+  exportSessionButton.addEventListener("click", () => downloadSessionSnapshot())
+  importSessionInput.addEventListener("change", (event) => importSessionSnapshot(event))
+  dmMetricInput.addEventListener("change", () => {
+    if (state.view) {
+      renderDmOptimization(state.view)
+    }
+  })
+  saveNotesButton.addEventListener("click", () => {
+    postAction("set_notes", { notes: notesInput.value })
+  })
   setDmButton.addEventListener("click", () => {
     postAction("set_dm", { dm: Number(dmInput.value) })
   })
@@ -182,6 +218,7 @@ function bindControls() {
       center_dm: Number(dmInput.value),
       half_range: Number(dmHalfRangeInput.value),
       step: Number(dmStepInput.value),
+      metric: dmMetricInput.value || "integrated_event_snr",
     })
   })
   applyBestDmButton.addEventListener("click", () => {
@@ -193,9 +230,13 @@ function bindControls() {
     postAction("set_dm", { dm: Number(bestDm) })
   })
   fitScatteringButton.addEventListener("click", () => postAction("fit_scattering"))
+  runSpectralButton.addEventListener("click", () => {
+    postAction("run_spectral_analysis", { segment_length_ms: Number(spectralSegmentInput.value) })
+  })
   buildExportButton.addEventListener("click", () => postAction("export_results"))
   resetViewButton.addEventListener("click", () => postAction("reset_view"))
   clearRegionsButton.addEventListener("click", () => postAction("clear_regions"))
+  clearOffpulseButton.addEventListener("click", () => postAction("clear_offpulse"))
   computeButton.addEventListener("click", () => postAction("compute_properties"))
   undoMaskButton.addEventListener("click", () => postAction("undo_mask"))
   resetMaskButton.addEventListener("click", () => postAction("reset_mask"))
@@ -215,6 +256,80 @@ function bindControls() {
   analysisTabButtons.forEach((button) => {
     button.addEventListener("click", () => setAnalysisTab(button.dataset.analysisTab))
   })
+}
+
+async function downloadSessionSnapshot() {
+  if (!state.sessionId) {
+    setStatus("Load a session first", "error")
+    showToast("Load a session first", "error")
+    return
+  }
+
+  setBusy("export_session")
+  setStatus("Exporting session", "info")
+  try {
+    const response = await fetch(`/api/sessions/${state.sessionId}/snapshot`)
+    if (!response.ok) {
+      const payload = await response.json()
+      throw new Error(payload.detail || "Snapshot export failed")
+    }
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    const disposition = response.headers.get("Content-Disposition") || ""
+    const match = disposition.match(/filename="([^"]+)"/)
+    link.href = url
+    link.download = match ? match[1] : "flits_session.json"
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    setStatus("Session exported", "success")
+    showToast("Session snapshot exported", "success")
+  } catch (error) {
+    setStatus(error.message, "error")
+    showToast(error.message, "error")
+  } finally {
+    setBusy(null)
+  }
+}
+
+async function importSessionSnapshot(event) {
+  const file = event.target.files?.[0]
+  if (!file) {
+    return
+  }
+
+  const previousSessionId = state.sessionId
+  setBusy("import_session")
+  setStatus("Importing session", "info")
+  clearPending()
+  try {
+    const text = await file.text()
+    const snapshot = JSON.parse(text)
+    const payload = await api("/api/sessions/import", {
+      method: "POST",
+      body: JSON.stringify({ snapshot }),
+    })
+    state.sessionId = payload.session_id
+    state.exportManifest = null
+    applyView(payload.view)
+    if (previousSessionId && previousSessionId !== payload.session_id) {
+      try {
+        await api(`/api/sessions/${previousSessionId}`, { method: "DELETE" })
+      } catch (cleanupError) {
+        console.warn("Failed to delete previous session", cleanupError)
+      }
+    }
+    setStatus("Imported", "success")
+    showToast("Session imported", "success")
+  } catch (error) {
+    setStatus(error.message, "error")
+    showToast(error.message, "error")
+  } finally {
+    importSessionInput.value = ""
+    setBusy(null)
+  }
 }
 
 async function api(path, options = {}) {
@@ -388,10 +503,12 @@ async function postAction(type, payload = {}) {
     })
     if (type === "optimize_dm") {
       state.activeAnalysisTab = "dm"
-    } else if (type === "compute_properties") {
-      state.activeAnalysisTab = "primary"
+    } else if (type === "compute_properties" || type === "compute_widths" || type === "accept_width_result") {
+      state.activeAnalysisTab = "prepare"
     } else if (type === "fit_scattering") {
       state.activeAnalysisTab = "fitting"
+    } else if (type === "run_spectral_analysis") {
+      state.activeAnalysisTab = "spectral"
     } else if (type === "export_results") {
       state.activeAnalysisTab = "export"
     }
@@ -419,21 +536,118 @@ function applyView(view) {
   if (view.meta.auto_mask_profile) {
     autoMaskProfileInput.value = view.meta.auto_mask_profile
   }
+  if (view.meta.preset_key) {
+    setPresetSelection(view.meta.preset_key)
+  }
+  syncDmMetricOptions(view)
+  dmInput.value = String(view.meta.dm)
+  sefdInput.value = view.meta.sefd_jy === null || view.meta.sefd_jy === undefined ? "" : String(view.meta.sefd_jy)
+  distanceInput.value = view.meta.distance_mpc === null || view.meta.distance_mpc === undefined ? "" : String(view.meta.distance_mpc)
+  redshiftInput.value = view.meta.redshift === null || view.meta.redshift === undefined ? "" : String(view.meta.redshift)
+  notesInput.value = view.state.notes || ""
+  syncSpectralSegmentInput(view)
   resolutionLabel.textContent = `t x${view.state.time_factor} / f x${view.state.freq_factor}`
   burstTitle.textContent = view.meta.burst_name
   burstSubtitle.textContent =
     `${fmt(view.meta.shape[0], 0)} channels x ${fmt(view.meta.shape[1], 0)} time bins. ` +
-    `Refine the event window, burst regions, masking, and spectral extent directly in the viewer.`
+    `Refine the event window, off-pulse windows, component regions, masking, and spectral window directly in the viewer.`
   renderHero(view)
   renderSessionFacts(view)
-  renderResults(view.results)
-  renderDiagnostics(view.results)
+  renderPrepare(view)
   renderDmOptimization(view)
   renderFitting(view.results)
+  renderSpectral(view)
   renderExportManifest()
   setAnalysisTab(state.activeAnalysisTab)
   renderPlots(view)
   updateControlStates()
+}
+
+function dmMetricOptions(view) {
+  const options = Array.isArray(view?.meta?.dm_metrics) ? view.meta.dm_metrics : []
+  if (options.length) {
+    return options
+  }
+  return [
+    { key: "integrated_event_snr", label: "Integrated-event S/N", summary: "Legacy sweep metric.", formula: "", origin: "", references: [] },
+    { key: "peak_snr", label: "Peak S/N", summary: "Maximize the event-window peak sample.", formula: "", origin: "", references: [] },
+    { key: "profile_sharpness", label: "Profile Sharpness", summary: "Favor concentrated pulse power.", formula: "", origin: "", references: [] },
+    { key: "burst_compactness", label: "Burst Compactness", summary: "Favor narrow bursts at fixed fluence.", formula: "", origin: "", references: [] },
+    { key: "minimal_residual_drift", label: "Minimal Residual Drift", summary: "Flatten sub-band residual delay.", formula: "", origin: "", references: [] },
+    { key: "maximal_structure", label: "Maximal Structure", summary: "Align fine temporal structure.", formula: "", origin: "", references: [] },
+  ]
+}
+
+function syncDmMetricOptions(view) {
+  const options = dmMetricOptions(view)
+  const currentValue = view?.dm_optimization?.settings?.metric || dmMetricInput.value || "integrated_event_snr"
+  dmMetricInput.innerHTML = options
+    .map(
+      (option) =>
+        `<option value="${escapeHtml(option.key)}" title="${escapeHtml(option.summary || "")}">${escapeHtml(option.label || option.key)}</option>`,
+    )
+    .join("")
+  const availableValues = new Set(options.map((option) => option.key))
+  dmMetricInput.value = availableValues.has(currentValue) ? currentValue : "integrated_event_snr"
+}
+
+function findDmMetricDefinition(view, metricKey) {
+  const options = dmMetricOptions(view)
+  return options.find((option) => option.key === metricKey) || options[0] || null
+}
+
+function tsampMs(view) {
+  const value = Number(view?.meta?.tsamp_us)
+  return Number.isFinite(value) && value > 0 ? value / 1000 : null
+}
+
+function eventBinCount(view) {
+  const sampleMs = tsampMs(view)
+  if (!sampleMs) {
+    return 0
+  }
+  const eventMs = Array.isArray(view?.state?.event_ms) ? view.state.event_ms : []
+  if (eventMs.length !== 2) {
+    return 0
+  }
+  return Math.max(0, Math.round((Number(eventMs[1]) - Number(eventMs[0])) / sampleMs))
+}
+
+function defaultSpectralSegmentMs(view) {
+  const sampleMs = tsampMs(view)
+  const bins = eventBinCount(view)
+  if (!sampleMs || bins <= 0) {
+    return null
+  }
+  const preferredBins = Math.max(4, Math.floor(bins / 4))
+  const maxBins = Math.max(1, Math.floor(bins / 2))
+  const segmentBins = Math.min(preferredBins, maxBins)
+  return Math.max(segmentBins * sampleMs, sampleMs)
+}
+
+function spectralSegmentIsValid(view, segmentMs) {
+  const sampleMs = tsampMs(view)
+  const bins = eventBinCount(view)
+  if (!sampleMs || bins <= 0 || !Number.isFinite(Number(segmentMs)) || Number(segmentMs) <= 0) {
+    return false
+  }
+  const segmentBins = Math.max(1, Math.round(Number(segmentMs) / sampleMs))
+  return Math.floor(bins / segmentBins) >= 2
+}
+
+function syncSpectralSegmentInput(view) {
+  const sampleMs = tsampMs(view)
+  if (!sampleMs) {
+    spectralSegmentInput.value = ""
+    return
+  }
+  spectralSegmentInput.step = String(sampleMs)
+  spectralSegmentInput.min = String(sampleMs)
+  const currentValue = Number(spectralSegmentInput.value)
+  const nextValue = spectralSegmentIsValid(view, currentValue)
+    ? currentValue
+    : Number(view?.spectral_analysis?.segment_length_ms) || defaultSpectralSegmentMs(view) || sampleMs
+  spectralSegmentInput.value = fmt(nextValue, 3)
 }
 
 function renderHero(view) {
@@ -486,9 +700,11 @@ function renderSessionFacts(view) {
     ["Redshift", view.meta.redshift === null ? "not set" : fmt(view.meta.redshift, 5)],
     ["Crop", `${fmt(view.state.crop_ms[0], 2)} to ${fmt(view.state.crop_ms[1], 2)} ms`],
     ["Event", `${fmt(view.state.event_ms[0], 2)} to ${fmt(view.state.event_ms[1], 2)} ms`],
-    ["Spectral extent", `${fmt(view.state.spectral_extent_mhz[0], 1)} to ${fmt(view.state.spectral_extent_mhz[1], 1)} MHz`],
+    ["Off-pulse", Array.isArray(view.state.offpulse_ms) && view.state.offpulse_ms.length ? view.state.offpulse_ms.map((window) => `${fmt(window[0], 2)} to ${fmt(window[1], 2)} ms`).join(", ") : "implicit event complement"],
+    ["Spectral window", `${fmt(view.state.spectral_extent_mhz[0], 1)} to ${fmt(view.state.spectral_extent_mhz[1], 1)} MHz`],
     ["Peaks", view.state.peak_ms.length ? view.state.peak_ms.map((value) => `${fmt(value, 2)} ms`).join(", ") : "auto"],
     ["Last auto mask", formatAutoMaskSummary(view.state.last_auto_mask)],
+    ["Notes", view.state.notes || "none"],
     ["Masked channels", compactList(view.state.masked_channels)],
   ]
 
@@ -500,54 +716,124 @@ function renderSessionFacts(view) {
     .join("")
 }
 
-function renderResults(results) {
-  if (!results) {
+function renderPrepare(view) {
+  const results = view.results
+  const widthAnalysis = view.width_analysis
+  if (!results && !widthAnalysis) {
     resultsContent.innerHTML =
-      '<div class="empty-state">No measurements yet. Click Compute after marking the burst.</div>'
+      `
+        ${renderPrepareChecklist(view, null)}
+        <div class="empty-state">No measurements yet. Click Compute after marking the burst.</div>
+        ${renderPrepareDiagnostics(null, widthAnalysis)}
+      `
     return
   }
 
-  const primaryTiles = [
-    resultTile("TOA (Topo MJD)", results.toa_topo_mjd === null ? "n/a" : fmt(results.toa_topo_mjd, 8), "primary"),
-    resultTile("Peak Bin S/N", results.snr_peak === null ? "n/a" : fmt(results.snr_peak, 3), "primary"),
-    resultTile("Integrated Event S/N", results.snr_integrated === null ? "n/a" : fmt(results.snr_integrated, 3), "primary"),
-    resultTile("Width (ACF)", results.width_ms_acf === null ? "n/a" : `${fmt(results.width_ms_acf, 3)} ms`, "primary"),
-    resultTile("Spectral Width (ACF)", results.spectral_width_mhz_acf === null ? "n/a" : `${fmt(results.spectral_width_mhz_acf, 3)} MHz`, "primary"),
-    resultTile("Fluence", results.fluence_jyms === null ? "n/a" : `${fmt(results.fluence_jyms, 3)} Jy ms`, "primary"),
+  const acceptedWidth = results?.accepted_width || widthAnalysis?.accepted_width || null
+  const acceptedMethod = acceptedWidth?.method ? formatWidthMethod(acceptedWidth.method) : (results?.provenance?.width_method || "n/a")
+  const acceptedWidthValue = acceptedWidth?.value === null || acceptedWidth?.value === undefined
+    ? (results?.width_ms_acf === null || results?.width_ms_acf === undefined ? "n/a" : `${fmt(results.width_ms_acf, 3)} ms`)
+    : `${fmt(acceptedWidth.value, 3)} ${acceptedWidth.units || "ms"}`
+  const acceptedWidthUncertainty = acceptedWidth?.uncertainty === null || acceptedWidth?.uncertainty === undefined
+    ? (results?.uncertainties?.width_ms_acf === null || results?.uncertainties?.width_ms_acf === undefined ? "n/a" : `±${fmt(results.uncertainties.width_ms_acf, 3)} ms`)
+    : `±${fmt(acceptedWidth.uncertainty, 3)} ${acceptedWidth.units || "ms"}`
+
+  const cards = [
+    renderMeasurementCard("TOA (Topo MJD)", results?.toa_topo_mjd === null || results?.toa_topo_mjd === undefined ? "n/a" : fmt(results.toa_topo_mjd, 8), {
+      uncertainty: results?.uncertainties?.toa_topo_mjd ? formatToaUncertainty(results.uncertainties.toa_topo_mjd) : null,
+      method: "peak bin",
+      flags: results?.measurement_flags || [],
+      details: renderMeasurementDetails(results?.provenance),
+    }),
+    renderMeasurementCard("Peak Bin S/N", results?.snr_peak === null || results?.snr_peak === undefined ? "n/a" : fmt(results.snr_peak, 3), {
+      method: "event peak",
+      flags: results?.measurement_flags || [],
+      details: renderMeasurementDetails(results?.provenance),
+    }),
+    renderMeasurementCard("Integrated Event S/N", results?.snr_integrated === null || results?.snr_integrated === undefined ? "n/a" : fmt(results.snr_integrated, 3), {
+      method: "selected event window",
+      flags: results?.measurement_flags || [],
+      details: renderMeasurementDetails(results?.provenance),
+    }),
+    renderMeasurementCard("Accepted Width", acceptedWidthValue, {
+      uncertainty: acceptedWidthUncertainty === "n/a" ? null : acceptedWidthUncertainty,
+      method: acceptedMethod,
+      flags: acceptedWidthFlags(widthAnalysis, acceptedWidth),
+      details: renderAcceptedWidthDetails(widthAnalysis, acceptedWidth, results?.provenance),
+    }),
+    renderMeasurementCard("Fluence", results?.fluence_jyms === null || results?.fluence_jyms === undefined ? "n/a" : `${fmt(results.fluence_jyms, 3)} Jy ms`, {
+      uncertainty: results?.uncertainties?.fluence_jyms ? `±${fmt(results.uncertainties.fluence_jyms, 3)} Jy ms` : null,
+      method: results?.provenance?.calibration_method || "n/a",
+      flags: results?.measurement_flags || [],
+      details: renderMeasurementDetails(results?.provenance),
+    }),
+    renderMeasurementCard("Peak Flux Density", results?.peak_flux_jy === null || results?.peak_flux_jy === undefined ? "n/a" : `${fmt(results.peak_flux_jy, 3)} Jy`, {
+      uncertainty: results?.uncertainties?.peak_flux_jy ? `±${fmt(results.uncertainties.peak_flux_jy, 3)} Jy` : null,
+      method: results?.provenance?.calibration_method || "n/a",
+      flags: results?.measurement_flags || [],
+      details: renderMeasurementDetails(results?.provenance),
+    }),
   ]
 
   const secondaryTiles = [
-    resultTile("Peak Flux", results.peak_flux_jy === null ? "n/a" : `${fmt(results.peak_flux_jy, 3)} Jy`, "secondary"),
-    resultTile("Isotropic Energy", formatIsoEnergy(results.iso_e, results.provenance?.energy_unit), "secondary"),
-    resultTile("Event Window", `${fmt(results.event_duration_ms, 3)} ms`, "secondary"),
-    resultTile("Spectral Extent", `${fmt(results.spectral_extent_mhz, 2)} MHz`, "secondary"),
-    resultTile("Mask Count", String(results.mask_count), "secondary"),
-    resultTile("Peak Positions", results.peak_positions_ms.length ? results.peak_positions_ms.map((value) => `${fmt(value, 2)} ms`).join(", ") : "n/a", "secondary"),
+    resultTile("Spectral Width (ACF)", results?.spectral_width_mhz_acf === null || results?.spectral_width_mhz_acf === undefined ? "n/a" : `${fmt(results.spectral_width_mhz_acf, 3)} MHz`, "secondary"),
+    resultTile("Spectral Window", results?.spectral_extent_mhz === null || results?.spectral_extent_mhz === undefined ? "n/a" : `${fmt(results.spectral_extent_mhz, 2)} MHz`, "secondary"),
+    resultTile("Event Duration", results?.event_duration_ms === null || results?.event_duration_ms === undefined ? "n/a" : `${fmt(results.event_duration_ms, 3)} ms`, "secondary"),
+    resultTile("Isotropic Energy", formatIsoEnergy(results?.iso_e, results?.provenance?.energy_unit), "secondary"),
+    resultTile("Mask Count", results ? String(results.mask_count) : String(view.state.masked_channels.length), "secondary"),
+    resultTile("Peak Positions", results?.peak_positions_ms?.length ? results.peak_positions_ms.map((value) => `${fmt(value, 2)} ms`).join(", ") : "n/a", "secondary"),
   ]
 
   resultsContent.innerHTML = `
-    <div class="results-primary">
-      ${primaryTiles.join("")}
+    ${renderPrepareChecklist(view, results)}
+    <div class="measurement-grid">
+      ${cards.join("")}
     </div>
     <div class="results-secondary">
       ${secondaryTiles.join("")}
     </div>
+    ${renderWidthAnalysisSection(widthAnalysis)}
+    ${renderPrepareDiagnostics(results, widthAnalysis)}
+  `
+  bindWidthActionButtons()
+}
+
+function renderPrepareChecklist(view, results) {
+  const regions = Array.isArray(view.state.burst_regions_ms) ? view.state.burst_regions_ms.length : 0
+  const peaks = Array.isArray(view.state.peak_ms) ? view.state.peak_ms.length : 0
+  const offpulse = Array.isArray(view.state.offpulse_ms) ? view.state.offpulse_ms.length : 0
+  const readinessTiles = [
+    resultTile("Crop", `${fmt(view.state.crop_ms[0], 2)} to ${fmt(view.state.crop_ms[1], 2)} ms`, "secondary"),
+    resultTile("Event", `${fmt(view.state.event_ms[0], 2)} to ${fmt(view.state.event_ms[1], 2)} ms`, "secondary"),
+    resultTile("Off-pulse", offpulse ? `${offpulse} window${offpulse === 1 ? "" : "s"}` : "implicit complement", "secondary"),
+    resultTile("Components", String(regions), "secondary"),
+    resultTile("Peaks", peaks ? `${peaks} manual` : "auto", "secondary"),
+    resultTile("Mask", `${view.state.masked_channels.length} channel${view.state.masked_channels.length === 1 ? "" : "s"}`, "secondary"),
+    resultTile("Spectral Window", `${fmt(view.state.spectral_extent_mhz[0], 1)} to ${fmt(view.state.spectral_extent_mhz[1], 1)} MHz`, "secondary"),
+    resultTile("Status", results ? "Measurements ready" : "Selection only", "secondary"),
+  ]
+
+  return `
+    <section class="results-section">
+      <div class="analysis-panel-head compact">
+        <h5>Readiness</h5>
+        <p>Everything in DM, Fitting, and Spectral uses this same crop, event/off-pulse selection, mask, spectral window, and applied DM.</p>
+      </div>
+      <div class="results-secondary">
+        ${readinessTiles.join("")}
+      </div>
+    </section>
   `
 }
 
-function renderDiagnostics(results) {
-  if (!results) {
-    diagnosticsContent.innerHTML =
-      '<div class="empty-state">No diagnostics yet. Compute measurements to inspect provenance and secondary fits.</div>'
-    return
-  }
-
-  const uncertainties = results.uncertainties || {}
-  const diagnostics = results.diagnostics || {}
-  const provenance = results.provenance || {}
-  const gaussianFits = diagnostics.gaussian_fits || []
-  const flagMarkup = results.measurement_flags?.length
-    ? results.measurement_flags.map((flag) => infoChip("Flag", formatMeasurementFlag(flag), flagTone(flag))).join("")
+function renderPrepareDiagnostics(results, widthAnalysis) {
+  const uncertainties = results?.uncertainties || {}
+  const provenance = results?.provenance || {}
+  const measurementFlags = Array.isArray(results?.measurement_flags) ? results.measurement_flags : []
+  const widthFlags = Array.isArray(widthAnalysis?.noise_summary?.warning_flags) ? widthAnalysis.noise_summary.warning_flags : []
+  const combinedFlags = Array.from(new Set([...measurementFlags, ...widthFlags]))
+  const flagMarkup = combinedFlags.length
+    ? combinedFlags.map((flag) => infoChip("Flag", formatMeasurementFlag(flag), flagTone(flag))).join("")
     : infoChip("Flag", "None", "neutral")
   const uncertaintyTiles = []
   if (uncertainties.toa_topo_mjd !== null && uncertainties.toa_topo_mjd !== undefined) {
@@ -574,16 +860,29 @@ function renderDiagnostics(results) {
       ),
     )
   }
-  const fitList = gaussianFits.length
-    ? `<ol class="fit-list">${gaussianFits
-        .map(
-          (fit) =>
-            `<li>mu ${fmt(fit.mu_ms, 3)} ms, sigma ${fmt(fit.sigma_ms, 3)} ms, amp ${fmt(fit.amp, 3)}</li>`,
-        )
-        .join("")}</ol>`
-    : "<div class=\"empty-state\">No Gaussian fits were produced for the current burst-region selection.</div>"
 
-  diagnosticsContent.innerHTML = `
+  const widthNoiseDetails = widthAnalysis?.noise_summary
+    ? `
+      <details class="details-card results-details">
+        <summary>Width Noise Basis</summary>
+        <div class="kv-list">
+          <div class="kv-item"><span>Estimator</span><strong>${escapeHtml(widthAnalysis.noise_summary.estimator || "n/a")}</strong></div>
+          <div class="kv-item"><span>Basis</span><strong>${escapeHtml(widthAnalysis.noise_summary.basis || "n/a")}</strong></div>
+          <div class="kv-item"><span>Baseline</span><strong>${escapeHtml(fmt(widthAnalysis.noise_summary.baseline, 4))}</strong></div>
+          <div class="kv-item"><span>Sigma</span><strong>${escapeHtml(fmt(widthAnalysis.noise_summary.sigma, 4))}</strong></div>
+          <div class="kv-item"><span>Off-pulse bins</span><strong>${escapeHtml(String(widthAnalysis.noise_summary.offpulse_bin_count || 0))}</strong></div>
+        </div>
+      </details>
+    `
+    : ""
+
+  return `
+    <section class="results-section">
+      <div class="analysis-panel-head compact">
+        <h5>Warnings and Provenance</h5>
+        <p>Review flags, uncertainty estimates, and why the accepted values were produced before moving into specialist analysis.</p>
+      </div>
+    </section>
     <div class="hero-tags">
       ${flagMarkup}
     </div>
@@ -591,29 +890,29 @@ function renderDiagnostics(results) {
       ? `<div class="results-secondary">${uncertaintyTiles.join("")}</div>`
       : '<div class="empty-state">No reported uncertainties for the current measurement set.</div>'}
     <details class="details-card results-details">
-      <summary>Provenance</summary>
+      <summary>Selection and Provenance</summary>
       <div class="kv-list">
         ${renderProvenanceItems(provenance)}
       </div>
     </details>
-    <details class="details-card results-details">
-      <summary>Gaussian Diagnostics (${gaussianFits.length} region${gaussianFits.length === 1 ? "" : "s"})</summary>
-      <div class="results-fit-panel">
-        ${fitList}
-      </div>
-    </details>
+    ${widthNoiseDetails}
   `
 }
 
 function renderDmOptimization(view) {
   const optimization = view.dm_optimization
+  const selectedMetricKey = optimization?.snr_metric || dmMetricInput.value || "integrated_event_snr"
+  const definition = findDmMetricDefinition(view, selectedMetricKey)
   if (!optimization) {
     dmOptimizeBadge.textContent = "Idle"
     dmOptimizeBadge.dataset.tone = "neutral"
     dmOptimizationContent.innerHTML =
-      '<div class="empty-state">No DM sweep yet. Run Optimize DM to inspect the integrated-event S/N curve.</div>'
+      '<div class="empty-state">No DM sweep yet. Run Optimize DM to inspect the selected metric curve.</div>' +
+      renderDmMetricDefinition(definition)
     dmResidualContent.innerHTML =
       '<div class="empty-state">No residual diagnostics yet. Run Optimize DM to compare sub-band arrival times.</div>'
+    dmComponentsContent.innerHTML =
+      '<div class="empty-state">No component DM summary yet. Add multiple component regions or manual peaks before running a sweep if the burst is complex.</div>'
     dmOptimizationPlot.classList.add("is-empty")
     dmResidualPlot.classList.add("is-empty")
     Plotly.purge(dmOptimizationPlot)
@@ -627,6 +926,7 @@ function renderDmOptimization(view) {
   dmOptimizeBadge.textContent = fitTone === "success" ? "Fit Ready" : "Sweep Ready"
   dmOptimizeBadge.dataset.tone = fitTone
   const snrLabel = snrMetricLabel(optimization.snr_metric)
+  const metricSummary = definition?.summary || snrMetricSummary(optimization.snr_metric)
   const residualTone = residualStatusTone(optimization.residual_status)
   const residualBandCount = Array.isArray(optimization.subband_freqs_mhz) ? optimization.subband_freqs_mhz.length : 0
 
@@ -653,16 +953,33 @@ function renderDmOptimization(view) {
     <div class="results-secondary">
       ${secondaryTiles.join("")}
     </div>
+    <div class="dm-fit-note" data-tone="neutral">
+      <strong>${escapeHtml(snrLabel)}</strong>
+      <span>${escapeHtml(metricSummary)}</span>
+    </div>
     <div class="dm-fit-note" data-tone="${escapeHtml(fitTone)}">
       <strong>${escapeHtml(fitStatusLabel(optimization.fit_status))}</strong>
       <span>${escapeHtml(fitStatusCopy(optimization.fit_status))}</span>
     </div>
+    ${renderDmMetricDefinition(definition)}
+    ${optimization.provenance ? `
+      <details class="details-card results-details">
+        <summary>DM Sweep Details</summary>
+        <div class="kv-list">
+          ${renderProvenanceItems(optimization.provenance)}
+        </div>
+      </details>
+    ` : ""}
   `
   const residualSummaryTiles = [
     resultTile("Residual Status", residualStatusLabel(optimization.residual_status), "secondary"),
     resultTile("Usable Sub-bands", String(residualBandCount), "secondary"),
     resultTile("Current Applied DM", fmt(view.meta.dm, 6), "secondary"),
     resultTile("Best-fit DM", fmt(optimization.best_dm, 6), "secondary"),
+    resultTile("Applied Drift RMS", optimization.residual_rms_applied_ms === null ? "n/a" : `${fmt(optimization.residual_rms_applied_ms, 4)} ms`, "secondary"),
+    resultTile("Best Drift RMS", optimization.residual_rms_best_ms === null ? "n/a" : `${fmt(optimization.residual_rms_best_ms, 4)} ms`, "secondary"),
+    resultTile("Applied Drift Slope", optimization.residual_slope_applied_ms_per_mhz === null ? "n/a" : `${fmt(optimization.residual_slope_applied_ms_per_mhz, 6)} ms/MHz`, "secondary"),
+    resultTile("Best Drift Slope", optimization.residual_slope_best_ms_per_mhz === null ? "n/a" : `${fmt(optimization.residual_slope_best_ms_per_mhz, 6)} ms/MHz`, "secondary"),
   ]
 
   dmResidualContent.innerHTML = `
@@ -677,13 +994,110 @@ function renderDmOptimization(view) {
       ${renderResidualTable(optimization)}
     </div>
   `
+  dmComponentsContent.innerHTML = renderDmComponentSummary(optimization)
+}
+
+function renderDmMetricDefinition(definition) {
+  if (!definition) {
+    return ""
+  }
+  const references = Array.isArray(definition.references) ? definition.references : []
+  const referencesMarkup = references.length
+    ? `<ul class="reference-list">${references.map(renderDmMetricReference).join("")}</ul>`
+    : '<div class="empty-state compact">No external reference stored for this metric yet.</div>'
+
+  return `
+    <details class="details-card results-details">
+      <summary>Metric Definition</summary>
+      <div class="kv-list">
+        <div class="kv-item"><span>Metric</span><strong>${escapeHtml(definition.label || definition.key || "n/a")}</strong></div>
+        <div class="kv-item"><span>Definition</span><strong>${escapeHtml(definition.summary || "n/a")}</strong></div>
+        <div class="kv-item"><span>Formula</span><strong>${escapeHtml(definition.formula || "n/a")}</strong></div>
+        <div class="kv-item"><span>Origin</span><strong>${escapeHtml(definition.origin || "n/a")}</strong></div>
+      </div>
+      <div class="references-block">
+        <h5>References</h5>
+        ${referencesMarkup}
+      </div>
+    </details>
+  `
+}
+
+function renderDmMetricReference(reference) {
+  const note = reference?.note ? `<div class="reference-note">${escapeHtml(reference.note)}</div>` : ""
+  return `
+    <li class="reference-item">
+      <a href="${escapeHtml(reference?.url || "#")}" target="_blank" rel="noreferrer noopener">${escapeHtml(reference?.label || reference?.citation || "Reference")}</a>
+      <div class="reference-citation">${escapeHtml(reference?.citation || "")}</div>
+      ${note}
+    </li>
+  `
+}
+
+function renderDmComponentSummary(optimization) {
+  const components = Array.isArray(optimization.component_results) ? optimization.component_results : []
+  if (!components.length) {
+    return '<div class="empty-state">No component DM summary for this sweep. Add multiple component regions or manual peaks to estimate per-component DM values.</div>'
+  }
+
+  const rows = components.map((component) => (
+    `<tr>` +
+    `<td>${escapeHtml(component.label || component.component_id || "Component")}</td>` +
+    `<td>${escapeHtml(`${fmt(component.event_window_ms?.[0], 3)} to ${fmt(component.event_window_ms?.[1], 3)} ms`)}</td>` +
+    `<td>${escapeHtml(fmt(component.best_dm, 6))}</td>` +
+    `<td>${escapeHtml(component.best_dm_uncertainty === null ? "n/a" : `±${fmt(component.best_dm_uncertainty, 6)}`)}</td>` +
+    `<td>${escapeHtml(fmt(component.best_value, 3))}</td>` +
+    `<td>${escapeHtml(fitStatusLabel(component.fit_status))}</td>` +
+    `</tr>`
+  )).join("")
+
+  return `
+    <details class="details-card results-details" open>
+      <summary>Component DM Summary (${components.length})</summary>
+      <div class="residual-table-wrap">
+        <table class="residual-table">
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Window</th>
+              <th>Best DM</th>
+              <th>Uncertainty</th>
+              <th>Best ${escapeHtml(snrMetricLabel(optimization.snr_metric))}</th>
+              <th>Fit Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  `
 }
 
 function renderFitting(results) {
-  const scatteringFit = results?.diagnostics?.scattering_fit
-  if (!results || !scatteringFit) {
+  const diagnostics = results?.diagnostics || {}
+  const scatteringFit = diagnostics?.scattering_fit
+  const gaussianFits = Array.isArray(diagnostics?.gaussian_fits) ? diagnostics.gaussian_fits : []
+  const gaussianSection = renderGaussianDiagnostics(gaussianFits)
+
+  if (!results) {
     fittingContent.innerHTML =
-      '<div class="empty-state">No scattering fit yet. Run the fit on the current selection to inspect model width, scattering time, and residuals.</div>'
+      '<div class="empty-state">No fitting diagnostics yet. Compute measurements or run a model fit on the current selection to inspect component and scattering behavior.</div>'
+    fittingSpectrumPlot.classList.add("is-empty")
+    Plotly.purge(fittingSpectrumPlot)
+    fittingSpectrumPlot.replaceChildren()
+    fittingProfilePlot.classList.add("is-empty")
+    Plotly.purge(fittingProfilePlot)
+    fittingProfilePlot.replaceChildren()
+    return
+  }
+
+  if (!scatteringFit) {
+    fittingContent.innerHTML = `
+      <div class="empty-state">No scattering fit yet. Run the fit on the current selection to inspect model width, scattering time, and residuals.</div>
+      ${gaussianSection}
+    `
     fittingSpectrumPlot.classList.add("is-empty")
     Plotly.purge(fittingSpectrumPlot)
     fittingSpectrumPlot.replaceChildren()
@@ -723,7 +1137,138 @@ function renderFitting(results) {
       <span>${escapeHtml(scatteringFit.status === "ok" ? scatteringStatusCopy(scatteringFit.status) : (scatteringFit.message || scatteringStatusCopy(scatteringFit.status)))}</span>
     </div>
     ${renderScatteringParameterTable(bestfit, bestfitUncertainties)}
+    ${results?.provenance ? `
+      <details class="details-card results-details">
+        <summary>Fit Selection Context</summary>
+        <div class="kv-list">
+          ${renderProvenanceItems(results.provenance)}
+        </div>
+      </details>
+    ` : ""}
+    ${gaussianSection}
   `
+}
+
+function renderGaussianDiagnostics(gaussianFits) {
+  const count = Array.isArray(gaussianFits) ? gaussianFits.length : 0
+  const fitList = count
+    ? `<ol class="fit-list">${gaussianFits
+        .map(
+          (fit) =>
+            `<li>mu ${fmt(fit.mu_ms, 3)} ms, sigma ${fmt(fit.sigma_ms, 3)} ms, amp ${fmt(fit.amp, 3)}</li>`,
+        )
+        .join("")}</ol>`
+    : "<div class=\"empty-state\">No Gaussian/component fits were produced for the current component-region selection.</div>"
+
+  return `
+    <details class="details-card results-details">
+      <summary>Gaussian / Component Fits (${count})</summary>
+      <div class="results-fit-panel">
+        ${fitList}
+      </div>
+    </details>
+  `
+}
+
+function renderSpectral(view) {
+  const spectralAnalysis = view?.spectral_analysis
+  const sharedStateTiles = [
+    resultTile("Applied DM", fmt(view.meta.dm, 6), "secondary"),
+    resultTile("Crop", `${fmt(view.state.crop_ms[0], 2)} to ${fmt(view.state.crop_ms[1], 2)} ms`, "secondary"),
+    resultTile("Event", `${fmt(view.state.event_ms[0], 2)} to ${fmt(view.state.event_ms[1], 2)} ms`, "secondary"),
+    resultTile("Off-pulse", Array.isArray(view.state.offpulse_ms) && view.state.offpulse_ms.length ? `${view.state.offpulse_ms.length} explicit` : "implicit complement", "secondary"),
+    resultTile("Spectral Window", `${fmt(view.state.spectral_extent_mhz[0], 1)} to ${fmt(view.state.spectral_extent_mhz[1], 1)} MHz`, "secondary"),
+    resultTile("Masked Channels", String(view.state.masked_channels.length), "secondary"),
+  ]
+
+  let spectralBody = '<div class="empty-state">No averaged power spectrum yet. Choose a segment length and run the analysis on the current event window.</div>'
+  if (spectralAnalysis) {
+    const resultTiles = [
+      resultTile("Status", spectralStatusLabel(spectralAnalysis.status), "secondary"),
+      resultTile("Normalization", spectralAnalysis.normalization || "none", "secondary"),
+      resultTile("Segment Length", spectralAnalysis.segment_length_ms === null || spectralAnalysis.segment_length_ms === undefined ? "n/a" : `${fmt(spectralAnalysis.segment_length_ms, 3)} ms`, "secondary"),
+      resultTile("Segments", spectralAnalysis.segment_count === null || spectralAnalysis.segment_count === undefined ? "n/a" : String(spectralAnalysis.segment_count), "secondary"),
+      resultTile("Event Window", Array.isArray(spectralAnalysis.event_window_ms) && spectralAnalysis.event_window_ms.length === 2 ? `${fmt(spectralAnalysis.event_window_ms[0], 3)} to ${fmt(spectralAnalysis.event_window_ms[1], 3)} ms` : "n/a", "secondary"),
+      resultTile("Resolution", spectralAnalysis.frequency_resolution_hz === null || spectralAnalysis.frequency_resolution_hz === undefined ? "n/a" : `${fmt(spectralAnalysis.frequency_resolution_hz, 3)} Hz`, "secondary"),
+      resultTile("Nyquist", spectralAnalysis.nyquist_hz === null || spectralAnalysis.nyquist_hz === undefined ? "n/a" : `${fmt(spectralAnalysis.nyquist_hz, 3)} Hz`, "secondary"),
+      resultTile("Bins", Array.isArray(spectralAnalysis.freq_hz) ? String(spectralAnalysis.freq_hz.length) : String(spectralAnalysis.freq_hz?.length || 0), "secondary"),
+    ]
+    spectralBody = `
+      <div class="results-section">
+        <div class="analysis-panel-head compact">
+          <h5>Averaged Power Spectrum</h5>
+          <p>Stingray uses the current event window only, after shared masking, spectral-window selection, and off-pulse baseline subtraction.</p>
+        </div>
+        <div class="results-secondary">
+          ${resultTiles.join("")}
+        </div>
+      </div>
+      ${spectralAnalysis.message ? `<div class="empty-state">${escapeHtml(spectralAnalysis.message)}</div>` : ""}
+    `
+  }
+
+  spectralContent.innerHTML = `
+    <div class="results-section">
+      <div class="analysis-panel-head compact">
+        <h5>Shared Session State</h5>
+        <p>The power-spectrum workflow uses the same current session state as Prepare, DM, and Fitting.</p>
+      </div>
+      <div class="results-secondary">
+        ${sharedStateTiles.join("")}
+      </div>
+    </div>
+    ${spectralBody}
+  `
+  if (spectralAnalysis?.status === "ok") {
+    spectralPlot.classList.remove("is-empty")
+    if (state.activeAnalysisTab === "spectral") {
+      renderSpectralPlot(spectralAnalysis)
+    }
+  } else {
+    spectralPlot.classList.add("is-empty")
+    Plotly.purge(spectralPlot)
+    spectralPlot.replaceChildren()
+  }
+}
+
+async function renderSpectralPlot(spectralAnalysis) {
+  if (!spectralAnalysis || spectralAnalysis.status !== "ok") {
+    spectralPlot.classList.add("is-empty")
+    Plotly.purge(spectralPlot)
+    spectralPlot.replaceChildren()
+    return
+  }
+
+  spectralPlot.classList.remove("is-empty")
+  await Plotly.react(
+    "spectralPlot",
+    [
+      {
+        x: spectralAnalysis.freq_hz,
+        y: spectralAnalysis.power,
+        mode: "lines",
+        type: "scattergl",
+        line: { color: "#0f766e", width: 2 },
+        name: "Averaged power",
+        hovertemplate: "Frequency %{x:.3f} Hz<br>Power %{y:.4g}<extra></extra>",
+      },
+    ],
+    {
+      margin: { l: 70, r: 24, t: 18, b: 54 },
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(255,255,255,0.55)",
+      showlegend: false,
+      xaxis: {
+        title: "Frequency (Hz)",
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+      yaxis: {
+        title: "Power",
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+    },
+    { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
+  )
 }
 
 function renderExportManifest() {
@@ -766,6 +1311,158 @@ function renderExportManifest() {
 
 function resultTile(label, value, variant) {
   return `<div class="result-tile ${variant}"><span class="results-label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
+}
+
+function renderMeasurementCard(label, value, { uncertainty = null, method = null, flags = [], details = "" } = {}) {
+  const chips = Array.isArray(flags) && flags.length
+    ? `<div class="measurement-flags">${flags.map((flag) => infoChip("Flag", formatMeasurementFlag(flag), flagTone(flag))).join("")}</div>`
+    : ""
+  const meta = [
+    method ? `<div class="measurement-meta"><span>Method</span><strong>${escapeHtml(String(method))}</strong></div>` : "",
+    uncertainty ? `<div class="measurement-meta"><span>Uncertainty</span><strong>${escapeHtml(String(uncertainty))}</strong></div>` : "",
+  ].join("")
+  return `
+    <article class="measurement-card">
+      <div class="measurement-head">
+        <span class="results-label">${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+      </div>
+      ${meta ? `<div class="measurement-meta-grid">${meta}</div>` : ""}
+      ${chips}
+      ${details}
+    </article>
+  `
+}
+
+function renderMeasurementDetails(provenance) {
+  if (!provenance) {
+    return ""
+  }
+  return `
+    <details class="details-card measurement-details">
+      <summary>Why this value?</summary>
+      <div class="kv-list">
+        ${renderProvenanceItems(provenance)}
+      </div>
+    </details>
+  `
+}
+
+function renderAcceptedWidthDetails(widthAnalysis, acceptedWidth, provenance) {
+  const result = widthAnalysis?.results?.find((item) => item.method === acceptedWidth?.method)
+  const items = []
+  if (acceptedWidth?.method) {
+    items.push(["Accepted method", formatWidthMethod(acceptedWidth.method)])
+  }
+  if (result?.algorithm_name) {
+    items.push(["Algorithm", result.algorithm_name])
+  }
+  if (Array.isArray(result?.event_window_ms) && result.event_window_ms.length === 2) {
+    items.push(["Event window", `${fmt(result.event_window_ms[0], 3)} to ${fmt(result.event_window_ms[1], 3)} ms`])
+  }
+  if (Array.isArray(result?.spectral_extent_mhz) && result.spectral_extent_mhz.length === 2) {
+    items.push(["Spectral window", `${fmt(result.spectral_extent_mhz[0], 3)} to ${fmt(result.spectral_extent_mhz[1], 3)} MHz`])
+  }
+  if (Array.isArray(result?.offpulse_windows_ms) && result.offpulse_windows_ms.length) {
+    items.push(["Off-pulse", result.offpulse_windows_ms.map((window) => `${fmt(window[0], 3)} to ${fmt(window[1], 3)} ms`).join(", ")])
+  } else if (provenance?.noise_basis) {
+    items.push(["Off-pulse", provenance.noise_basis])
+  }
+  const body = items
+    .map(([key, current]) => `<div class="kv-item"><span>${escapeHtml(key)}</span><strong>${escapeHtml(String(current))}</strong></div>`)
+    .join("")
+  if (!body) {
+    return ""
+  }
+  return `
+    <details class="details-card measurement-details">
+      <summary>Why this value?</summary>
+      <div class="kv-list">${body}</div>
+    </details>
+  `
+}
+
+function renderWidthAnalysisSection(widthAnalysis) {
+  if (!widthAnalysis) {
+    return `
+      <section class="results-section width-section">
+        <div class="analysis-panel-head compact">
+          <h5>Width Comparison</h5>
+          <p>Compute the boxcar, Gaussian, and fluence-percentile widths for the current burst.</p>
+        </div>
+        <div class="export-actions">
+          <button class="primary-button" id="computeWidthsButton">Compute Widths</button>
+        </div>
+        <div class="empty-state">No width comparison yet. Compute widths to compare methods and accept one for export.</div>
+      </section>
+    `
+  }
+
+  const rows = widthAnalysis.results.map((result) => {
+    const isAccepted = widthAnalysis.accepted_width?.method === result.method
+    const flags = Array.isArray(result.quality_flags) && result.quality_flags.length
+      ? result.quality_flags.map((flag) => infoChip("Flag", formatMeasurementFlag(flag), flagTone(flag))).join("")
+      : infoChip("Flag", "None", "neutral")
+    const action = isAccepted
+      ? `<span class="panel-badge" data-tone="success">Accepted</span>`
+      : `<button class="ghost-button width-accept-button" data-width-method="${escapeHtml(result.method)}">Accept</button>`
+    return `
+      <div class="width-row">
+        <div class="width-copy">
+          <strong>${escapeHtml(result.label)}</strong>
+          <span>${escapeHtml(result.value === null || result.value === undefined ? "n/a" : `${fmt(result.value, 3)} ${result.units || "ms"}`)}</span>
+          <span>${escapeHtml(result.uncertainty === null || result.uncertainty === undefined ? "uncertainty n/a" : `±${fmt(result.uncertainty, 3)} ${result.units || "ms"}`)}</span>
+        </div>
+        <div class="width-flags">${flags}</div>
+        <div class="width-actions">${action}</div>
+      </div>
+    `
+  }).join("")
+
+  return `
+    <section class="results-section width-section">
+      <div class="analysis-panel-head compact">
+        <h5>Width Comparison</h5>
+        <p>Compare multiple time-scale definitions. The accepted width is stored in the session snapshot and results export.</p>
+      </div>
+      <div class="export-actions">
+        <button class="primary-button" id="computeWidthsButton">Recompute Widths</button>
+      </div>
+      <div class="width-list">
+        ${rows}
+      </div>
+    </section>
+  `
+}
+
+function bindWidthActionButtons() {
+  const computeWidthsButton = document.getElementById("computeWidthsButton")
+  if (computeWidthsButton) {
+    computeWidthsButton.disabled = !state.sessionId || Boolean(state.busyAction)
+    computeWidthsButton.addEventListener("click", () => postAction("compute_widths"))
+  }
+  document.querySelectorAll(".width-accept-button").forEach((button) => {
+    button.disabled = !state.sessionId || Boolean(state.busyAction)
+    button.addEventListener("click", () => {
+      postAction("accept_width_result", { method: button.dataset.widthMethod })
+    })
+  })
+}
+
+function acceptedWidthFlags(widthAnalysis, acceptedWidth) {
+  const flags = widthAnalysis?.results?.find((result) => result.method === acceptedWidth?.method)?.quality_flags
+  return Array.isArray(flags) ? flags : []
+}
+
+function formatWidthMethod(method) {
+  const labels = {
+    boxcar_equivalent: "Boxcar equivalent",
+    gaussian_sigma: "Gaussian sigma",
+    gaussian_fwhm: "Gaussian FWHM",
+    fluence_percentile: "Fluence percentile",
+    acf_half_max: "ACF half max",
+  }
+  return labels[method] || method || "n/a"
 }
 
 async function renderPlots(view) {
@@ -868,7 +1565,10 @@ async function renderPlots(view) {
 }
 
 async function renderDmOptimizationPlot(optimization, appliedDm) {
-  const yRange = dmOptimizationYRange(optimization.snr)
+  const componentCurves = Array.isArray(optimization.component_results)
+    ? optimization.component_results.map((component) => component.metric_values || [])
+    : []
+  const yRange = dmOptimizationYRange([optimization.snr, ...componentCurves].flat())
   const traces = []
   const snrLabel = snrMetricLabel(optimization.snr_metric)
 
@@ -902,6 +1602,23 @@ async function renderDmOptimizationPlot(optimization, appliedDm) {
     name: `${snrLabel} sweep`,
   })
 
+  ;(optimization.component_results || []).forEach((component, index) => {
+    traces.push({
+      x: component.trial_dms,
+      y: component.metric_values,
+      mode: "lines",
+      type: "scattergl",
+      name: component.label || `Component ${index + 1}`,
+      line: {
+        color: dmComponentColor(index),
+        width: 1.6,
+        dash: "dot",
+      },
+      opacity: 0.75,
+      hovertemplate: `DM %{x:.6f}<br>${escapeHtml(component.label || `Component ${index + 1}`)} ${escapeHtml(snrLabel)} %{y:.3f}<extra></extra>`,
+    })
+  })
+
   await Plotly.react(
     "dmOptimizationPlot",
     traces,
@@ -909,7 +1626,14 @@ async function renderDmOptimizationPlot(optimization, appliedDm) {
       margin: { l: 70, r: 24, t: 18, b: 54 },
       paper_bgcolor: "rgba(0,0,0,0)",
       plot_bgcolor: "rgba(255,255,255,0.55)",
-      showlegend: false,
+      showlegend: traces.length > 2,
+      legend: {
+        orientation: "h",
+        yanchor: "bottom",
+        y: 1.02,
+        xanchor: "right",
+        x: 1.0,
+      },
       hovermode: "closest",
       xaxis: {
         title: "Dispersion Measure",
@@ -946,6 +1670,14 @@ function syncFittingPlot() {
   }
   renderFittingSpectrumPlot(scatteringFit)
   renderFittingProfilePlot(scatteringFit)
+}
+
+function syncSpectralPlot() {
+  const spectralAnalysis = state.view?.spectral_analysis
+  if (!spectralAnalysis || state.activeAnalysisTab !== "spectral" || spectralAnalysis.status !== "ok") {
+    return
+  }
+  renderSpectralPlot(spectralAnalysis)
 }
 
 async function renderDmResidualPlot(optimization) {
@@ -1330,7 +2062,11 @@ function handleViewerPlotClick(event) {
   if (panel === "time") {
     handleTimePlotClick(Number(point.x))
   } else if (panel === "heatmap") {
-    handleFreqPlotClick(Number(point.y), false)
+    if (state.mode === "event") {
+      handleTimePlotClick(Number(point.x))
+    } else {
+      handleFreqPlotClick(Number(point.y), true)
+    }
   } else if (panel === "spectrum") {
     handleFreqPlotClick(Number(point.y), true)
   }
@@ -1354,6 +2090,8 @@ function handleTimePlotClick(timeMs) {
     handlePair("set_event", timeMs, "ms")
   } else if (state.mode === "crop") {
     handlePair("set_crop", timeMs, "ms")
+  } else if (state.mode === "offpulse") {
+    handlePair("add_offpulse", timeMs, "ms")
   } else if (state.mode === "region") {
     handlePair("add_region", timeMs, "ms")
   } else if (state.mode === "add-peak") {
@@ -1384,7 +2122,7 @@ function handlePair(action, value, unit) {
   const firstValue = state.pending.value
   clearPending()
 
-  if (action === "set_crop" || action === "set_event" || action === "add_region") {
+  if (action === "set_crop" || action === "set_event" || action === "add_region" || action === "add_offpulse") {
     postAction(action, { start_ms: firstValue, end_ms: value })
   } else if (action === "mask_range" || action === "set_spectral_extent") {
     postAction(action, { start_freq_mhz: firstValue, end_freq_mhz: value })
@@ -1408,21 +2146,27 @@ function setMode(mode) {
 }
 
 function setAnalysisTab(tab) {
-  state.activeAnalysisTab = tab
+  const normalizedTab = ["prepare", "dm", "fitting", "spectral", "export"].includes(tab) ? tab : "prepare"
+  state.activeAnalysisTab = normalizedTab
   analysisTabButtons.forEach((button) => {
-    const isActive = button.dataset.analysisTab === tab
+    const isActive = button.dataset.analysisTab === normalizedTab
     button.classList.toggle("active", isActive)
     button.setAttribute("aria-selected", String(isActive))
   })
   analysisPanels.forEach((panel) => {
-    const isActive = panel.dataset.tabPanel === tab
+    const isActive = panel.dataset.tabPanel === normalizedTab
     panel.classList.toggle("active", isActive)
     panel.hidden = !isActive
   })
-  if (tab === "dm") {
+  if (window.location.hash !== `#${normalizedTab}`) {
+    window.history.replaceState(null, "", `#${normalizedTab}`)
+  }
+  if (normalizedTab === "dm") {
     syncDmPlots()
-  } else if (tab === "fitting") {
+  } else if (normalizedTab === "fitting") {
     syncFittingPlot()
+  } else if (normalizedTab === "spectral") {
+    syncSpectralPlot()
   }
 }
 
@@ -1514,6 +2258,20 @@ function buildTimeShapes(view) {
     verticalLine(view.state.event_ms[1], yMin, yMax, "#d97706", "solid", "x2", "y2"),
   ]
 
+  for (const region of view.state.offpulse_ms || []) {
+    shapes.push({
+      type: "rect",
+      xref: "x2",
+      yref: "y2",
+      x0: region[0],
+      x1: region[1],
+      y0: yMin,
+      y1: yMax,
+      fillcolor: "rgba(37, 99, 235, 0.14)",
+      line: { width: 0 },
+    })
+  }
+
   for (const region of view.state.burst_regions_ms) {
     shapes.push({
       type: "rect",
@@ -1545,6 +2303,20 @@ function buildHeatmapShapes(view) {
     horizontalLine(view.state.spectral_extent_mhz[0], x0, x1, "#7c3aed", "solid", "x", "y"),
     horizontalLine(view.state.spectral_extent_mhz[1], x0, x1, "#7c3aed", "solid", "x", "y"),
   ]
+
+  for (const region of view.state.offpulse_ms || []) {
+    shapes.push({
+      type: "rect",
+      xref: "x",
+      yref: "y",
+      x0: region[0],
+      x1: region[1],
+      y0,
+      y1,
+      fillcolor: "rgba(37, 99, 235, 0.08)",
+      line: { width: 0 },
+    })
+  }
 
   for (const peak of view.state.peak_ms) {
     shapes.push(verticalLine(peak, y0, y1, "#dc2626", "dot", "x", "y"))
@@ -1612,6 +2384,9 @@ function updateControlStates() {
     control.disabled = isBusy
   }
 
+  notesInput.disabled = !hasSession || isBusy
+  dmMetricInput.disabled = !hasSession || isBusy
+
   loadButton.disabled = isBusy || !hasBurstPath
   applyBestDmButton.disabled = !hasSession || isBusy || !hasBestDm
   hero.classList.toggle("is-loaded", hasSession)
@@ -1645,11 +2420,15 @@ function syncBusyButtons() {
 
 function busyButtonForAction(action) {
   if (action === "load") return loadButton
+  if (action === "export_session") return exportSessionButton
+  if (action === "import_session") return exportSessionButton
   if (action === "compute_properties") return computeButton
   if (action === "auto_mask_jess") return jessButton
   if (action === "optimize_dm") return optimizeDmButton
   if (action === "fit_scattering") return fitScatteringButton
+  if (action === "run_spectral_analysis") return runSpectralButton
   if (action === "export_results") return buildExportButton
+  if (action === "set_notes") return saveNotesButton
   if (action === "set_dm") return setDmButton
   if (action === "reset_view") return resetViewButton
   return null
@@ -1657,11 +2436,15 @@ function busyButtonForAction(action) {
 
 function busyButtonText(action) {
   if (action === "load") return "Loading..."
+  if (action === "export_session") return "Exporting..."
+  if (action === "import_session") return "Importing..."
   if (action === "compute_properties") return "Computing..."
   if (action === "auto_mask_jess") return "Masking..."
   if (action === "optimize_dm") return "Sweeping DM..."
   if (action === "fit_scattering") return "Fitting..."
+  if (action === "run_spectral_analysis") return "Running..."
   if (action === "export_results") return "Building..."
+  if (action === "set_notes") return "Saving..."
   if (action === "set_dm") return "Applying DM..."
   if (action === "reset_view") return "Resetting..."
   return actionBusyText(action)
@@ -1674,19 +2457,25 @@ function actionBusyText(action) {
     reset_view: "Resetting view",
     set_crop: "Updating crop window",
     set_event: "Updating event window",
-    add_region: "Adding burst region",
-    clear_regions: "Clearing regions",
+    add_offpulse: "Adding off-pulse window",
+    add_region: "Adding component region",
+    clear_regions: "Clearing components",
+    clear_offpulse: "Clearing off-pulse windows",
     add_peak: "Adding peak",
     remove_peak: "Removing peak",
     mask_channel: "Masking channel",
     mask_range: "Masking range",
     undo_mask: "Undoing mask",
     reset_mask: "Resetting masks",
-    set_spectral_extent: "Setting spectral extent",
+    set_spectral_extent: "Setting spectral window",
     auto_mask_jess: "Auto masking",
     optimize_dm: "Sweeping DM",
+    compute_widths: "Computing width comparison",
+    accept_width_result: "Accepting width result",
     fit_scattering: "Running scattering fit",
+    run_spectral_analysis: "Running power spectrum",
     export_results: "Building export bundle",
+    set_notes: "Saving notes",
     set_dm: "Applying DM",
     compute_properties: "Computing",
   }
@@ -1696,12 +2485,17 @@ function actionBusyText(action) {
 function actionSuccessText(action) {
   const labels = {
     reset_view: "View reset",
-    clear_regions: "Burst regions cleared",
+    clear_regions: "Component regions cleared",
+    clear_offpulse: "Off-pulse windows cleared",
     undo_mask: "Last mask removed",
     reset_mask: "All masks cleared",
     optimize_dm: "DM sweep completed",
+    compute_widths: "Width comparison updated",
+    accept_width_result: "Accepted width updated",
     fit_scattering: "Scattering fit completed",
+    run_spectral_analysis: "Power spectrum updated",
     export_results: "Export bundle built",
+    set_notes: "Notes saved",
     set_dm: "Dispersion measure updated",
     compute_properties: "Derived properties updated",
   }
@@ -1889,8 +2683,30 @@ function formatToaUncertainty(daysValue) {
 function snrMetricLabel(metric) {
   const labels = {
     integrated_event_snr: "Integrated Event S/N",
+    peak_snr: "Peak S/N",
+    profile_sharpness: "Profile Sharpness",
+    burst_compactness: "Burst Compactness",
+    minimal_residual_drift: "Residual Drift Metric",
+    maximal_structure: "Structure Metric",
   }
-  return labels[metric] || "Event S/N"
+  return labels[metric] || "DM Metric"
+}
+
+function snrMetricSummary(metric) {
+  const labels = {
+    integrated_event_snr: "Sum the event-profile S/N across the selected event window. This is the legacy FLITS DM sweep metric.",
+    peak_snr: "Use the single highest-S/N time bin inside the selected event window.",
+    profile_sharpness: "Use the smoothed in-window profile power to favor temporally sharp dedispersion solutions.",
+    burst_compactness: "Use a fluence-to-width compactness score so broader smeared solutions are penalized.",
+    minimal_residual_drift: "Use sub-band arrival-time residual scatter so flatter delay trends score higher.",
+    maximal_structure: "Use profile curvature to favor DMs that align fine-scale temporal structure.",
+  }
+  return labels[metric] || "Optimize the currently selected DM metric."
+}
+
+function dmComponentColor(index) {
+  const palette = ["#9a3412", "#7c3aed", "#0f766e", "#be123c", "#0369a1", "#65a30d"]
+  return palette[index % palette.length]
 }
 
 function minFinite(values) {
@@ -1979,9 +2795,9 @@ function residualStatusLabel(status) {
 function residualStatusCopy(status) {
   const labels = {
     ok: "Residuals are referenced to the band-mean arrival time. A monotonic slope indicates under- or over-dedispersion across the selected band.",
-    insufficient_active_channels: "Keep at least 12 unmasked channels in the selected spectral extent so three sub-bands can each contribute four channels.",
-    insufficient_subbands: "Widen the selected spectral extent or reduce masking so the active band can be partitioned into at least three contiguous sub-bands.",
-    heavily_masked_subbands: "The current masking pattern breaks the selected band into unreliable sub-bands. Relax the mask or widen the spectral extent before interpreting residuals.",
+    insufficient_active_channels: "Keep at least 12 unmasked channels in the selected spectral window so three sub-bands can each contribute four channels.",
+    insufficient_subbands: "Widen the selected spectral window or reduce masking so the active band can be partitioned into at least three contiguous sub-bands.",
+    heavily_masked_subbands: "The current masking pattern breaks the selected band into unreliable sub-bands. Relax the mask or widen the spectral window before interpreting residuals.",
     insufficient_signal: "At least one sub-band does not contain a stable arrival-time estimate inside the active event window.",
   }
   return labels[status] || "Review the selected band, masking, and event window before trusting the residual diagnostic."
@@ -2031,9 +2847,9 @@ function scatteringStatusCopy(status) {
   const labels = {
     ok: "The model fit uses fitburst on the current selected band and reports intrinsic width and scattering time as secondary, model-based diagnostics.",
     fitburst_unavailable: "Install the optional fitburst dependency to enable model-based burst fitting in FLITS.",
-    insufficient_data: "Widen the selected spectral extent or reset the current crop before running a scattering fit.",
+    insufficient_data: "Widen the selected spectral window or reset the current crop before running a scattering fit.",
     insufficient_time_bins: "Use a wider crop or event window so the burst and off-pulse baseline are both represented in the fit.",
-    insufficient_channels: "Keep at least four unmasked channels inside the selected spectral extent for a stable fit.",
+    insufficient_channels: "Keep at least four unmasked channels inside the selected spectral window for a stable fit.",
     insufficient_offpulse: "The fitter needs a contiguous off-pulse block to estimate per-channel weights from the current crop.",
     insufficient_signal: "The selected event window does not support a stable model fit. Recenter or widen the event window before retrying.",
     fit_failed: "The current selection or initial guesses did not converge to a stable fit. Check masking and event placement before retrying.",
@@ -2058,8 +2874,25 @@ function formatMeasurementFlag(flag) {
     edge_clipped: "Edge clipped",
     missing_distance: "Missing distance",
     missing_sefd: "Missing SEFD",
+    implicit_offpulse: "Implicit off-pulse",
+    insufficient_offpulse_bins: "Sparse off-pulse",
+    uncertainty_unavailable: "No uncertainty",
+    insufficient_successful_trials: "Sparse MC trials",
+    measurement_unavailable: "Unavailable",
   }
   return labels[flag] || flag
+}
+
+function spectralStatusLabel(status) {
+  const labels = {
+    ok: "Ready",
+    insufficient_data: "No data",
+    insufficient_time_bins: "Event too short",
+    invalid_segment_length: "Invalid segment",
+    stingray_unavailable: "Stingray unavailable",
+    stingray_failed: "Stingray failed",
+  }
+  return labels[status] || status || "Unknown"
 }
 
 function renderProvenanceItems(provenance) {
@@ -2068,12 +2901,19 @@ function renderProvenanceItems(provenance) {
     ["Width method", provenance.width_method || "n/a"],
     ["Spectral width method", provenance.spectral_width_method || "n/a"],
     ["Calibration", provenance.calibration_method || "n/a"],
+    ["Calibration assumptions", Array.isArray(provenance.calibration_assumptions) && provenance.calibration_assumptions.length ? provenance.calibration_assumptions.join("; ") : "n/a"],
     ["Energy unit", provenance.energy_unit || "n/a"],
     ["Uncertainty basis", provenance.uncertainty_basis || "n/a"],
     ["Event window", Array.isArray(provenance.event_window_ms) ? `${fmt(provenance.event_window_ms[0], 3)} to ${fmt(provenance.event_window_ms[1], 3)} ms` : "n/a"],
-    ["Spectral extent", Array.isArray(provenance.spectral_extent_mhz) ? `${fmt(provenance.spectral_extent_mhz[0], 3)} to ${fmt(provenance.spectral_extent_mhz[1], 3)} MHz` : "n/a"],
+    ["Spectral window", Array.isArray(provenance.spectral_extent_mhz) ? `${fmt(provenance.spectral_extent_mhz[0], 3)} to ${fmt(provenance.spectral_extent_mhz[1], 3)} MHz` : "n/a"],
+    ["Off-pulse windows", Array.isArray(provenance.offpulse_windows_ms) && provenance.offpulse_windows_ms.length ? provenance.offpulse_windows_ms.map((window) => `${fmt(window[0], 3)} to ${fmt(window[1], 3)} ms`).join(", ") : provenance.noise_basis || "n/a"],
     ["Effective bandwidth", provenance.effective_bandwidth_mhz === undefined ? "n/a" : `${fmt(provenance.effective_bandwidth_mhz, 3)} MHz`],
     ["Masked fraction", provenance.masked_fraction === undefined ? "n/a" : fmt(provenance.masked_fraction, 3)],
+    ["Masked channels", Array.isArray(provenance.masked_channels) && provenance.masked_channels.length ? compactList(provenance.masked_channels) : "none"],
+    ["Noise basis", provenance.noise_basis || "n/a"],
+    ["Noise estimator", provenance.noise_estimator || "n/a"],
+    ["Algorithm", provenance.algorithm_name || "n/a"],
+    ["Warnings", Array.isArray(provenance.warning_flags) && provenance.warning_flags.length ? provenance.warning_flags.map((flag) => formatMeasurementFlag(flag)).join(", ") : "none"],
     ["Off-pulse bins", provenance.offpulse_bin_count === undefined ? "n/a" : String(provenance.offpulse_bin_count)],
     ["Deprecated alias", Array.isArray(provenance.deprecated_fields) && provenance.deprecated_fields.length ? provenance.deprecated_fields.join(", ") : "none"],
   ]

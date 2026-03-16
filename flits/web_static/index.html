@@ -95,27 +95,6 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h2>DM Optimize</h2>
-            <span class="panel-badge" id="dmOptimizeBadge">Idle</span>
-          </div>
-          <div class="field-row">
-            <label class="field">
-              <span>Half-range</span>
-              <input id="dmHalfRangeInput" type="number" step="0.001" value="2.0">
-            </label>
-            <label class="field">
-              <span>Step</span>
-              <input id="dmStepInput" type="number" step="0.001" value="0.1">
-            </label>
-          </div>
-          <div class="button-grid two">
-            <button class="ghost-button" id="optimizeDmButton">Optimize DM</button>
-            <button class="primary-button" id="applyBestDmButton">Apply Best DM</button>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
             <h2>Interaction</h2>
           </div>
           <div class="mode-groups">
@@ -124,7 +103,7 @@
               <div class="button-grid two">
                 <button class="mode-button active" data-mode="event">Event Window</button>
                 <button class="mode-button" data-mode="crop">Crop Window</button>
-                <button class="mode-button wide" data-mode="region">Burst Region</button>
+                <button class="mode-button" data-mode="offpulse">Off-Pulse</button>
               </div>
             </section>
             <section class="mode-group">
@@ -132,7 +111,7 @@
               <div class="button-grid two">
                 <button class="mode-button" data-mode="mask-channel">Mask Channel</button>
                 <button class="mode-button" data-mode="mask-range">Mask Range</button>
-                <button class="mode-button wide" data-mode="spec-extent">Spectral Extent</button>
+                <button class="mode-button wide" data-mode="spec-extent">Spectral Window</button>
               </div>
             </section>
             <section class="mode-group">
@@ -140,6 +119,12 @@
               <div class="button-grid two">
                 <button class="mode-button" data-mode="add-peak">Add Peak</button>
                 <button class="mode-button" data-mode="remove-peak">Remove Peak</button>
+              </div>
+            </section>
+            <section class="mode-group">
+              <h3>Components</h3>
+              <div class="button-grid two">
+                <button class="mode-button wide" data-mode="region">Component Region</button>
               </div>
             </section>
           </div>
@@ -151,12 +136,22 @@
             <h2>Session</h2>
             <span class="panel-badge" id="sessionBadge">Not loaded</span>
           </div>
+          <div class="button-grid two">
+            <button class="ghost-button" id="exportSessionButton">Export Session</button>
+            <label class="file-button" for="importSessionInput">Import Session</label>
+            <input id="importSessionInput" type="file" accept="application/json" hidden>
+          </div>
           <div class="session-summary" id="sessionSummary">
             <div class="summary-card"><span>Profile</span><strong>Not loaded</strong></div>
             <div class="summary-card"><span>Detection</span><strong>-</strong></div>
             <div class="summary-card"><span>Crop</span><strong>-</strong></div>
             <div class="summary-card"><span>Mask</span><strong>-</strong></div>
           </div>
+          <label class="field">
+            <span>Analyst Notes</span>
+            <textarea id="notesInput" rows="4" placeholder="optional notes"></textarea>
+          </label>
+          <button class="ghost-button" id="saveNotesButton">Save Notes</button>
           <details class="details-card">
             <summary>Advanced metadata</summary>
             <div class="kv-list" id="sessionFacts">
@@ -212,12 +207,14 @@
             </div>
             <div class="viewer-legend" aria-label="Plot legend">
               <div class="legend-item"><span class="legend-swatch event"></span><span>Event window</span></div>
-              <div class="legend-item"><span class="legend-swatch region"></span><span>Burst region</span></div>
+              <div class="legend-item"><span class="legend-swatch offpulse"></span><span>Off-pulse</span></div>
+              <div class="legend-item"><span class="legend-swatch region"></span><span>Component region</span></div>
               <div class="legend-item"><span class="legend-swatch peak"></span><span>Peak marker</span></div>
-              <div class="legend-item"><span class="legend-swatch spectral"></span><span>Spectral extent</span></div>
+              <div class="legend-item"><span class="legend-swatch spectral"></span><span>Spectral window</span></div>
             </div>
             <div class="viewer-toolbar viewer-toolbar-top">
-              <button class="ghost-button" id="clearRegionsButton">Clear Regions</button>
+              <button class="ghost-button" id="clearRegionsButton">Clear Components</button>
+              <button class="ghost-button" id="clearOffpulseButton">Clear Off-Pulse</button>
               <button class="primary-button" id="computeButton">Compute</button>
             </div>
             <div class="plot viewer-plot" id="viewerPlot"></div>
@@ -236,42 +233,51 @@
             <div class="card-head analysis-card-head">
               <div>
                 <h3>Analysis Workspace</h3>
-                <p>Stay in one live session and switch between primary science products, diagnostics, and DM analysis.</p>
+                <p>Stay in one live session and move from preparation through specialist analyses without losing the current burst state.</p>
               </div>
               <div class="analysis-tabs" role="tablist" aria-label="Analysis views">
-                <button class="analysis-tab active" type="button" role="tab" aria-selected="true" data-analysis-tab="primary">Primary</button>
-                <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="diagnostics">Diagnostics</button>
+                <button class="analysis-tab active" type="button" role="tab" aria-selected="true" data-analysis-tab="prepare">Prepare</button>
                 <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="dm">DM</button>
                 <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="fitting">Fitting</button>
+                <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="spectral">Spectral</button>
                 <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="export">Export</button>
               </div>
             </div>
 
-            <section class="analysis-panel active" id="analysisPrimaryPanel" data-tab-panel="primary" role="tabpanel">
+            <section class="analysis-panel active" id="analysisPreparePanel" data-tab-panel="prepare" role="tabpanel">
               <div class="analysis-panel-head">
-                <h4>Primary Measurements</h4>
-                <p>Primary science metrics computed from the current crop, mask, event window, and spectral extent.</p>
+                <h4>Prepare</h4>
+                <p>Define the burst state, confirm readiness, and review compact measurement summaries before moving into specialist analysis tabs.</p>
               </div>
               <div id="resultsContent" class="results-content">
                 <div class="empty-state">No measurements yet. Click Compute after marking the burst.</div>
               </div>
             </section>
 
-            <section class="analysis-panel" id="analysisDiagnosticsPanel" data-tab-panel="diagnostics" role="tabpanel" hidden>
-              <div class="analysis-panel-head">
-                <h4>Diagnostics</h4>
-                <p>Flags, uncertainties, provenance, and secondary Gaussian diagnostics.</p>
-              </div>
-              <div id="diagnosticsContent" class="results-content">
-                <div class="empty-state">No diagnostics yet. Compute measurements to inspect provenance and secondary fits.</div>
-              </div>
-            </section>
-
             <section class="analysis-panel" id="analysisDmPanel" data-tab-panel="dm" role="tabpanel" hidden>
               <div class="analysis-panel-head">
                 <h4>DM Optimization</h4>
-                <p>Integrated-event S/N sweep and sub-band arrival-time residuals from the active crop, mask, event window, and spectral extent.</p>
+                <p>Run trial DMs with several optimization metrics, inspect the curve, compare residual drift before and after, and review per-component DM estimates for complex bursts.</p>
               </div>
+              <div class="field-row">
+                <label class="field">
+                  <span>Metric</span>
+                  <select id="dmMetricInput"></select>
+                </label>
+                <label class="field">
+                  <span>Half-range</span>
+                  <input id="dmHalfRangeInput" type="number" step="0.001" value="2.0">
+                </label>
+                <label class="field">
+                  <span>Step</span>
+                  <input id="dmStepInput" type="number" step="0.001" value="0.1">
+                </label>
+              </div>
+              <div class="button-grid two">
+                <button class="ghost-button" id="optimizeDmButton">Optimize DM</button>
+                <button class="primary-button" id="applyBestDmButton">Apply Best DM</button>
+              </div>
+              <div class="panel-badge" id="dmOptimizeBadge">Idle</div>
               <div id="dmOptimizationContent" class="results-content">
                 <div class="empty-state">No DM sweep yet. Run Optimize DM to inspect the integrated-event S/N curve.</div>
               </div>
@@ -280,12 +286,15 @@
                 <div class="empty-state">No residual diagnostics yet. Run Optimize DM to compare sub-band arrival times.</div>
               </div>
               <div class="plot dm-optimization-plot is-empty" id="dmResidualPlot"></div>
+              <div id="dmComponentsContent" class="results-content">
+                <div class="empty-state">No component DM summary yet. Add multiple component regions or manual peaks before running a sweep if the burst is complex.</div>
+              </div>
             </section>
 
             <section class="analysis-panel" id="analysisFittingPanel" data-tab-panel="fitting" role="tabpanel" hidden>
               <div class="analysis-panel-head">
                 <h4>Model Fitting</h4>
-                <p>Run a fitburst-backed scattering fit on the current crop, event window, mask, and spectral extent.</p>
+                <p>Run a fitburst-backed scattering fit on the current crop, event window, mask, and spectral window.</p>
               </div>
               <div class="export-actions">
                 <button class="primary-button" id="fitScatteringButton">Run Scattering Fit</button>
@@ -295,6 +304,26 @@
               </div>
               <div class="plot fitting-spectrum-plot is-empty" id="fittingSpectrumPlot"></div>
               <div class="plot fitting-plot is-empty" id="fittingProfilePlot"></div>
+            </section>
+
+            <section class="analysis-panel" id="analysisSpectralPanel" data-tab-panel="spectral" role="tabpanel" hidden>
+              <div class="analysis-panel-head">
+                <h4>Spectral Structure</h4>
+                <p>Run a Stingray-backed averaged power spectrum on the current shared session state.</p>
+              </div>
+              <div class="field-row">
+                <label class="field">
+                  <span>Segment Length</span>
+                  <input id="spectralSegmentInput" type="number" step="0.001" min="0.001">
+                </label>
+              </div>
+              <div class="export-actions">
+                <button class="primary-button" id="runSpectralButton">Run Power Spectrum</button>
+              </div>
+              <div id="spectralContent" class="results-content">
+                <div class="empty-state">No spectral-structure diagnostics yet. This tab will use the current crop, event/off-pulse windows, mask, spectral window, and applied DM.</div>
+              </div>
+              <div class="plot dm-optimization-plot is-empty" id="spectralPlot"></div>
             </section>
 
             <section class="analysis-panel" id="analysisExportPanel" data-tab-panel="export" role="tabpanel" hidden>

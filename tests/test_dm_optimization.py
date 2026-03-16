@@ -61,6 +61,56 @@ def _synthetic_dm_session(true_dm: float = 50.0, *, num_channels: int = 8) -> Bu
     )
 
 
+def _synthetic_complex_dm_session(true_dm: float = 50.0, *, num_channels: int = 24) -> BurstSession:
+    freqs = np.linspace(1100.0, 1000.0, num_channels)
+    tsamp = 1e-3
+    num_time_bins = 320
+
+    time = np.arange(num_time_bins, dtype=float)
+    pulse = np.exp(-0.5 * ((time - 110) / 2.5) ** 2) + 0.8 * np.exp(-0.5 * ((time - 150) / 3.0) ** 2)
+    reffreq = float(np.max(freqs))
+    time_shift = DM_CONST * true_dm * (reffreq ** -2.0 - freqs ** -2.0)
+    bin_shift = np.round(time_shift / tsamp).astype(int)
+
+    data = np.zeros((freqs.size, num_time_bins), dtype=float)
+    for chan, shift in enumerate(bin_shift):
+        data[chan, :] = np.roll(pulse, -int(shift))
+
+    metadata = FilterbankMetadata(
+        source_path=Path("synthetic_complex_dm.fil"),
+        source_name="synthetic_complex_dm",
+        tsamp=tsamp,
+        freqres=float(abs(freqs[1] - freqs[0])),
+        start_mjd=60000.0,
+        read_start_sec=0.0,
+        sefd_jy=10.0,
+        bandwidth_mhz=float(abs(freqs[1] - freqs[0]) * freqs.size),
+        npol=1,
+        freqs_mhz=freqs,
+        header_npol=1,
+        telescope_id=None,
+        machine_id=None,
+        detected_preset_key="generic",
+        detection_basis="synthetic",
+    )
+    config = ObservationConfig.from_preset(dm=0.0, preset_key="generic", sefd_jy=10.0)
+    session = BurstSession(
+        config=config,
+        metadata=metadata,
+        data=data,
+        crop_start=0,
+        crop_end=num_time_bins,
+        event_start=100,
+        event_end=160,
+        spec_ex_lo=0,
+        spec_ex_hi=freqs.size - 1,
+        channel_mask=np.zeros(freqs.size, dtype=bool),
+    )
+    session.add_peak_ms(session.bin_to_ms(110))
+    session.add_peak_ms(session.bin_to_ms(150))
+    return session
+
+
 class DmOptimizationTest(unittest.TestCase):
     def test_optimize_dm_recovers_bracketed_peak_without_mutating_session(self) -> None:
         session = _synthetic_dm_session(true_dm=50.0)
@@ -133,6 +183,10 @@ class DmOptimizationTest(unittest.TestCase):
         result = session.optimize_dm(center_dm=50.0, half_range=8.0, step=0.5)
 
         self.assertEqual(result.snr_metric, "integrated_event_snr")
+        self.assertIsNotNone(result.settings)
+        self.assertEqual(result.settings.metric, "integrated_event_snr")
+        self.assertIsNotNone(result.provenance)
+        self.assertEqual(result.provenance.algorithm_name, "dm_trial_sweep")
         self.assertEqual(result.applied_dm, 25.0)
         self.assertEqual(result.residual_status, "ok")
         self.assertGreaterEqual(result.subband_freqs_mhz.size, 3)
@@ -144,6 +198,11 @@ class DmOptimizationTest(unittest.TestCase):
         slope_best = float(np.polyfit(result.subband_freqs_mhz, result.residuals_best_ms, 1)[0])
         self.assertLess(slope_under, 0.0)
         self.assertLess(abs(slope_best), abs(slope_under))
+        self.assertIsNotNone(result.residual_rms_applied_ms)
+        self.assertIsNotNone(result.residual_rms_best_ms)
+        self.assertIsNotNone(result.residual_slope_applied_ms_per_mhz)
+        self.assertIsNotNone(result.residual_slope_best_ms_per_mhz)
+        self.assertLess(result.residual_rms_best_ms or 0.0, result.residual_rms_applied_ms or 0.0)
 
     def test_optimize_dm_reports_overdedispersed_residual_slope(self) -> None:
         session = _synthetic_dm_session(true_dm=50.0, num_channels=24)
@@ -166,6 +225,38 @@ class DmOptimizationTest(unittest.TestCase):
         self.assertEqual(result.arrival_times_best_ms.size, 0)
         self.assertEqual(result.residuals_applied_ms.size, 0)
         self.assertEqual(result.residuals_best_ms.size, 0)
+
+    def test_optimize_dm_supports_multiple_metrics(self) -> None:
+        metrics = (
+            "peak_snr",
+            "profile_sharpness",
+            "burst_compactness",
+            "minimal_residual_drift",
+            "maximal_structure",
+        )
+        for metric in metrics:
+            with self.subTest(metric=metric):
+                session = _synthetic_dm_session(true_dm=50.0, num_channels=24)
+                result = session.optimize_dm(center_dm=50.0, half_range=8.0, step=0.5, metric=metric)
+
+                self.assertEqual(result.snr_metric, metric)
+                self.assertIsNotNone(result.settings)
+                self.assertEqual(result.settings.metric, metric)
+                self.assertLess(abs(result.best_dm - 50.0), 2.5)
+                self.assertTrue(np.isfinite(result.best_sn))
+
+    def test_optimize_dm_reports_component_results_for_complex_burst(self) -> None:
+        session = _synthetic_complex_dm_session(true_dm=50.0)
+
+        result = session.optimize_dm(center_dm=50.0, half_range=8.0, step=0.5, metric="peak_snr")
+
+        self.assertEqual(len(result.component_results), 2)
+        for component in result.component_results:
+            self.assertEqual(component.metric, "peak_snr")
+            self.assertEqual(component.trial_dms.size, result.trial_dms.size)
+            self.assertEqual(component.metric_values.size, result.snr.size)
+            self.assertLess(abs(component.best_dm - 50.0), 5.0)
+            self.assertEqual(len(component.event_window_ms), 2)
 
 
 if __name__ == "__main__":

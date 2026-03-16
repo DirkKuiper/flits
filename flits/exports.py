@@ -49,6 +49,7 @@ class ExportSnapshotData:
     meta: dict[str, Any]
     state: dict[str, Any]
     results: dict[str, Any] | None
+    width_analysis: dict[str, Any] | None
     dm_optimization: dict[str, Any] | None
     dynamic_spectrum: np.ndarray
     time_axis_ms: np.ndarray
@@ -222,6 +223,7 @@ def _build_snapshot_data(session: "BurstSession") -> ExportSnapshotData:
         meta=view["meta"],
         state=view["state"],
         results=session.results.to_dict() if session.results is not None else None,
+        width_analysis=session.width_analysis.to_dict() if session.width_analysis is not None else None,
         dm_optimization=session.dm_optimization.to_dict() if session.dm_optimization is not None else None,
         dynamic_spectrum=np.asarray(masked, dtype=float),
         time_axis_ms=np.asarray(context.time_axis_ms, dtype=float),
@@ -363,6 +365,7 @@ def _build_science_json(snapshot: ExportSnapshotData, manifest: ExportManifest) 
         "meta": snapshot.meta,
         "state": snapshot.state,
         "results": snapshot.results,
+        "width_analysis": snapshot.width_analysis,
         "dm_optimization": snapshot.dm_optimization,
         "artifacts": manifest.to_dict()["artifacts"],
     }
@@ -371,6 +374,8 @@ def _build_science_json(snapshot: ExportSnapshotData, manifest: ExportManifest) 
 
 def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
     results = snapshot.results or {}
+    width_analysis = snapshot.width_analysis or {}
+    accepted_width = width_analysis.get("accepted_width") or results.get("accepted_width") or {}
     dm = snapshot.dm_optimization or {}
     row = {
         "bundle_name": snapshot.bundle_name,
@@ -385,6 +390,9 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         "preset_key": snapshot.meta.get("preset_key", ""),
         "detected_preset_key": snapshot.meta.get("detected_preset_key", ""),
         "dm_applied": snapshot.meta.get("dm", ""),
+        "accepted_width_method": accepted_width.get("method", ""),
+        "accepted_width_value_ms": accepted_width.get("value", ""),
+        "accepted_width_uncertainty_ms": accepted_width.get("uncertainty", ""),
         "toa_topo_mjd": results.get("toa_topo_mjd", ""),
         "snr_peak": results.get("snr_peak", ""),
         "snr_integrated": results.get("snr_integrated", ""),

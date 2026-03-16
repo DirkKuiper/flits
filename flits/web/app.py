@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,10 @@ class DetectFilterbankRequest(BaseModel):
 class ActionRequest(BaseModel):
     type: str
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ImportSessionRequest(BaseModel):
+    snapshot: dict[str, Any]
 
 
 app = FastAPI(title="FLITS")
@@ -168,6 +173,32 @@ def delete_session(session_id: str) -> dict[str, str]:
     return {"status": "deleted"}
 
 
+@app.get("/api/sessions/{session_id}/snapshot")
+def session_snapshot(session_id: str) -> Response:
+    session = get_session(session_id)
+    snapshot_bytes = (json.dumps(session.snapshot_dict(), indent=2, allow_nan=False) + "\n").encode("utf-8")
+    snapshot_name = f"{Path(session.burst_file).stem}_flits_session.json"
+    return Response(
+        content=snapshot_bytes,
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{snapshot_name}"'},
+    )
+
+
+@app.post("/api/sessions/import")
+def import_session(request: ImportSessionRequest) -> dict[str, Any]:
+    try:
+        session = BurstSession.from_snapshot(request.snapshot)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    session_id = uuid4().hex
+    SESSIONS[session_id] = session
+    return {"session_id": session_id, "view": session.get_view()}
+
+
 @app.get("/api/sessions/{session_id}/exports/{export_id}")
 def session_export_manifest(session_id: str, export_id: str) -> dict[str, Any]:
     session = get_session(session_id)
@@ -214,6 +245,10 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
             session.add_region_ms(float(payload["start_ms"]), float(payload["end_ms"]))
         elif action == "clear_regions":
             session.clear_regions()
+        elif action == "add_offpulse":
+            session.add_offpulse_ms(float(payload["start_ms"]), float(payload["end_ms"]))
+        elif action == "clear_offpulse":
+            session.clear_offpulse()
         elif action == "add_peak":
             session.add_peak_ms(float(payload["time_ms"]))
         elif action == "remove_peak":
@@ -237,11 +272,20 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
                 float(payload["center_dm"]),
                 float(payload["half_range"]),
                 float(payload["step"]),
+                metric=str(payload.get("metric", "integrated_event_snr")),
             )
+        elif action == "compute_widths":
+            session.compute_widths()
+        elif action == "accept_width_result":
+            session.accept_width_result(str(payload["method"]))
         elif action == "compute_properties":
             session.compute_properties()
         elif action == "fit_scattering":
             session.fit_scattering()
+        elif action == "run_spectral_analysis":
+            session.run_spectral_analysis(float(payload["segment_length_ms"]))
+        elif action == "set_notes":
+            session.set_notes(payload.get("notes"))
         elif action == "export_results":
             manifest = session.export_results(
                 session_id=session_id,

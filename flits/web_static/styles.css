@@ -279,12 +279,14 @@ body::before {
 
 input,
 select,
+textarea,
 button {
   font: inherit;
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   border: 1px solid rgba(24, 33, 38, 0.12);
   background: rgba(255, 255, 255, 0.88);
@@ -294,8 +296,14 @@ select {
 }
 
 input:disabled,
-select:disabled {
+select:disabled,
+textarea:disabled {
   opacity: 0.7;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 96px;
 }
 
 button {
@@ -323,10 +331,25 @@ button:disabled {
 }
 
 .ghost-button,
-.mode-button {
+.mode-button,
+.file-button {
   background: rgba(255, 255, 255, 0.75);
   border: 1px solid rgba(24, 33, 38, 0.1);
   color: var(--ink);
+}
+
+.file-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 14px;
+  padding: 12px 14px;
+  transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
+}
+
+.file-button:hover {
+  transform: translateY(-1px);
 }
 
 .mode-button.active {
@@ -602,6 +625,12 @@ button.is-busy::after {
   border-top: 3px solid #d97706;
 }
 
+.legend-swatch.offpulse {
+  border-radius: 10px;
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  background: rgba(37, 99, 235, 0.16);
+}
+
 .legend-swatch.peak::before {
   border-top: 2px dashed #dc2626;
 }
@@ -730,6 +759,47 @@ button.is-busy::after {
   display: none;
 }
 
+.references-block {
+  margin-top: 16px;
+}
+
+.references-block h5 {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-700);
+}
+
+.reference-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.reference-item a {
+  font-weight: 700;
+  color: var(--accent-700);
+  text-decoration: none;
+}
+
+.reference-item a:hover {
+  text-decoration: underline;
+}
+
+.reference-citation,
+.reference-note {
+  margin-top: 2px;
+  color: var(--muted-700);
+  font-size: 0.94rem;
+  line-height: 1.45;
+}
+
+.empty-state.compact {
+  padding: 10px 0 0;
+}
+
 .fitting-plot.is-empty {
   display: none;
 }
@@ -741,6 +811,60 @@ button.is-busy::after {
 .results-content {
   display: grid;
   gap: 14px;
+}
+
+.measurement-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.measurement-card {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(24, 33, 38, 0.08);
+  display: grid;
+  gap: 12px;
+}
+
+.measurement-head {
+  display: grid;
+  gap: 6px;
+}
+
+.measurement-head strong {
+  font-size: 1.35rem;
+}
+
+.measurement-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.measurement-meta {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(244, 239, 231, 0.72);
+}
+
+.measurement-meta span,
+.width-copy span {
+  color: var(--muted);
+}
+
+.measurement-flags,
+.width-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.measurement-details .kv-list {
+  padding-top: 0;
 }
 
 .export-actions {
@@ -790,6 +914,36 @@ button.is-busy::after {
 
 .result-tile.secondary strong {
   font-size: 1.05rem;
+}
+
+.width-section {
+  margin-top: 4px;
+}
+
+.width-list {
+  display: grid;
+  gap: 10px;
+}
+
+.width-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(24, 33, 38, 0.08);
+}
+
+.width-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.width-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .results-details {
@@ -1006,6 +1160,10 @@ button.is-busy::after {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .measurement-grid {
+    grid-template-columns: 1fr;
+  }
+
   .analysis-card-head {
     align-items: start;
   }
@@ -1064,6 +1222,11 @@ button.is-busy::after {
   }
 
   .results-primary {
+    grid-template-columns: 1fr;
+  }
+
+  .measurement-meta-grid,
+  .width-row {
     grid-template-columns: 1fr;
   }
 

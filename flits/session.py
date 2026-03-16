@@ -3,38 +3,56 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 import warnings
 
 import numpy as np
 
+from flits.analysis.dm import available_dm_metrics, optimize_dm_trials
+from flits.analysis.spectral import run_averaged_spectral_analysis
+from flits.analysis.widths import compute_width_analysis
 from flits.exports import MAX_EXPORT_SNAPSHOTS, StoredExportSnapshot, create_export_snapshot
 from flits.fitburst_adapter import fit_scattering_selected_band
 from flits.measurements import (
     MeasurementContext,
+    _offpulse_windows_ms,
+    _primary_peak_bin,
     build_measurement_context,
     compute_burst_measurements,
-    event_snr,
-    _primary_peak_bin,
     compute_subband_arrival_residuals,
+    event_snr,
 )
 from flits.models import (
+    AcceptedWidthSelection,
+    AnalysisSessionSnapshot,
+    AutoMaskRunSummary,
+    BurstRegion,
     BurstMeasurements,
+    DmComponentOptimizationResult,
+    DmOptimizationProvenance,
     DmOptimizationResult,
     ExportArtifact,
     ExportManifest,
     FilterbankMetadata,
+    NoiseEstimateSettings,
+    OffPulseRegion,
+    SessionSourceRef,
+    SpectralAnalysisResult,
+    WidthAnalysisSettings,
+    WidthAnalysisSummary,
 )
 from flits.settings import ObservationConfig, get_auto_mask_profile, get_preset
 from flits.signal import block_reduce_mean, dedisperse
 
 try:
     import jess.channel_masks as _jess_channel_masks
+
     jess = SimpleNamespace(channel_masks=_jess_channel_masks)
 except Exception:  # pragma: no cover - optional dependency
     jess = SimpleNamespace(channel_masks=SimpleNamespace(channel_masker=None))
 
 
+SESSION_SNAPSHOT_SCHEMA_VERSION = "1.0"
 JESS_MASK_DTYPE = np.float32
 JESS_WORKING_COPY_FACTOR = 6
 JESS_TEST_SEQUENCE = ("skew", "stand-dev")
@@ -102,34 +120,10 @@ def _sample_time_bins_evenly(candidate_bins: np.ndarray, max_samples: int) -> np
     return candidate_bins[sample_positions]
 
 
-@dataclass(frozen=True)
-class AutoMaskRunSummary:
-    profile: str
-    profile_label: str
-    memory_budget_mb: int
-    candidate_time_bins: int
-    sampled_time_bins: int
-    eligible_channels: int
-    constant_channel_count: int
-    detected_channel_count: int
-    added_channel_count: int
-    test_used: str | None
-    tests_tried: tuple[str, ...]
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "profile": self.profile,
-            "profile_label": self.profile_label,
-            "memory_budget_mb": self.memory_budget_mb,
-            "candidate_time_bins": self.candidate_time_bins,
-            "sampled_time_bins": self.sampled_time_bins,
-            "eligible_channels": self.eligible_channels,
-            "constant_channel_count": self.constant_channel_count,
-            "detected_channel_count": self.detected_channel_count,
-            "added_channel_count": self.added_channel_count,
-            "test_used": self.test_used,
-            "tests_tried": list(self.tests_tried),
-        }
+def _coerce_snapshot(snapshot: AnalysisSessionSnapshot | dict[str, Any]) -> AnalysisSessionSnapshot:
+    if isinstance(snapshot, AnalysisSessionSnapshot):
+        return snapshot
+    return AnalysisSessionSnapshot.from_dict(snapshot)
 
 
 @dataclass
@@ -146,13 +140,19 @@ class BurstSession:
     spec_ex_lo: int = 0
     spec_ex_hi: int = 0
     burst_regions: list[tuple[int, int]] = field(default_factory=list)
+    offpulse_regions: list[tuple[int, int]] = field(default_factory=list)
     peak_positions: list[int] = field(default_factory=list)
     manual_peaks: bool = False
     channel_mask: np.ndarray | None = None
     mask_history: list[list[int]] = field(default_factory=list)
     last_auto_mask: AutoMaskRunSummary | None = None
+    noise_settings: NoiseEstimateSettings = field(default_factory=NoiseEstimateSettings)
+    width_settings: WidthAnalysisSettings = field(default_factory=WidthAnalysisSettings)
+    width_analysis: WidthAnalysisSummary | None = None
+    notes: str | None = None
     results: BurstMeasurements | None = None
     dm_optimization: DmOptimizationResult | None = None
+    spectral_analysis: SpectralAnalysisResult | None = None
     export_snapshots: dict[str, StoredExportSnapshot] = field(default_factory=dict)
     export_order: list[str] = field(default_factory=list)
 
@@ -200,6 +200,72 @@ class BurstSession:
             spec_ex_hi=data.shape[0] - 1,
             channel_mask=np.zeros(data.shape[0], dtype=bool),
         )
+
+    @classmethod
+    def from_snapshot(
+        cls,
+        snapshot: AnalysisSessionSnapshot | dict[str, Any],
+        *,
+        loader: Callable[..., "BurstSession"] | None = None,
+    ) -> "BurstSession":
+        snapshot = _coerce_snapshot(snapshot)
+        session_loader = cls.from_file if loader is None else loader
+        session = session_loader(
+            str(snapshot.source.source_path),
+            dm=float(snapshot.dm),
+            telescope=snapshot.preset_key,
+            sefd_jy=snapshot.sefd_jy,
+            read_start_sec=snapshot.read_start_sec,
+            initial_crop_sec=snapshot.initial_crop_sec,
+            auto_mask_profile=snapshot.auto_mask_profile,
+            distance_mpc=snapshot.distance_mpc,
+            redshift=snapshot.redshift,
+        )
+        session._validate_snapshot_source(snapshot.source)
+
+        if len(snapshot.crop_bins) == 2:
+            session.crop_start = session.clamp_bin(snapshot.crop_bins[0])
+            session.crop_end = session.clamp_bin(snapshot.crop_bins[1], is_end=True)
+        if len(snapshot.event_bins) == 2:
+            session.event_start = max(session.crop_start, session.clamp_bin(snapshot.event_bins[0]))
+            session.event_end = min(session.crop_end, session.clamp_bin(snapshot.event_bins[1], is_end=True))
+        if len(snapshot.spectral_extent_channels) == 2:
+            session.spec_ex_lo, session.spec_ex_hi = session._ordered_channel_bounds(
+                snapshot.spectral_extent_channels[0],
+                snapshot.spectral_extent_channels[1],
+            )
+        session._sync_selections_to_crop()
+        session.time_factor = max(1, min(int(snapshot.time_factor), session.crop_end - session.crop_start))
+        session.freq_factor = max(1, min(int(snapshot.freq_factor), session.total_channels))
+
+        session.offpulse_regions = [
+            (max(0, int(region.start_bin)), min(session.total_time_bins, int(region.end_bin)))
+            for region in snapshot.offpulse_regions
+            if int(region.end_bin) - int(region.start_bin) >= 2
+        ]
+        session.burst_regions = [
+            (max(0, int(region.start_bin)), min(session.total_time_bins, int(region.end_bin)))
+            for region in snapshot.burst_regions
+            if int(region.end_bin) - int(region.start_bin) >= 2
+        ]
+        session.peak_positions = [
+            session.clamp_bin(int(peak)) for peak in snapshot.peak_bins if 0 <= int(peak) < session.total_time_bins
+        ]
+        session.manual_peaks = bool(snapshot.manual_peaks)
+        session.channel_mask[:] = False
+        if snapshot.masked_channels:
+            session.channel_mask[np.asarray(snapshot.masked_channels, dtype=int)] = True
+        session.last_auto_mask = snapshot.last_auto_mask
+        session.noise_settings = snapshot.noise_settings
+        session.width_settings = snapshot.width_settings
+        session.notes = snapshot.notes
+        session.results = snapshot.results
+        session.width_analysis = snapshot.width_analysis
+        session.dm_optimization = snapshot.dm_optimization
+        session.spectral_analysis = snapshot.spectral_analysis
+        if session.results is not None:
+            session._apply_width_analysis_to_results()
+        return session
 
     @property
     def burst_file(self) -> str:
@@ -249,16 +315,6 @@ class BurstSession:
     def freqs(self) -> np.ndarray:
         return self.metadata.freqs_mhz
 
-    def invalidate_results(self) -> None:
-        self.results = None
-
-    def clear_dm_optimization(self) -> None:
-        self.dm_optimization = None
-
-    def invalidate_selection_state(self) -> None:
-        self.invalidate_results()
-        self.clear_dm_optimization()
-
     @property
     def total_time_bins(self) -> int:
         return int(self.data.shape[1])
@@ -270,6 +326,26 @@ class BurstSession:
     @property
     def tsamp_ms(self) -> float:
         return float(self.tsamp * 1e3)
+
+    def invalidate_results(self) -> None:
+        self.results = None
+
+    def clear_width_analysis(self) -> None:
+        self.width_analysis = None
+        if self.results is not None:
+            self.results = replace(self.results, width_results=[], accepted_width=None)
+
+    def clear_dm_optimization(self) -> None:
+        self.dm_optimization = None
+
+    def clear_spectral_analysis(self) -> None:
+        self.spectral_analysis = None
+
+    def invalidate_analysis_state(self) -> None:
+        self.invalidate_results()
+        self.clear_width_analysis()
+        self.clear_dm_optimization()
+        self.clear_spectral_analysis()
 
     def bin_to_ms(self, time_bin: int | float) -> float:
         return float(time_bin) * self.tsamp_ms
@@ -320,6 +396,22 @@ class BurstSession:
         peak_local = int(np.nanargmax(profile))
         return [self.crop_start + peak_local]
 
+    def _offpulse_regions_in_crop(self) -> list[tuple[int, int]]:
+        clipped: list[tuple[int, int]] = []
+        for start, end in self.offpulse_regions:
+            rel_start = max(0, int(start) - self.crop_start)
+            rel_end = min(self.crop_end - self.crop_start, int(end) - self.crop_start)
+            if rel_end - rel_start >= 2:
+                clipped.append((rel_start, rel_end))
+        return clipped
+
+    def _offpulse_regions_ms(self) -> list[list[float]]:
+        return [
+            [self.bin_to_ms(start), self.bin_to_ms(end)]
+            for start, end in self.offpulse_regions
+            if end - start >= 2
+        ]
+
     def get_masked_crop(self, data: np.ndarray | None = None) -> np.ndarray:
         source = self.data if data is None else data
         arr = np.array(source[:, self.crop_start:self.crop_end], copy=True)
@@ -349,9 +441,16 @@ class BurstSession:
     def _build_measurement_context_for_data(
         self,
         data: np.ndarray | None = None,
+        *,
+        event_bounds_abs: tuple[int, int] | None = None,
     ) -> tuple[np.ndarray, MeasurementContext]:
         masked = self.get_masked_crop(data)
-        rel_start, rel_end = self._event_bounds_in_crop(masked.shape[1])
+        if event_bounds_abs is None:
+            rel_start, rel_end = self._event_bounds_in_crop(masked.shape[1])
+        else:
+            start_abs, end_abs = sorted((int(event_bounds_abs[0]), int(event_bounds_abs[1])))
+            rel_start = max(0, min(masked.shape[1] - 1, start_abs - self.crop_start))
+            rel_end = max(rel_start + 1, min(masked.shape[1], end_abs - self.crop_start))
         spec_lo, spec_hi = self._selected_channel_bounds()
         context = build_measurement_context(
             masked=masked,
@@ -362,18 +461,36 @@ class BurstSession:
             spec_lo=spec_lo,
             spec_hi=spec_hi,
             freqres_mhz=self.freqres,
+            offpulse_regions=self._offpulse_regions_in_crop(),
+            noise_settings=self.noise_settings,
         )
         return masked, context
 
-    def _score_event_sn(self, context: MeasurementContext) -> float:
-        return event_snr(
-            context.selected_profile_sn,
-            context.event_rel_start,
-            context.event_rel_end,
-        )
+    def _measurement_context_for_data(
+        self,
+        data: np.ndarray,
+        *,
+        event_bounds_abs: tuple[int, int] | None = None,
+    ) -> MeasurementContext:
+        _, context = self._build_measurement_context_for_data(data, event_bounds_abs=event_bounds_abs)
+        return context
 
-    def _subband_residuals_for_data(self, data: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, str]:
-        masked, context = self._build_measurement_context_for_data(data)
+    def _score_event_sn(
+        self,
+        data: np.ndarray,
+        *,
+        event_bounds_abs: tuple[int, int] | None = None,
+    ) -> float:
+        context = self._measurement_context_for_data(data, event_bounds_abs=event_bounds_abs)
+        return event_snr(context.selected_profile_sn, context.event_rel_start, context.event_rel_end)
+
+    def _subband_residuals_for_data(
+        self,
+        data: np.ndarray,
+        *,
+        event_bounds_abs: tuple[int, int] | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, str]:
+        masked, context = self._build_measurement_context_for_data(data, event_bounds_abs=event_bounds_abs)
         diagnostics = compute_subband_arrival_residuals(
             masked=masked,
             time_axis_ms=context.time_axis_ms,
@@ -383,6 +500,8 @@ class BurstSession:
             spec_lo=context.spec_lo,
             spec_hi=context.spec_hi,
             freqres_mhz=self.freqres,
+            offpulse_regions=self._offpulse_regions_in_crop(),
+            noise_settings=self.noise_settings,
         )
         return (
             diagnostics.center_freqs_mhz,
@@ -390,6 +509,33 @@ class BurstSession:
             diagnostics.residuals_ms,
             diagnostics.status,
         )
+
+    def _dm_component_windows(self) -> list[tuple[str, tuple[int, int]]]:
+        components: list[tuple[str, tuple[int, int]]] = []
+        if len(self.burst_regions) >= 2:
+            for index, (start, end) in enumerate(sorted(self.burst_regions), start=1):
+                start = max(self.crop_start, int(start))
+                end = min(self.crop_end, int(end))
+                if end - start >= 2:
+                    components.append((f"Component {index}", (start, end)))
+            return components
+
+        if self.manual_peaks and len(self.peak_positions) >= 2:
+            peaks = sorted(
+                peak for peak in self.peak_positions if self.crop_start <= int(peak) < self.crop_end
+            )
+            if len(peaks) < 2:
+                return []
+
+            boundaries = [self.event_start]
+            boundaries.extend(int(round((left + right) / 2.0)) for left, right in zip(peaks[:-1], peaks[1:]))
+            boundaries.append(self.event_end)
+            for index, peak in enumerate(peaks, start=1):
+                start = max(self.crop_start, boundaries[index - 1])
+                end = min(self.crop_end, boundaries[index])
+                if end - start >= 2 and start <= peak < end:
+                    components.append((f"Peak {index}", (start, end)))
+        return components
 
     def get_view(self) -> dict[str, Any]:
         display = self.get_display_crop()
@@ -435,6 +581,7 @@ class BurstSession:
                 "shape": [self.total_channels, self.total_time_bins],
                 "view_shape": [int(reduced.shape[0]), int(reduced.shape[1])],
                 "freq_range_mhz": [freq_lo_mhz, freq_hi_mhz],
+                "dm_metrics": available_dm_metrics(),
             },
             "state": {
                 "time_factor": self.time_factor,
@@ -444,11 +591,13 @@ class BurstSession:
                 "burst_regions_ms": [
                     [self.bin_to_ms(start), self.bin_to_ms(end)] for start, end in self.burst_regions
                 ],
+                "offpulse_ms": self._offpulse_regions_ms(),
                 "peak_ms": [self.bin_to_ms(peak) for peak in peak_positions],
                 "manual_peaks": self.manual_peaks,
                 "spectral_extent_mhz": [spec_lo_mhz, spec_hi_mhz],
                 "masked_channels": np.flatnonzero(self.channel_mask).astype(int).tolist(),
                 "last_auto_mask": self.last_auto_mask.to_dict() if self.last_auto_mask is not None else None,
+                "notes": self.notes,
             },
             "plot": {
                 "heatmap": {
@@ -468,7 +617,11 @@ class BurstSession:
                 },
             },
             "results": self.results.to_dict() if self.results is not None else None,
+            "width_analysis": self.width_analysis.to_dict() if self.width_analysis is not None else None,
             "dm_optimization": self.dm_optimization.to_dict() if self.dm_optimization is not None else None,
+            "spectral_analysis": (
+                None if self.spectral_analysis is None else self.spectral_analysis.to_dict()
+            ),
         }
 
     def _sync_selections_to_crop(self) -> None:
@@ -484,13 +637,21 @@ class BurstSession:
             self.event_start = self.crop_start
             self.event_end = min(self.crop_end, self.crop_start + span)
 
-        clipped_regions: list[tuple[int, int]] = []
-        for start, end in self.burst_regions:
-            start = max(self.crop_start, start)
-            end = min(self.crop_end, end)
-            if end - start >= 2:
-                clipped_regions.append((start, end))
-        self.burst_regions = clipped_regions
+        def _clip_regions(regions: list[tuple[int, int]]) -> list[tuple[int, int]]:
+            clipped: list[tuple[int, int]] = []
+            for start, end in regions:
+                start = max(self.crop_start, start)
+                end = min(self.crop_end, end)
+                if end - start >= 2:
+                    clipped.append((start, end))
+            return clipped
+
+        self.burst_regions = _clip_regions(self.burst_regions)
+        self.offpulse_regions = _clip_regions(self.offpulse_regions)
+        self.peak_positions = [
+            peak for peak in self.peak_positions if self.crop_start <= int(peak) < self.crop_end
+        ]
+        self.manual_peaks = bool(self.peak_positions) if self.manual_peaks else self.manual_peaks
 
     def reset_view(self) -> None:
         self.time_factor = default_time_factor(self.total_time_bins)
@@ -500,9 +661,10 @@ class BurstSession:
         self.event_start = 2 * (self.total_time_bins // 10)
         self.event_end = 3 * (self.total_time_bins // 10)
         self.burst_regions = []
+        self.offpulse_regions = []
         self.peak_positions = []
         self.manual_peaks = False
-        self.invalidate_selection_state()
+        self.invalidate_analysis_state()
 
     def set_time_factor(self, factor: int) -> None:
         self.time_factor = max(1, min(int(factor), self.crop_end - self.crop_start))
@@ -515,7 +677,7 @@ class BurstSession:
         self.crop_start = self.clamp_bin(start)
         self.crop_end = self.clamp_bin(end, is_end=True)
         self._sync_selections_to_crop()
-        self.invalidate_selection_state()
+        self.invalidate_analysis_state()
 
     def set_event_ms(self, start_ms: float, end_ms: float) -> None:
         start, end = sorted((self.ms_to_bin(start_ms), self.ms_to_bin(end_ms)))
@@ -523,7 +685,7 @@ class BurstSession:
         self.event_end = min(self.crop_end, self.clamp_bin(end, is_end=True))
         if self.event_end <= self.event_start:
             self.event_end = min(self.crop_end, self.event_start + 2)
-        self.invalidate_selection_state()
+        self.invalidate_analysis_state()
 
     def add_region_ms(self, start_ms: float, end_ms: float) -> None:
         start, end = sorted((self.ms_to_bin(start_ms), self.ms_to_bin(end_ms)))
@@ -536,6 +698,19 @@ class BurstSession:
     def clear_regions(self) -> None:
         self.burst_regions = []
         self.invalidate_results()
+
+    def add_offpulse_ms(self, start_ms: float, end_ms: float) -> None:
+        start, end = sorted((self.ms_to_bin(start_ms), self.ms_to_bin(end_ms)))
+        start = max(self.crop_start, self.clamp_bin(start))
+        end = min(self.crop_end, self.clamp_bin(end, is_end=True))
+        if end - start >= 2:
+            self.offpulse_regions.append((start, end))
+            self.offpulse_regions = sorted(set(self.offpulse_regions))
+            self.invalidate_analysis_state()
+
+    def clear_offpulse(self) -> None:
+        self.offpulse_regions = []
+        self.invalidate_analysis_state()
 
     def add_peak_ms(self, time_ms: float) -> None:
         peak = self.clamp_bin(self.ms_to_bin(time_ms))
@@ -564,7 +739,7 @@ class BurstSession:
                 added.append(chan)
         if added:
             self.mask_history.append(added)
-            self.invalidate_selection_state()
+            self.invalidate_analysis_state()
 
     def mask_channel_freq(self, freq_mhz: float) -> None:
         self._mask_batch([self.freq_to_channel(freq_mhz)])
@@ -579,17 +754,29 @@ class BurstSession:
         latest = self.mask_history.pop()
         for chan in latest:
             self.channel_mask[chan] = False
-        self.invalidate_selection_state()
+        self.invalidate_analysis_state()
 
     def reset_mask(self) -> None:
         self.channel_mask[:] = False
         self.mask_history = []
-        self.invalidate_selection_state()
+        self.invalidate_analysis_state()
 
     def set_spectral_extent_freq(self, low_freq_mhz: float, high_freq_mhz: float) -> None:
         low, high = self._channel_bounds_for_freqs(low_freq_mhz, high_freq_mhz)
         self.spec_ex_lo, self.spec_ex_hi = low, high
-        self.invalidate_selection_state()
+        self.invalidate_analysis_state()
+
+    def set_notes(self, notes: str | None) -> None:
+        text = None if notes is None else str(notes).strip()
+        self.notes = text or None
+
+    def _current_event_window_ms(self, context: MeasurementContext | None = None) -> tuple[float, float]:
+        if context is not None and context.time_axis_ms.size and context.event_rel_end > context.event_rel_start:
+            return (
+                float(context.time_axis_ms[context.event_rel_start]),
+                float(context.time_axis_ms[context.event_rel_end - 1] + self.tsamp_ms),
+            )
+        return (self.bin_to_ms(self.event_start), self.bin_to_ms(self.event_end))
 
     def auto_mask_jess(self, profile: str | None = None) -> None:
         if jess.channel_masks.channel_masker is None:
@@ -615,17 +802,27 @@ class BurstSession:
             )
             return
 
-        rel_start, rel_end = self._event_bounds_in_crop(masked.shape[1])
-        candidate_bins = np.concatenate(
-            [
-                np.arange(0, rel_start, dtype=int),
-                np.arange(rel_end, masked.shape[1], dtype=int),
-            ]
-        )
+        explicit_offpulse = self._offpulse_regions_in_crop()
+        if explicit_offpulse:
+            candidate_bins = np.concatenate(
+                [np.arange(start, end, dtype=int) for start, end in explicit_offpulse if end > start]
+            )
+        else:
+            rel_start, rel_end = self._event_bounds_in_crop(masked.shape[1])
+            candidate_bins = np.concatenate(
+                [
+                    np.arange(0, rel_start, dtype=int),
+                    np.arange(rel_end, masked.shape[1], dtype=int),
+                ]
+            )
         if candidate_bins.size == 0:
             candidate_bins = np.arange(masked.shape[1], dtype=int)
 
-        eligible_channels = np.flatnonzero(~self.channel_mask) if self.channel_mask is not None else np.arange(masked.shape[0], dtype=int)
+        eligible_channels = (
+            np.flatnonzero(~self.channel_mask)
+            if self.channel_mask is not None
+            else np.arange(masked.shape[0], dtype=int)
+        )
         max_samples = _adaptive_jess_time_bin_limit(eligible_channels.size, mask_profile.memory_budget_mb)
         sampled_bins = _sample_time_bins_evenly(candidate_bins, max_samples)
         if eligible_channels.size == 0 or sampled_bins.size == 0:
@@ -678,10 +875,18 @@ class BurstSession:
                 if bool_mask.any():
                     break
 
-        previous_mask = self.channel_mask.copy() if self.channel_mask is not None else np.zeros(self.total_channels, dtype=bool)
+        previous_mask = (
+            self.channel_mask.copy()
+            if self.channel_mask is not None
+            else np.zeros(self.total_channels, dtype=bool)
+        )
         channels = sorted(set(detected_channels))
         self._mask_batch(channels)
-        added_channel_count = int(np.count_nonzero(self.channel_mask & ~previous_mask)) if self.channel_mask is not None else 0
+        added_channel_count = (
+            int(np.count_nonzero(self.channel_mask & ~previous_mask))
+            if self.channel_mask is not None
+            else 0
+        )
         self.last_auto_mask = AutoMaskRunSummary(
             profile=mask_profile.key,
             profile_label=mask_profile.label,
@@ -703,179 +908,164 @@ class BurstSession:
         delta_dm = new_dm - self.dm
         self.data = dedisperse(self.data, delta_dm, self.freqs, self.tsamp)
         self.config = replace(self.config, dm=new_dm)
-        self.invalidate_selection_state()
+        self.invalidate_analysis_state()
 
-    def _effective_selected_bandwidth_mhz(self, masked: np.ndarray | None = None) -> float:
-        masked = self.get_masked_crop() if masked is None else masked
-        spec_lo, spec_hi = self._selected_channel_bounds()
-        selected = masked[spec_lo : spec_hi + 1, :]
-        if selected.size == 0:
-            return 0.0
-        active_channels = int(np.isfinite(selected).any(axis=1).sum())
-        return float(active_channels * self.freqres)
-
-    def _fit_dm_peak(
-        self,
-        trial_dms: np.ndarray,
-        snr: np.ndarray,
-        peak_index: int,
-    ) -> tuple[float, float, float | None, str]:
-        sampled_best_dm = float(trial_dms[peak_index])
-        sampled_best_sn = float(snr[peak_index])
-
-        if peak_index < 2 or peak_index > len(trial_dms) - 3:
-            return sampled_best_dm, sampled_best_sn, None, "peak_on_sweep_edge"
-
-        x = np.asarray(trial_dms[peak_index - 2 : peak_index + 3], dtype=float)
-        y = np.asarray(snr[peak_index - 2 : peak_index + 3], dtype=float)
-        if x.size != 5 or not np.all(np.isfinite(y)):
-            return sampled_best_dm, sampled_best_sn, None, "insufficient_peak_window"
-
-        try:
-            coeffs = np.polyfit(x, y, 2)
-        except Exception:
-            return sampled_best_dm, sampled_best_sn, None, "quadratic_fit_failed"
-
-        a, b, c = (float(value) for value in coeffs)
-        if not np.all(np.isfinite(coeffs)):
-            return sampled_best_dm, sampled_best_sn, None, "quadratic_fit_failed"
-        if a >= 0:
-            return sampled_best_dm, sampled_best_sn, None, "quadratic_not_concave"
-
-        best_dm = float(-b / (2 * a))
-        if best_dm < float(x[0]) or best_dm > float(x[-1]):
-            return sampled_best_dm, sampled_best_sn, None, "fit_vertex_outside_peak_window"
-
-        best_sn = float(np.polyval(coeffs, best_dm))
-        if not np.isfinite(best_sn):
-            return sampled_best_dm, sampled_best_sn, None, "quadratic_fit_failed"
-
-        target_sn = best_sn - 1.0
-        uncertainty: float | None = None
-        status = "quadratic_peak_fit"
-        try:
-            roots = np.roots([a, b, c - target_sn])
-        except Exception:
-            roots = np.array([], dtype=complex)
-
-        real_roots = sorted(
-            float(root.real)
-            for root in np.atleast_1d(roots)
-            if np.isfinite(root.real) and abs(float(root.imag)) < 1e-6
+    def _dm_provenance(self, context: MeasurementContext) -> DmOptimizationProvenance:
+        return DmOptimizationProvenance(
+            event_window_ms=[
+                float(context.time_axis_ms[context.event_rel_start]) if context.time_axis_ms.size else 0.0,
+                float(context.time_axis_ms[context.event_rel_end - 1] + self.tsamp_ms)
+                if context.time_axis_ms.size and context.event_rel_end > context.event_rel_start
+                else 0.0,
+            ],
+            spectral_extent_mhz=[
+                float(np.min(context.spectral_axis_mhz)) if context.spectral_axis_mhz.size else 0.0,
+                float(np.max(context.spectral_axis_mhz)) if context.spectral_axis_mhz.size else 0.0,
+            ],
+            offpulse_windows_ms=_offpulse_windows_ms(
+                offpulse_bins=context.offpulse_bins,
+                time_axis_ms=context.time_axis_ms,
+                tsamp_ms=self.tsamp_ms,
+            ),
+            masked_channels=np.flatnonzero(self.channel_mask).astype(int).tolist(),
+            effective_bandwidth_mhz=float(context.effective_bandwidth_mhz),
+            tsamp_ms=float(self.tsamp_ms),
+            freqres_mhz=float(abs(self.freqres)),
+            algorithm_name="dm_trial_sweep",
+            warning_flags=list(context.noise_summary.warning_flags),
         )
-        lower = max((root for root in real_roots if root <= best_dm), default=None)
-        upper = min((root for root in real_roots if root >= best_dm), default=None)
-        if lower is not None and upper is not None:
-            sweep_min = float(np.min(trial_dms))
-            sweep_max = float(np.max(trial_dms))
-            candidate = 0.5 * (upper - lower)
-            if (
-                np.isfinite(candidate)
-                and candidate > 0
-                and lower >= sweep_min
-                and upper <= sweep_max
-            ):
-                uncertainty = float(candidate)
-            else:
-                status = "quadratic_peak_fit_uncertainty_unavailable"
-        else:
-            status = "quadratic_peak_fit_uncertainty_unavailable"
 
-        return best_dm, best_sn, uncertainty, status
+    def compute_widths(self) -> WidthAnalysisSummary:
+        _, context = self._build_measurement_context_for_data()
+        existing_method = None
+        if self.width_analysis is not None and self.width_analysis.accepted_width is not None:
+            existing_method = self.width_analysis.accepted_width.method
+        self.width_analysis = compute_width_analysis(
+            selected_profile=context.selected_profile_baselined,
+            time_axis_ms=context.time_axis_ms,
+            event_rel_start=context.event_rel_start,
+            event_rel_end=context.event_rel_end,
+            tsamp_ms=self.tsamp_ms,
+            noise_summary=context.noise_summary,
+            settings=self.width_settings,
+            event_window_ms=[
+                float(context.time_axis_ms[context.event_rel_start]) if context.time_axis_ms.size else 0.0,
+                float(context.time_axis_ms[context.event_rel_end - 1] + self.tsamp_ms)
+                if context.time_axis_ms.size and context.event_rel_end > context.event_rel_start
+                else 0.0,
+            ],
+            spectral_extent_mhz=[
+                float(np.min(context.spectral_axis_mhz)) if context.spectral_axis_mhz.size else 0.0,
+                float(np.max(context.spectral_axis_mhz)) if context.spectral_axis_mhz.size else 0.0,
+            ],
+            offpulse_windows_ms=_offpulse_windows_ms(
+                offpulse_bins=context.offpulse_bins,
+                time_axis_ms=context.time_axis_ms,
+                tsamp_ms=self.tsamp_ms,
+            ),
+            masked_channels=np.flatnonzero(self.channel_mask).astype(int).tolist(),
+            effective_bandwidth_mhz=context.effective_bandwidth_mhz,
+            existing_accepted_method=existing_method,
+        )
+        self._apply_width_analysis_to_results()
+        return self.width_analysis
 
-    def optimize_dm(self, center_dm: float, half_range: float, step: float) -> DmOptimizationResult:
-        center_dm = float(center_dm)
-        half_range = float(half_range)
-        step = float(step)
-        if not all(np.isfinite(value) for value in (center_dm, half_range, step)):
-            raise ValueError("DM sweep parameters must be finite numbers.")
-        if half_range <= 0:
-            raise ValueError("DM sweep half-range must be greater than zero.")
-        if step <= 0:
-            raise ValueError("DM sweep step must be greater than zero.")
+    def accept_width_result(self, method: str) -> WidthAnalysisSummary:
+        if self.width_analysis is None:
+            self.compute_widths()
+        assert self.width_analysis is not None
+        selection = next((result for result in self.width_analysis.results if result.method == method), None)
+        if selection is None:
+            raise ValueError(f"Unknown width method '{method}'.")
+        self.width_analysis = replace(
+            self.width_analysis,
+            accepted_width=AcceptedWidthSelection.from_result(selection),
+        )
+        self._apply_width_analysis_to_results()
+        return self.width_analysis
 
-        num_side = int(np.floor((half_range / step) + 1e-12))
-        num_trials = 2 * num_side + 1
-        if num_trials < 5:
-            raise ValueError("DM sweep must include at least 5 trial DMs.")
-        if num_trials > 121:
-            raise ValueError("DM sweep supports at most 121 trial DMs.")
+    def optimize_dm(
+        self,
+        center_dm: float,
+        half_range: float,
+        step: float,
+        metric: str = "integrated_event_snr",
+    ) -> DmOptimizationResult:
+        _, context = self._build_measurement_context_for_data(self.data)
+        optimization = optimize_dm_trials(
+            data=self.data,
+            current_dm=float(self.dm),
+            freqs_mhz=self.freqs,
+            tsamp_sec=self.tsamp,
+            center_dm=float(center_dm),
+            half_range=float(half_range),
+            step=float(step),
+            context_builder=lambda data: self._measurement_context_for_data(data),
+            residuals=lambda data: self._subband_residuals_for_data(data),
+            provenance=self._dm_provenance(context),
+            metric=metric,
+        )
+        component_results: list[DmComponentOptimizationResult] = []
+        for index, (label, event_bounds_abs) in enumerate(self._dm_component_windows(), start=1):
+            component_context = self._measurement_context_for_data(
+                self.data,
+                event_bounds_abs=event_bounds_abs,
+            )
+            component_optimization = optimize_dm_trials(
+                data=self.data,
+                current_dm=float(self.dm),
+                freqs_mhz=self.freqs,
+                tsamp_sec=self.tsamp,
+                center_dm=float(center_dm),
+                half_range=float(half_range),
+                step=float(step),
+                context_builder=lambda data, bounds=event_bounds_abs: self._measurement_context_for_data(
+                    data,
+                    event_bounds_abs=bounds,
+                ),
+                residuals=lambda data, bounds=event_bounds_abs: self._subband_residuals_for_data(
+                    data,
+                    event_bounds_abs=bounds,
+                ),
+                provenance=self._dm_provenance(component_context),
+                metric=metric,
+            )
+            component_results.append(
+                DmComponentOptimizationResult(
+                    component_id=f"component_{index}",
+                    label=label,
+                    event_window_ms=[
+                        self.bin_to_ms(event_bounds_abs[0]),
+                        self.bin_to_ms(event_bounds_abs[1]),
+                    ],
+                    trial_dms=np.asarray(component_optimization.trial_dms, dtype=float),
+                    metric_values=np.asarray(component_optimization.snr, dtype=float),
+                    metric=metric,
+                    sampled_best_dm=float(component_optimization.sampled_best_dm),
+                    sampled_best_value=float(component_optimization.sampled_best_sn),
+                    best_dm=float(component_optimization.best_dm),
+                    best_dm_uncertainty=component_optimization.best_dm_uncertainty,
+                    best_value=float(component_optimization.best_sn),
+                    fit_status=component_optimization.fit_status,
+                )
+            )
 
-        offsets = np.arange(-num_side, num_side + 1, dtype=float) * step
-        trial_dms = np.round(center_dm + offsets, 12)
-        actual_half_range = float(abs(offsets[-1])) if offsets.size else 0.0
-
-        snr = np.empty(trial_dms.size, dtype=float)
-        for idx, trial_dm in enumerate(trial_dms):
-            if np.isclose(trial_dm, self.dm):
-                trial_data = self.data
-            else:
-                trial_data = dedisperse(self.data, float(trial_dm - self.dm), self.freqs, self.tsamp)
-            _, context = self._build_measurement_context_for_data(trial_data)
-            snr[idx] = self._score_event_sn(context)
-
-        if not np.isfinite(snr).any():
-            raise ValueError("Unable to compute DM sweep for the current selection.")
-
-        peak_index = int(np.nanargmax(snr))
-        sampled_best_dm = float(trial_dms[peak_index])
-        sampled_best_sn = float(snr[peak_index])
-        best_dm, best_sn, best_dm_uncertainty, fit_status = self._fit_dm_peak(trial_dms, snr, peak_index)
-        applied_dm = float(self.dm)
-
-        applied_freqs, applied_arrivals, applied_residuals, applied_status = self._subband_residuals_for_data(self.data)
-        best_freqs = np.array([], dtype=float)
-        best_arrivals = np.array([], dtype=float)
-        best_residuals = np.array([], dtype=float)
-        if np.isclose(best_dm, applied_dm):
-            best_freqs = applied_freqs
-            best_arrivals = applied_arrivals
-            best_residuals = applied_residuals
-            residual_status = applied_status
-        else:
-            best_data = dedisperse(self.data, float(best_dm - applied_dm), self.freqs, self.tsamp)
-            best_freqs, best_arrivals, best_residuals, best_status = self._subband_residuals_for_data(best_data)
-            if applied_status == "ok" and best_status == "ok":
-                residual_status = "ok"
-            else:
-                residual_status = applied_status if applied_status != "ok" else best_status
-
-        subband_freqs = applied_freqs if applied_freqs.size else best_freqs
-        arrival_times_applied = applied_arrivals if residual_status == "ok" and applied_freqs.size else np.array([], dtype=float)
-        residuals_applied = applied_residuals if residual_status == "ok" and applied_freqs.size else np.array([], dtype=float)
-        arrival_times_best = best_arrivals if residual_status == "ok" and best_freqs.size else np.array([], dtype=float)
-        residuals_best = best_residuals if residual_status == "ok" and best_freqs.size else np.array([], dtype=float)
-
-        if residual_status != "ok":
-            subband_freqs = np.array([], dtype=float)
-            arrival_times_applied = np.array([], dtype=float)
-            arrival_times_best = np.array([], dtype=float)
-            residuals_applied = np.array([], dtype=float)
-            residuals_best = np.array([], dtype=float)
-
-        self.dm_optimization = DmOptimizationResult(
-            center_dm=center_dm,
-            requested_half_range=half_range,
-            actual_half_range=actual_half_range,
-            step=step,
-            trial_dms=trial_dms,
-            snr=snr,
-            snr_metric="integrated_event_snr",
-            applied_dm=applied_dm,
-            sampled_best_dm=sampled_best_dm,
-            sampled_best_sn=sampled_best_sn,
-            best_dm=best_dm,
-            best_dm_uncertainty=best_dm_uncertainty,
-            best_sn=best_sn,
-            fit_status=fit_status,
-            subband_freqs_mhz=subband_freqs,
-            arrival_times_applied_ms=arrival_times_applied,
-            arrival_times_best_ms=arrival_times_best,
-            residuals_applied_ms=residuals_applied,
-            residuals_best_ms=residuals_best,
-            residual_status=residual_status,
+        self.dm_optimization = replace(
+            optimization,
+            component_results=component_results,
         )
         return self.dm_optimization
+
+    def _apply_width_analysis_to_results(self) -> None:
+        if self.results is None:
+            return
+        width_results = [] if self.width_analysis is None else list(self.width_analysis.results)
+        accepted_width = None if self.width_analysis is None else self.width_analysis.accepted_width
+        self.results = replace(
+            self.results,
+            width_results=width_results,
+            accepted_width=accepted_width,
+        )
 
     def compute_properties(self) -> BurstMeasurements:
         previous_results = self.results
@@ -905,6 +1095,10 @@ class BurstSession:
             distance_mpc=self.config.distance_mpc,
             redshift=self.config.redshift,
             masked_channels=np.flatnonzero(self.channel_mask).astype(int).tolist(),
+            offpulse_regions_rel=self._offpulse_regions_in_crop(),
+            noise_settings=self.noise_settings,
+            width_results=[] if self.width_analysis is None else list(self.width_analysis.results),
+            accepted_width=None if self.width_analysis is None else self.width_analysis.accepted_width,
         )
         if previous_results is not None and previous_results.diagnostics.scattering_fit is not None:
             measurements = replace(
@@ -922,7 +1116,8 @@ class BurstSession:
                 ),
             )
         self.results = measurements
-        return measurements
+        self._apply_width_analysis_to_results()
+        return self.results
 
     def fit_scattering(self) -> BurstMeasurements:
         if self.results is None:
@@ -971,7 +1166,110 @@ class BurstSession:
                 scattering_fit=fit_result.diagnostics,
             ),
         )
+        self._apply_width_analysis_to_results()
         return self.results
+
+    def run_spectral_analysis(self, segment_length_ms: float) -> SpectralAnalysisResult:
+        _, context = self._build_measurement_context_for_data()
+        event_series = np.asarray(
+            context.selected_profile_baselined[context.event_rel_start:context.event_rel_end],
+            dtype=float,
+        )
+        self.spectral_analysis = run_averaged_spectral_analysis(
+            event_series=event_series,
+            tsamp_ms=self.tsamp_ms,
+            segment_length_ms=float(segment_length_ms),
+            event_window_ms=self._current_event_window_ms(context),
+            spectral_extent_mhz=self._selected_frequency_bounds_mhz(),
+        )
+        return self.spectral_analysis
+
+    def _build_source_ref(self) -> SessionSourceRef:
+        source_path = Path(self.burst_file).expanduser().resolve()
+        try:
+            stat = source_path.stat()
+            file_size = int(stat.st_size)
+            mtime_unix = float(stat.st_mtime)
+        except FileNotFoundError:
+            file_size = 0
+            mtime_unix = 0.0
+        freq_lo, freq_hi = self._frequency_range_mhz()
+        return SessionSourceRef(
+            source_path=source_path,
+            source_name=self.metadata.source_name,
+            file_size_bytes=file_size,
+            mtime_unix=mtime_unix,
+            shape=[self.total_channels, self.total_time_bins],
+            tsamp=float(self.tsamp),
+            freqres=float(self.freqres),
+            start_mjd=float(self.start_mjd),
+            npol=int(self.npol),
+            freq_range_mhz=[float(freq_lo), float(freq_hi)],
+        )
+
+    def _validate_snapshot_source(self, source: SessionSourceRef) -> None:
+        path = Path(source.source_path).expanduser().resolve()
+        if not path.exists():
+            raise FileNotFoundError(f"Session source file not found: {path}")
+        current = self._build_source_ref()
+        if current.file_size_bytes != int(source.file_size_bytes):
+            raise ValueError("Session source file size does not match the saved snapshot.")
+        if current.shape != list(source.shape):
+            raise ValueError("Session source shape does not match the saved snapshot.")
+        if not np.isclose(current.mtime_unix, float(source.mtime_unix)):
+            raise ValueError("Session source modification time does not match the saved snapshot.")
+        comparisons = [
+            ("tsamp", current.tsamp, float(source.tsamp)),
+            ("freqres", current.freqres, float(source.freqres)),
+            ("start_mjd", current.start_mjd, float(source.start_mjd)),
+            ("npol", float(current.npol), float(source.npol)),
+            ("freq_range_mhz[0]", current.freq_range_mhz[0], float(source.freq_range_mhz[0])),
+            ("freq_range_mhz[1]", current.freq_range_mhz[1], float(source.freq_range_mhz[1])),
+        ]
+        for label, current_value, saved_value in comparisons:
+            if not np.isclose(current_value, saved_value):
+                raise ValueError(f"Session source metadata mismatch for {label}.")
+
+    def to_snapshot(self) -> AnalysisSessionSnapshot:
+        return AnalysisSessionSnapshot(
+            schema_version=SESSION_SNAPSHOT_SCHEMA_VERSION,
+            source=self._build_source_ref(),
+            dm=float(self.dm),
+            preset_key=self.config.preset_key,
+            sefd_jy=self.config.sefd_jy,
+            read_start_sec=float(self.config.read_start_sec),
+            initial_crop_sec=self.config.initial_crop_sec,
+            auto_mask_profile=self.config.auto_mask_profile,
+            distance_mpc=self.config.distance_mpc,
+            redshift=self.config.redshift,
+            time_factor=int(self.time_factor),
+            freq_factor=int(self.freq_factor),
+            crop_bins=[int(self.crop_start), int(self.crop_end)],
+            event_bins=[int(self.event_start), int(self.event_end)],
+            spectral_extent_channels=[int(self.spec_ex_lo), int(self.spec_ex_hi)],
+            burst_regions=[
+                BurstRegion(start_bin=int(start), end_bin=int(end))
+                for start, end in self.burst_regions
+            ],
+            offpulse_regions=[
+                OffPulseRegion(start_bin=int(start), end_bin=int(end))
+                for start, end in self.offpulse_regions
+            ],
+            peak_bins=[int(value) for value in self.peak_positions],
+            manual_peaks=bool(self.manual_peaks),
+            masked_channels=np.flatnonzero(self.channel_mask).astype(int).tolist(),
+            last_auto_mask=self.last_auto_mask,
+            noise_settings=self.noise_settings,
+            width_settings=self.width_settings,
+            notes=self.notes,
+            results=self.results,
+            width_analysis=self.width_analysis,
+            dm_optimization=self.dm_optimization,
+            spectral_analysis=self.spectral_analysis,
+        )
+
+    def snapshot_dict(self) -> dict[str, Any]:
+        return self.to_snapshot().to_dict()
 
     def export_results(
         self,
