@@ -66,10 +66,14 @@ const dmOptimizationContent = document.getElementById("dmOptimizationContent")
 const dmOptimizationPlot = document.getElementById("dmOptimizationPlot")
 const dmResidualContent = document.getElementById("dmResidualContent")
 const dmResidualPlot = document.getElementById("dmResidualPlot")
+const fittingContent = document.getElementById("fittingContent")
+const fittingSpectrumPlot = document.getElementById("fittingSpectrumPlot")
+const fittingProfilePlot = document.getElementById("fittingProfilePlot")
 const exportManifestContent = document.getElementById("exportManifestContent")
 const setDmButton = document.getElementById("setDmButton")
 const optimizeDmButton = document.getElementById("optimizeDmButton")
 const applyBestDmButton = document.getElementById("applyBestDmButton")
+const fitScatteringButton = document.getElementById("fitScatteringButton")
 const buildExportButton = document.getElementById("buildExportButton")
 const resetViewButton = document.getElementById("resetViewButton")
 const clearRegionsButton = document.getElementById("clearRegionsButton")
@@ -96,6 +100,7 @@ const sessionControls = [
   setDmButton,
   optimizeDmButton,
   applyBestDmButton,
+  fitScatteringButton,
   buildExportButton,
   resetViewButton,
   clearRegionsButton,
@@ -187,6 +192,7 @@ function bindControls() {
     dmInput.value = String(bestDm)
     postAction("set_dm", { dm: Number(bestDm) })
   })
+  fitScatteringButton.addEventListener("click", () => postAction("fit_scattering"))
   buildExportButton.addEventListener("click", () => postAction("export_results"))
   resetViewButton.addEventListener("click", () => postAction("reset_view"))
   clearRegionsButton.addEventListener("click", () => postAction("clear_regions"))
@@ -384,6 +390,8 @@ async function postAction(type, payload = {}) {
       state.activeAnalysisTab = "dm"
     } else if (type === "compute_properties") {
       state.activeAnalysisTab = "primary"
+    } else if (type === "fit_scattering") {
+      state.activeAnalysisTab = "fitting"
     } else if (type === "export_results") {
       state.activeAnalysisTab = "export"
     }
@@ -421,6 +429,7 @@ function applyView(view) {
   renderResults(view.results)
   renderDiagnostics(view.results)
   renderDmOptimization(view)
+  renderFitting(view.results)
   renderExportManifest()
   setAnalysisTab(state.activeAnalysisTab)
   renderPlots(view)
@@ -670,6 +679,53 @@ function renderDmOptimization(view) {
   `
 }
 
+function renderFitting(results) {
+  const scatteringFit = results?.diagnostics?.scattering_fit
+  if (!results || !scatteringFit) {
+    fittingContent.innerHTML =
+      '<div class="empty-state">No scattering fit yet. Run the fit on the current selection to inspect model width, scattering time, and residuals.</div>'
+    fittingSpectrumPlot.classList.add("is-empty")
+    Plotly.purge(fittingSpectrumPlot)
+    fittingSpectrumPlot.replaceChildren()
+    fittingProfilePlot.classList.add("is-empty")
+    Plotly.purge(fittingProfilePlot)
+    fittingProfilePlot.replaceChildren()
+    return
+  }
+
+  const fitTone = scatteringStatusTone(scatteringFit.status)
+  const fitStatistics = scatteringFit.fit_statistics || {}
+  const bestfit = scatteringFit.bestfit_parameters || {}
+  const bestfitUncertainties = scatteringFit.bestfit_uncertainties || {}
+  const fitSummaryTiles = [
+    resultTile("Model Width", results.width_ms_model === null ? "n/a" : `${fmt(results.width_ms_model, 3)} ms`, "primary"),
+    resultTile("Scattering Tau", results.tau_sc_ms === null ? "n/a" : `${fmt(results.tau_sc_ms, 3)} ms`, "primary"),
+    resultTile("Reduced Chi^2", fitStatistics.chisq_final_reduced === null || fitStatistics.chisq_final_reduced === undefined ? "n/a" : fmt(fitStatistics.chisq_final_reduced, 3), "primary"),
+  ]
+  const fitMetaTiles = [
+    resultTile("Fitter", scatteringFit.fitter || "n/a", "secondary"),
+    resultTile("Fit S/N", fitStatistics.snr === null || fitStatistics.snr === undefined ? "n/a" : fmt(fitStatistics.snr, 3), "secondary"),
+    resultTile("Good Channels", fitStatistics.num_freq_good === null || fitStatistics.num_freq_good === undefined ? "n/a" : String(fitStatistics.num_freq_good), "secondary"),
+    resultTile("Observations", fitStatistics.num_observations === null || fitStatistics.num_observations === undefined ? "n/a" : String(fitStatistics.num_observations), "secondary"),
+    resultTile("Fitted Parameters", Array.isArray(scatteringFit.fit_parameters) && scatteringFit.fit_parameters.length ? scatteringFit.fit_parameters.join(", ") : "n/a", "secondary"),
+    resultTile("Fixed Parameters", Array.isArray(scatteringFit.fixed_parameters) && scatteringFit.fixed_parameters.length ? scatteringFit.fixed_parameters.join(", ") : "n/a", "secondary"),
+  ]
+
+  fittingContent.innerHTML = `
+    <div class="results-primary">
+      ${fitSummaryTiles.join("")}
+    </div>
+    <div class="results-secondary">
+      ${fitMetaTiles.join("")}
+    </div>
+    <div class="dm-fit-note" data-tone="${escapeHtml(fitTone)}">
+      <strong>${escapeHtml(scatteringStatusLabel(scatteringFit.status))}</strong>
+      <span>${escapeHtml(scatteringFit.status === "ok" ? scatteringStatusCopy(scatteringFit.status) : (scatteringFit.message || scatteringStatusCopy(scatteringFit.status)))}</span>
+    </div>
+    ${renderScatteringParameterTable(bestfit, bestfitUncertainties)}
+  `
+}
+
 function renderExportManifest() {
   if (!state.sessionId || !state.view) {
     exportManifestContent.innerHTML =
@@ -883,6 +939,15 @@ function syncDmPlots() {
   renderDmResidualPlot(optimization)
 }
 
+function syncFittingPlot() {
+  const scatteringFit = state.view?.results?.diagnostics?.scattering_fit
+  if (!scatteringFit || state.activeAnalysisTab !== "fitting") {
+    return
+  }
+  renderFittingSpectrumPlot(scatteringFit)
+  renderFittingProfilePlot(scatteringFit)
+}
+
 async function renderDmResidualPlot(optimization) {
   if (optimization.residual_status !== "ok") {
     dmResidualPlot.classList.add("is-empty")
@@ -946,6 +1011,219 @@ async function renderDmResidualPlot(optimization) {
   )
 }
 
+async function renderFittingProfilePlot(scatteringFit) {
+  if (!scatteringFit || scatteringFit.status !== "ok") {
+    fittingProfilePlot.classList.add("is-empty")
+    Plotly.purge(fittingProfilePlot)
+    fittingProfilePlot.replaceChildren()
+    return
+  }
+
+  fittingProfilePlot.classList.remove("is-empty")
+  await Plotly.react(
+    "fittingProfilePlot",
+    [
+      {
+        x: scatteringFit.time_axis_ms,
+        y: scatteringFit.data_profile_sn,
+        mode: "lines",
+        type: "scattergl",
+        name: "Data profile",
+        line: { color: "#162e3a", width: 2.2 },
+        hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra>Data profile</extra>",
+      },
+      {
+        x: scatteringFit.time_axis_ms,
+        y: scatteringFit.model_profile_sn,
+        mode: "lines",
+        type: "scattergl",
+        name: "Model profile",
+        line: { color: "#0f766e", width: 2.4 },
+        hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra>Model profile</extra>",
+      },
+      {
+        x: scatteringFit.time_axis_ms,
+        y: scatteringFit.residual_profile_sn,
+        mode: "lines",
+        type: "scattergl",
+        name: "Residual profile",
+        line: { color: "#b45309", width: 2.0, dash: "dot" },
+        hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra>Residual profile</extra>",
+      },
+    ],
+    {
+      margin: { l: 70, r: 24, t: 18, b: 54 },
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(255,255,255,0.55)",
+      showlegend: true,
+      legend: {
+        orientation: "h",
+        yanchor: "bottom",
+        y: 1.02,
+        xanchor: "right",
+        x: 1.0,
+      },
+      hovermode: "closest",
+      xaxis: {
+        title: "Time (ms)",
+        automargin: true,
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+      yaxis: {
+        title: "Normalized Intensity",
+        automargin: true,
+        zeroline: true,
+        zerolinecolor: "rgba(24,33,38,0.25)",
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+    },
+    { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
+  )
+}
+
+async function renderFittingSpectrumPlot(scatteringFit) {
+  const dataSpectrum = scatteringFit?.data_dynamic_spectrum_sn
+  const modelSpectrum = scatteringFit?.model_dynamic_spectrum_sn
+  const residualSpectrum = scatteringFit?.residual_dynamic_spectrum_sn
+  const freqAxis = scatteringFit?.freq_axis_mhz
+  const timeAxis = scatteringFit?.time_axis_ms
+  if (
+    !scatteringFit
+    || scatteringFit.status !== "ok"
+    || !Array.isArray(dataSpectrum)
+    || !Array.isArray(modelSpectrum)
+    || !Array.isArray(residualSpectrum)
+    || !Array.isArray(freqAxis)
+    || !Array.isArray(timeAxis)
+    || !dataSpectrum.length
+    || !modelSpectrum.length
+    || !residualSpectrum.length
+  ) {
+    fittingSpectrumPlot.classList.add("is-empty")
+    Plotly.purge(fittingSpectrumPlot)
+    fittingSpectrumPlot.replaceChildren()
+    return
+  }
+
+  fittingSpectrumPlot.classList.remove("is-empty")
+  const dataModelRange = combinedQuantileRange([dataSpectrum, modelSpectrum], 0.02, 0.995)
+  const residualRange = symmetricQuantileRange(residualSpectrum, 0.995)
+  await Plotly.react(
+    "fittingSpectrumPlot",
+    [
+      {
+        x: timeAxis,
+        y: freqAxis,
+        z: dataSpectrum,
+        type: "heatmap",
+        xaxis: "x",
+        yaxis: "y",
+        coloraxis: "coloraxis",
+        hovertemplate: "%{x:.3f} ms<br>%{y:.3f} MHz<br>%{z:.3f}<extra>Data</extra>",
+      },
+      {
+        x: timeAxis,
+        y: freqAxis,
+        z: modelSpectrum,
+        type: "heatmap",
+        xaxis: "x2",
+        yaxis: "y2",
+        coloraxis: "coloraxis",
+        hovertemplate: "%{x:.3f} ms<br>%{y:.3f} MHz<br>%{z:.3f}<extra>Model</extra>",
+      },
+      {
+        x: timeAxis,
+        y: freqAxis,
+        z: residualSpectrum,
+        type: "heatmap",
+        xaxis: "x3",
+        yaxis: "y3",
+        coloraxis: "coloraxis2",
+        hovertemplate: "%{x:.3f} ms<br>%{y:.3f} MHz<br>%{z:.3f}<extra>Residual</extra>",
+      },
+    ],
+    {
+      margin: { l: 78, r: 110, t: 32, b: 54 },
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(255,255,255,0.55)",
+      showlegend: false,
+      hovermode: "closest",
+      xaxis: {
+        domain: [0.0, 0.28],
+        anchor: "y",
+        title: "Time (ms)",
+        automargin: true,
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+      yaxis: {
+        domain: [0.0, 1.0],
+        anchor: "x",
+        title: "Frequency (MHz)",
+        automargin: true,
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+      xaxis2: {
+        domain: [0.36, 0.64],
+        anchor: "y2",
+        title: "Time (ms)",
+        automargin: true,
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+      yaxis2: {
+        domain: [0.0, 1.0],
+        anchor: "x2",
+        matches: "y",
+        showticklabels: false,
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+      xaxis3: {
+        domain: [0.72, 1.0],
+        anchor: "y3",
+        title: "Time (ms)",
+        automargin: true,
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+      yaxis3: {
+        domain: [0.0, 1.0],
+        anchor: "x3",
+        matches: "y",
+        showticklabels: false,
+        gridcolor: "rgba(24,33,38,0.08)",
+      },
+      coloraxis: {
+        colorscale: "Viridis",
+        cmin: dataModelRange[0],
+        cmax: dataModelRange[1],
+        colorbar: {
+          title: { text: "Data / Model" },
+          x: 1.04,
+          y: 0.73,
+          len: 0.44,
+          thickness: 12,
+        },
+      },
+      coloraxis2: {
+        colorscale: "RdBu",
+        cmin: residualRange[0],
+        cmax: residualRange[1],
+        colorbar: {
+          title: { text: "Residual" },
+          x: 1.04,
+          y: 0.24,
+          len: 0.44,
+          thickness: 12,
+        },
+      },
+      annotations: [
+        panelLabel("Data", 0.0, 1.0),
+        panelLabel("Model", 0.36, 1.0),
+        panelLabel("Residual", 0.72, 1.0),
+      ],
+    },
+    { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
+  )
+}
+
 function renderResidualTable(optimization) {
   if (optimization.residual_status !== "ok") {
     return ""
@@ -979,6 +1257,56 @@ function renderResidualTable(optimization) {
       </table>
     </div>
   `
+}
+
+function renderScatteringParameterTable(parameters, uncertainties) {
+  const rows = [
+    parameterRow("Arrival Time", parameters.arrival_time?.[0], uncertainties.arrival_time?.[0], 1e3, "ms"),
+    parameterRow("Intrinsic Width", parameters.burst_width?.[0], uncertainties.burst_width?.[0], 1e3, "ms"),
+    parameterRow("Scattering Tau", parameters.scattering_timescale?.[0], uncertainties.scattering_timescale?.[0], 1e3, "ms"),
+    parameterRow("Log Amplitude", parameters.amplitude?.[0], uncertainties.amplitude?.[0], 1.0, ""),
+  ].filter(Boolean)
+
+  if (!rows.length) {
+    return ""
+  }
+
+  return `
+    <details class="details-card results-details">
+      <summary>Scattering Parameters</summary>
+      <div class="residual-table-wrap">
+        <table class="residual-table">
+          <thead>
+            <tr>
+              <th>Parameter</th>
+              <th>Best Fit</th>
+              <th>Uncertainty</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.join("")}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  `
+}
+
+function parameterRow(label, value, uncertainty, scale, unit) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return ""
+  }
+  const scaledValue = Number(value) * scale
+  const scaledUncertainty = uncertainty === null || uncertainty === undefined || Number.isNaN(Number(uncertainty))
+    ? "n/a"
+    : `±${fmt(Number(uncertainty) * scale, 3)}${unit ? ` ${unit}` : ""}`
+  return (
+    `<tr>` +
+    `<td>${escapeHtml(label)}</td>` +
+    `<td>${escapeHtml(`${fmt(scaledValue, 3)}${unit ? ` ${unit}` : ""}`)}</td>` +
+    `<td>${escapeHtml(scaledUncertainty)}</td>` +
+    `</tr>`
+  )
 }
 
 function bindPlotEvents() {
@@ -1093,6 +1421,8 @@ function setAnalysisTab(tab) {
   })
   if (tab === "dm") {
     syncDmPlots()
+  } else if (tab === "fitting") {
+    syncFittingPlot()
   }
 }
 
@@ -1318,6 +1648,7 @@ function busyButtonForAction(action) {
   if (action === "compute_properties") return computeButton
   if (action === "auto_mask_jess") return jessButton
   if (action === "optimize_dm") return optimizeDmButton
+  if (action === "fit_scattering") return fitScatteringButton
   if (action === "export_results") return buildExportButton
   if (action === "set_dm") return setDmButton
   if (action === "reset_view") return resetViewButton
@@ -1329,6 +1660,7 @@ function busyButtonText(action) {
   if (action === "compute_properties") return "Computing..."
   if (action === "auto_mask_jess") return "Masking..."
   if (action === "optimize_dm") return "Sweeping DM..."
+  if (action === "fit_scattering") return "Fitting..."
   if (action === "export_results") return "Building..."
   if (action === "set_dm") return "Applying DM..."
   if (action === "reset_view") return "Resetting..."
@@ -1353,6 +1685,7 @@ function actionBusyText(action) {
     set_spectral_extent: "Setting spectral extent",
     auto_mask_jess: "Auto masking",
     optimize_dm: "Sweeping DM",
+    fit_scattering: "Running scattering fit",
     export_results: "Building export bundle",
     set_dm: "Applying DM",
     compute_properties: "Computing",
@@ -1367,6 +1700,7 @@ function actionSuccessText(action) {
     undo_mask: "Last mask removed",
     reset_mask: "All masks cleared",
     optimize_dm: "DM sweep completed",
+    fit_scattering: "Scattering fit completed",
     export_results: "Export bundle built",
     set_dm: "Dispersion measure updated",
     compute_properties: "Derived properties updated",
@@ -1577,9 +1911,52 @@ function dmOptimizationYRange(values) {
   return [yMin - pad, yMax + pad]
 }
 
+function combinedQuantileRange(collections, lowQuantile = 0.02, highQuantile = 0.995) {
+  const finite = collections
+    .flatMap((values) => values.flat ? values.flat() : values)
+    .map(Number)
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)
+  if (!finite.length) {
+    return [-1, 1]
+  }
+  const lowIndex = Math.max(0, Math.floor((finite.length - 1) * lowQuantile))
+  const highIndex = Math.max(lowIndex, Math.floor((finite.length - 1) * highQuantile))
+  const low = finite[lowIndex]
+  const high = finite[highIndex]
+  if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) {
+    return [finite[0], finite[finite.length - 1] || finite[0] + 1]
+  }
+  return [low, high]
+}
+
+function symmetricQuantileRange(values, quantile = 0.995) {
+  const finite = values
+    .flatMap((row) => row)
+    .map(Number)
+    .filter(Number.isFinite)
+    .map((value) => Math.abs(value))
+    .sort((a, b) => a - b)
+  if (!finite.length) {
+    return [-1, 1]
+  }
+  const index = Math.max(0, Math.floor((finite.length - 1) * quantile))
+  const bound = finite[index]
+  if (!Number.isFinite(bound) || bound <= 0) {
+    return [-1, 1]
+  }
+  return [-bound, bound]
+}
+
 function fitStatusTone(status) {
   if (status === "quadratic_peak_fit") return "success"
   if (status === "quadratic_peak_fit_uncertainty_unavailable") return "warning"
+  return "warning"
+}
+
+function scatteringStatusTone(status) {
+  if (status === "ok") return "success"
+  if (status === "fitburst_unavailable") return "error"
   return "warning"
 }
 
@@ -1634,6 +2011,34 @@ function fitStatusCopy(status) {
     fit_vertex_outside_peak_window: "The local quadratic fit shifted the maximum outside the sampled peak window, so the discrete best DM was retained.",
   }
   return labels[status] || "Review the sampled S/N curve before applying a new DM."
+}
+
+function scatteringStatusLabel(status) {
+  const labels = {
+    ok: "Scattering fit accepted",
+    fitburst_unavailable: "fitburst is unavailable",
+    insufficient_data: "Selected-band data are unavailable",
+    insufficient_time_bins: "Selection is too short for fitting",
+    insufficient_channels: "Too few usable channels",
+    insufficient_offpulse: "No contiguous off-pulse region",
+    insufficient_signal: "Event signal is too weak for fitting",
+    fit_failed: "Scattering fit failed",
+  }
+  return labels[status] || "Scattering fit unavailable"
+}
+
+function scatteringStatusCopy(status) {
+  const labels = {
+    ok: "The model fit uses fitburst on the current selected band and reports intrinsic width and scattering time as secondary, model-based diagnostics.",
+    fitburst_unavailable: "Install the optional fitburst dependency to enable model-based burst fitting in FLITS.",
+    insufficient_data: "Widen the selected spectral extent or reset the current crop before running a scattering fit.",
+    insufficient_time_bins: "Use a wider crop or event window so the burst and off-pulse baseline are both represented in the fit.",
+    insufficient_channels: "Keep at least four unmasked channels inside the selected spectral extent for a stable fit.",
+    insufficient_offpulse: "The fitter needs a contiguous off-pulse block to estimate per-channel weights from the current crop.",
+    insufficient_signal: "The selected event window does not support a stable model fit. Recenter or widen the event window before retrying.",
+    fit_failed: "The current selection or initial guesses did not converge to a stable fit. Check masking and event placement before retrying.",
+  }
+  return labels[status] || "Review the current selection before trusting the model fit."
 }
 
 function flagTone(flag) {

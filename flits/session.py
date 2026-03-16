@@ -9,14 +9,22 @@ import warnings
 import numpy as np
 
 from flits.exports import MAX_EXPORT_SNAPSHOTS, StoredExportSnapshot, create_export_snapshot
+from flits.fitburst_adapter import fit_scattering_selected_band
 from flits.measurements import (
     MeasurementContext,
     build_measurement_context,
     compute_burst_measurements,
-    compute_subband_arrival_residuals,
     event_snr,
+    _primary_peak_bin,
+    compute_subband_arrival_residuals,
 )
-from flits.models import BurstMeasurements, DmOptimizationResult, ExportArtifact, ExportManifest, FilterbankMetadata
+from flits.models import (
+    BurstMeasurements,
+    DmOptimizationResult,
+    ExportArtifact,
+    ExportManifest,
+    FilterbankMetadata,
+)
 from flits.settings import ObservationConfig, get_auto_mask_profile, get_preset
 from flits.signal import block_reduce_mean, dedisperse
 
@@ -870,10 +878,11 @@ class BurstSession:
         return self.dm_optimization
 
     def compute_properties(self) -> BurstMeasurements:
+        previous_results = self.results
         masked = self.get_masked_crop()
         event_rel_start, event_rel_end = self._event_bounds_in_crop(masked.shape[1])
         spec_lo, spec_hi = self._selected_channel_bounds()
-        self.results = compute_burst_measurements(
+        measurements = compute_burst_measurements(
             burst_name=Path(self.burst_file).stem,
             dm=self.dm,
             start_mjd=self.start_mjd,
@@ -896,6 +905,71 @@ class BurstSession:
             distance_mpc=self.config.distance_mpc,
             redshift=self.config.redshift,
             masked_channels=np.flatnonzero(self.channel_mask).astype(int).tolist(),
+        )
+        if previous_results is not None and previous_results.diagnostics.scattering_fit is not None:
+            measurements = replace(
+                measurements,
+                width_ms_model=previous_results.width_ms_model,
+                tau_sc_ms=previous_results.tau_sc_ms,
+                uncertainties=replace(
+                    measurements.uncertainties,
+                    width_ms_model=previous_results.uncertainties.width_ms_model,
+                    tau_sc_ms=previous_results.uncertainties.tau_sc_ms,
+                ),
+                diagnostics=replace(
+                    measurements.diagnostics,
+                    scattering_fit=previous_results.diagnostics.scattering_fit,
+                ),
+            )
+        self.results = measurements
+        return measurements
+
+    def fit_scattering(self) -> BurstMeasurements:
+        if self.results is None:
+            self.compute_properties()
+        assert self.results is not None
+
+        masked, context = self._build_measurement_context_for_data()
+        selected_band = np.asarray(masked[context.spec_lo : context.spec_hi + 1, :], dtype=float)
+        selected_freqs = np.asarray(self.freqs[context.spec_lo : context.spec_hi + 1], dtype=float)
+        peak_abs_bin = _primary_peak_bin(
+            peak_bins_abs=self._current_peak_positions(),
+            profile_sn=context.selected_profile_sn,
+            crop_start_bin=self.crop_start,
+            event_rel_start=context.event_rel_start,
+            event_rel_end=context.event_rel_end,
+        )
+        peak_rel_bin = None if peak_abs_bin is None else int(peak_abs_bin - self.crop_start)
+        fit_result = fit_scattering_selected_band(
+            selected_band=selected_band,
+            freqs_mhz=selected_freqs,
+            time_axis_ms=context.time_axis_ms,
+            event_rel_start=context.event_rel_start,
+            event_rel_end=context.event_rel_end,
+            offpulse_bins=context.offpulse_bins,
+            tsamp_ms=self.tsamp_ms,
+            peak_rel_bin=peak_rel_bin,
+            width_guess_ms=self.results.width_ms_acf,
+        )
+
+        updated_flags = list(self.results.measurement_flags)
+        if fit_result.status == "ok" and "fit" not in updated_flags:
+            updated_flags.append("fit")
+
+        self.results = replace(
+            self.results,
+            width_ms_model=fit_result.width_ms_model,
+            tau_sc_ms=fit_result.tau_sc_ms,
+            measurement_flags=updated_flags,
+            uncertainties=replace(
+                self.results.uncertainties,
+                width_ms_model=fit_result.width_uncertainty_ms,
+                tau_sc_ms=fit_result.tau_uncertainty_ms,
+            ),
+            diagnostics=replace(
+                self.results.diagnostics,
+                scattering_fit=fit_result.diagnostics,
+            ),
         )
         return self.results
 

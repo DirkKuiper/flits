@@ -389,7 +389,9 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         "snr_peak": results.get("snr_peak", ""),
         "snr_integrated": results.get("snr_integrated", ""),
         "width_ms_acf": results.get("width_ms_acf", ""),
+        "width_ms_model": results.get("width_ms_model", ""),
         "spectral_width_mhz_acf": results.get("spectral_width_mhz_acf", ""),
+        "tau_sc_ms": results.get("tau_sc_ms", ""),
         "peak_flux_jy": results.get("peak_flux_jy", ""),
         "fluence_jyms": results.get("fluence_jyms", ""),
         "iso_e_erg": results.get("iso_e", ""),
@@ -445,11 +447,25 @@ def _build_diagnostics_npz(snapshot: ExportSnapshotData) -> bytes:
     }
 
     if snapshot.results is not None:
-        gaussian_fits = snapshot.results.get("diagnostics", {}).get("gaussian_fits", [])
+        diagnostics = snapshot.results.get("diagnostics", {})
+        gaussian_fits = diagnostics.get("gaussian_fits", [])
         payload["gaussian_amp"] = np.asarray([fit.get("amp", np.nan) for fit in gaussian_fits], dtype=float)
         payload["gaussian_mu_ms"] = np.asarray([fit.get("mu_ms", np.nan) for fit in gaussian_fits], dtype=float)
         payload["gaussian_sigma_ms"] = np.asarray([fit.get("sigma_ms", np.nan) for fit in gaussian_fits], dtype=float)
         payload["gaussian_offset"] = np.asarray([fit.get("offset", np.nan) for fit in gaussian_fits], dtype=float)
+        scattering_fit = diagnostics.get("scattering_fit") or {}
+        for key in (
+            "freq_axis_mhz",
+            "time_axis_ms",
+            "data_dynamic_spectrum_sn",
+            "model_dynamic_spectrum_sn",
+            "residual_dynamic_spectrum_sn",
+            "data_profile_sn",
+            "model_profile_sn",
+            "residual_profile_sn",
+        ):
+            if key in scattering_fit:
+                payload[f"scattering_{key}"] = np.asarray(scattering_fit.get(key, []), dtype=float)
 
     if snapshot.dm_optimization is not None:
         for key in (

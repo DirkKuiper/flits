@@ -134,6 +134,22 @@ class ExportResultsTest(unittest.TestCase):
                 np.asarray(payload["view"]["plot"]["heatmap"]["z"]).shape,
             )
 
+        session.compute_properties()
+        session.fit_scattering()
+        fit_manifest = session_action(
+            session_id,
+            ActionRequest(type="export_results", payload={}),
+        )["export_manifest"]
+        fit_npz_name = next(
+            artifact["name"] for artifact in fit_manifest["artifacts"] if artifact["name"].endswith("_diagnostics.npz")
+        )
+        fit_npz_response = session_export_artifact(session_id, fit_manifest["export_id"], fit_npz_name)
+        with np.load(io.BytesIO(fit_npz_response.body)) as arrays:
+            self.assertIn("scattering_data_dynamic_spectrum_sn", arrays.files)
+            self.assertIn("scattering_model_dynamic_spectrum_sn", arrays.files)
+            self.assertIn("scattering_residual_dynamic_spectrum_sn", arrays.files)
+            self.assertIn("scattering_freq_axis_mhz", arrays.files)
+
         png_name = next(name for name in artifact_names if name.endswith("_dynamic_spectrum.png"))
         svg_name = next(name for name in artifact_names if name.endswith("_dynamic_spectrum.svg"))
         png_response = session_export_artifact(session_id, manifest["export_id"], png_name)

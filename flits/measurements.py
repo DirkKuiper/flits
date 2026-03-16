@@ -542,7 +542,9 @@ def compute_burst_measurements(
         snr_peak=None,
         snr_integrated=None,
         width_ms_acf=float(tsamp_ms * 0.5) if width_ms_acf is not None else None,
+        width_ms_model=None,
         spectral_width_mhz_acf=float(abs(freqres_mhz) * 0.5) if spectral_width_mhz_acf is not None else None,
+        tau_sc_ms=None,
         peak_flux_jy=flux_scale if peak_flux_jy is not None and flux_scale is not None else None,
         fluence_jyms=fluence_uncertainty,
         iso_e=(None if iso_e is None or fluence_jyms in (None, 0.0) or not fluence_uncertainty else float(abs(iso_e) * (fluence_uncertainty / abs(fluence_jyms)))),
@@ -594,6 +596,7 @@ def compute_burst_measurements(
         temporal_acf_lags_ms=np.asarray(temporal_lags_ms, dtype=float),
         spectral_acf=np.asarray(spectral_acf, dtype=float),
         spectral_acf_lags_mhz=np.asarray(spectral_lags_mhz, dtype=float),
+        scattering_fit=None,
     )
 
     spectral_extent_mhz = 0.0
@@ -609,7 +612,9 @@ def compute_burst_measurements(
         snr_peak=snr_peak,
         snr_integrated=snr_integrated,
         width_ms_acf=width_ms_acf,
+        width_ms_model=None,
         spectral_width_mhz_acf=spectral_width_mhz_acf,
+        tau_sc_ms=None,
         peak_flux_jy=peak_flux_jy,
         fluence_jyms=fluence_jyms,
         iso_e=None if iso_e is None else float(iso_e),

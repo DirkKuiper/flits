@@ -22,6 +22,20 @@ def _jsonable(values: np.ndarray, digits: int = 4) -> list[Any]:
     ]
 
 
+def _jsonable_parameter_dict(
+    values: dict[str, list[float] | None],
+    digits: int = 6,
+) -> dict[str, list[float | None] | None]:
+    payload: dict[str, list[float | None] | None] = {}
+    for key, current in values.items():
+        if current is None:
+            payload[key] = None
+            continue
+        rounded = np.round(np.asarray(current, dtype=float), digits)
+        payload[key] = [float(value) if np.isfinite(value) else None for value in rounded]
+    return payload
+
+
 @dataclass(frozen=True)
 class FilterbankMetadata:
     source_path: Path
@@ -130,7 +144,9 @@ class MeasurementUncertainties:
     snr_peak: float | None = None
     snr_integrated: float | None = None
     width_ms_acf: float | None = None
+    width_ms_model: float | None = None
     spectral_width_mhz_acf: float | None = None
+    tau_sc_ms: float | None = None
     peak_flux_jy: float | None = None
     fluence_jyms: float | None = None
     iso_e: float | None = None
@@ -141,7 +157,9 @@ class MeasurementUncertainties:
             "snr_peak": self.snr_peak,
             "snr_integrated": self.snr_integrated,
             "width_ms_acf": self.width_ms_acf,
+            "width_ms_model": self.width_ms_model,
             "spectral_width_mhz_acf": self.spectral_width_mhz_acf,
+            "tau_sc_ms": self.tau_sc_ms,
             "peak_flux_jy": self.peak_flux_jy,
             "fluence_jyms": self.fluence_jyms,
             "iso_e": self.iso_e,
@@ -203,6 +221,54 @@ class MeasurementProvenance:
 
 
 @dataclass(frozen=True)
+class ScatteringFitDiagnostics:
+    status: str
+    message: str | None
+    fitter: str | None
+    component_count: int
+    fit_parameters: list[str] = field(default_factory=list)
+    fixed_parameters: list[str] = field(default_factory=list)
+    initial_parameters: dict[str, list[float] | None] = field(default_factory=dict)
+    bestfit_parameters: dict[str, list[float] | None] = field(default_factory=dict)
+    bestfit_uncertainties: dict[str, list[float] | None] = field(default_factory=dict)
+    fit_statistics: dict[str, float | int | None] = field(default_factory=dict)
+    freq_axis_mhz: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    time_axis_ms: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    data_dynamic_spectrum_sn: np.ndarray = field(default_factory=lambda: np.empty((0, 0), dtype=float))
+    model_dynamic_spectrum_sn: np.ndarray = field(default_factory=lambda: np.empty((0, 0), dtype=float))
+    residual_dynamic_spectrum_sn: np.ndarray = field(default_factory=lambda: np.empty((0, 0), dtype=float))
+    data_profile_sn: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    model_profile_sn: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    residual_profile_sn: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+
+    def to_dict(self) -> dict[str, Any]:
+        fit_statistics = {
+            key: (None if value is None else float(value) if isinstance(value, (np.floating, float)) else int(value) if isinstance(value, (np.integer, int)) else value)
+            for key, value in self.fit_statistics.items()
+        }
+        return {
+            "status": self.status,
+            "message": self.message,
+            "fitter": self.fitter,
+            "component_count": self.component_count,
+            "fit_parameters": self.fit_parameters,
+            "fixed_parameters": self.fixed_parameters,
+            "initial_parameters": _jsonable_parameter_dict(self.initial_parameters),
+            "bestfit_parameters": _jsonable_parameter_dict(self.bestfit_parameters),
+            "bestfit_uncertainties": _jsonable_parameter_dict(self.bestfit_uncertainties),
+            "fit_statistics": fit_statistics,
+            "freq_axis_mhz": _jsonable_1d(self.freq_axis_mhz, digits=6),
+            "time_axis_ms": _jsonable_1d(self.time_axis_ms, digits=6),
+            "data_dynamic_spectrum_sn": _jsonable(self.data_dynamic_spectrum_sn, digits=6),
+            "model_dynamic_spectrum_sn": _jsonable(self.model_dynamic_spectrum_sn, digits=6),
+            "residual_dynamic_spectrum_sn": _jsonable(self.residual_dynamic_spectrum_sn, digits=6),
+            "data_profile_sn": _jsonable_1d(self.data_profile_sn, digits=6),
+            "model_profile_sn": _jsonable_1d(self.model_profile_sn, digits=6),
+            "residual_profile_sn": _jsonable_1d(self.residual_profile_sn, digits=6),
+        }
+
+
+@dataclass(frozen=True)
 class MeasurementDiagnostics:
     gaussian_fits: list[GaussianFit1D]
     time_axis_ms: np.ndarray
@@ -215,6 +281,7 @@ class MeasurementDiagnostics:
     temporal_acf_lags_ms: np.ndarray
     spectral_acf: np.ndarray
     spectral_acf_lags_mhz: np.ndarray
+    scattering_fit: ScatteringFitDiagnostics | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -229,6 +296,7 @@ class MeasurementDiagnostics:
             "temporal_acf_lags_ms": _jsonable_1d(self.temporal_acf_lags_ms),
             "spectral_acf": _jsonable_1d(self.spectral_acf),
             "spectral_acf_lags_mhz": _jsonable_1d(self.spectral_acf_lags_mhz),
+            "scattering_fit": self.scattering_fit.to_dict() if self.scattering_fit is not None else None,
         }
 
 
@@ -242,7 +310,9 @@ class BurstMeasurements:
     snr_peak: float | None
     snr_integrated: float | None
     width_ms_acf: float | None
+    width_ms_model: float | None
     spectral_width_mhz_acf: float | None
+    tau_sc_ms: float | None
     peak_flux_jy: float | None
     fluence_jyms: float | None
     iso_e: float | None
@@ -265,7 +335,9 @@ class BurstMeasurements:
             "snr_peak": self.snr_peak,
             "snr_integrated": self.snr_integrated,
             "width_ms_acf": self.width_ms_acf,
+            "width_ms_model": self.width_ms_model,
             "spectral_width_mhz_acf": self.spectral_width_mhz_acf,
+            "tau_sc_ms": self.tau_sc_ms,
             "peak_flux_jy": self.peak_flux_jy,
             "fluence_jyms": self.fluence_jyms,
             "iso_e": self.iso_e,

@@ -242,6 +242,7 @@
                 <button class="analysis-tab active" type="button" role="tab" aria-selected="true" data-analysis-tab="primary">Primary</button>
                 <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="diagnostics">Diagnostics</button>
                 <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="dm">DM</button>
+                <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="fitting">Fitting</button>
                 <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="export">Export</button>
               </div>
             </div>
@@ -279,6 +280,21 @@
                 <div class="empty-state">No residual diagnostics yet. Run Optimize DM to compare sub-band arrival times.</div>
               </div>
               <div class="plot dm-optimization-plot is-empty" id="dmResidualPlot"></div>
+            </section>
+
+            <section class="analysis-panel" id="analysisFittingPanel" data-tab-panel="fitting" role="tabpanel" hidden>
+              <div class="analysis-panel-head">
+                <h4>Model Fitting</h4>
+                <p>Run a fitburst-backed scattering fit on the current crop, event window, mask, and spectral extent.</p>
+              </div>
+              <div class="export-actions">
+                <button class="primary-button" id="fitScatteringButton">Run Scattering Fit</button>
+              </div>
+              <div id="fittingContent" class="results-content">
+                <div class="empty-state">No scattering fit yet. Run the fit on the current selection to inspect model width, scattering time, and residuals.</div>
+              </div>
+              <div class="plot fitting-spectrum-plot is-empty" id="fittingSpectrumPlot"></div>
+              <div class="plot fitting-plot is-empty" id="fittingProfilePlot"></div>
             </section>
 
             <section class="analysis-panel" id="analysisExportPanel" data-tab-panel="export" role="tabpanel" hidden>

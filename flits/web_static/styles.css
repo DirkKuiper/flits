@@ -714,7 +714,27 @@ button.is-busy::after {
   margin-top: 16px;
 }
 
+.fitting-plot {
+  height: 340px;
+  min-height: 340px;
+  margin-top: 16px;
+}
+
+.fitting-spectrum-plot {
+  height: 420px;
+  min-height: 420px;
+  margin-top: 16px;
+}
+
 .dm-optimization-plot.is-empty {
+  display: none;
+}
+
+.fitting-plot.is-empty {
+  display: none;
+}
+
+.fitting-spectrum-plot.is-empty {
   display: none;
 }
 

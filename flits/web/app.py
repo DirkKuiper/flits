@@ -240,6 +240,8 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
             )
         elif action == "compute_properties":
             session.compute_properties()
+        elif action == "fit_scattering":
+            session.fit_scattering()
         elif action == "export_results":
             manifest = session.export_results(
                 session_id=session_id,

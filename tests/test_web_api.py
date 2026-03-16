@@ -176,11 +176,16 @@ class WebApiTest(unittest.TestCase):
         self.assertIn('data-analysis-tab="primary"', index_html)
         self.assertIn('data-analysis-tab="diagnostics"', index_html)
         self.assertIn('data-analysis-tab="dm"', index_html)
+        self.assertIn('data-analysis-tab="fitting"', index_html)
         self.assertIn('data-analysis-tab="export"', index_html)
         self.assertIn('id="dmResidualPlot"', index_html)
+        self.assertIn('id="fitScatteringButton"', index_html)
+        self.assertIn('id="fittingSpectrumPlot"', index_html)
+        self.assertIn('id="fittingProfilePlot"', index_html)
         self.assertIn('id="buildExportButton"', index_html)
         self.assertIn("activeAnalysisTab", app_js)
         self.assertIn("syncDmPlots", app_js)
+        self.assertIn("syncFittingPlot", app_js)
         self.assertIn("exportManifest", app_js)
 
     @patch("flits.web.app.BurstSession.from_file")
@@ -263,6 +268,21 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("residuals_applied_ms", optimization)
         self.assertIn("residuals_best_ms", optimization)
         self.assertIn("residual_status", optimization)
+
+    def test_session_action_fit_scattering_dispatches_to_session_method(self) -> None:
+        session_id = "synthetic-fit-dispatch"
+        session = _synthetic_session()
+        session.fit_scattering = Mock(return_value=None)
+        SESSIONS[session_id] = session
+        try:
+            session_action(
+                session_id,
+                ActionRequest(type="fit_scattering", payload={}),
+            )
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        session.fit_scattering.assert_called_once_with()
 
     def test_session_action_compute_properties_returns_nested_science_payload(self) -> None:
         session_id = "synthetic-measurements"
