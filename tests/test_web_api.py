@@ -319,7 +319,7 @@ class WebApiTest(unittest.TestCase):
         finally:
             SESSIONS.pop(session_id, None)
 
-        session.fit_scattering.assert_called_once_with()
+        session.fit_scattering.assert_called_once_with({})
 
     def test_session_action_run_spectral_analysis_returns_serialized_payload(self) -> None:
         session_id = "synthetic-spectral-dispatch"

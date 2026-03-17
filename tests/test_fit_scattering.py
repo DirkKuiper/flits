@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from flits.fitburst_adapter import SpectrumModeler
+from flits.analysis.fitting.fitburst_adapter import SpectrumModeler
 from flits.models import FilterbankMetadata
 from flits.session import BurstSession
 from flits.settings import ObservationConfig

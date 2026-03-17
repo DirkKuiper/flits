@@ -281,7 +281,7 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
         elif action == "compute_properties":
             session.compute_properties()
         elif action == "fit_scattering":
-            session.fit_scattering()
+            session.fit_scattering(payload)
         elif action == "run_spectral_analysis":
             session.run_spectral_analysis(float(payload["segment_length_ms"]))
         elif action == "set_notes":

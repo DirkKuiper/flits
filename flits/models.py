@@ -978,6 +978,9 @@ class ScatteringFitDiagnostics:
     data_profile_sn: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     model_profile_sn: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     residual_profile_sn: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    data_freq_profile_sn: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    model_freq_profile_sn: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    residual_freq_profile_sn: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
 
     def to_dict(self) -> dict[str, Any]:
         fit_statistics = {
@@ -1011,6 +1014,9 @@ class ScatteringFitDiagnostics:
             "data_profile_sn": _jsonable_1d(self.data_profile_sn, digits=6),
             "model_profile_sn": _jsonable_1d(self.model_profile_sn, digits=6),
             "residual_profile_sn": _jsonable_1d(self.residual_profile_sn, digits=6),
+            "data_freq_profile_sn": _jsonable_1d(self.data_freq_profile_sn, digits=6),
+            "model_freq_profile_sn": _jsonable_1d(self.model_freq_profile_sn, digits=6),
+            "residual_freq_profile_sn": _jsonable_1d(self.residual_freq_profile_sn, digits=6),
         }
 
     @classmethod
@@ -1034,6 +1040,9 @@ class ScatteringFitDiagnostics:
             data_profile_sn=_array_1d(payload.get("data_profile_sn"), dtype=float),
             model_profile_sn=_array_1d(payload.get("model_profile_sn"), dtype=float),
             residual_profile_sn=_array_1d(payload.get("residual_profile_sn"), dtype=float),
+            data_freq_profile_sn=_array_1d(payload.get("data_freq_profile_sn"), dtype=float),
+            model_freq_profile_sn=_array_1d(payload.get("model_freq_profile_sn"), dtype=float),
+            residual_freq_profile_sn=_array_1d(payload.get("residual_freq_profile_sn"), dtype=float),
         )
 
 

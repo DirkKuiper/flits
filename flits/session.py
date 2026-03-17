@@ -8,11 +8,12 @@ import warnings
 
 import numpy as np
 
-from flits.analysis.dm import available_dm_metrics, optimize_dm_trials
-from flits.analysis.spectral import run_averaged_spectral_analysis
-from flits.analysis.widths import compute_width_analysis
+from flits.analysis.dm_optimization import available_dm_metrics, optimize_dm_trials
+from flits.analysis.spectral.core import run_averaged_spectral_analysis
+from flits.analysis.morphology import compute_width_analysis
 from flits.exports import MAX_EXPORT_SNAPSHOTS, StoredExportSnapshot, create_export_snapshot
-from flits.fitburst_adapter import fit_scattering_selected_band
+from flits.analysis.fitting import fit_scattering_selected_band
+from flits.analysis.fitting.fitburst_adapter import FitburstRequestConfig
 from flits.measurements import (
     MeasurementContext,
     _offpulse_windows_ms,
@@ -1122,14 +1123,16 @@ class BurstSession:
         self._apply_width_analysis_to_results()
         return self.results
 
-    def fit_scattering(self) -> BurstMeasurements:
+    def fit_scattering(self, config_data: dict[str, Any] | None = None) -> BurstMeasurements:
         if self.results is None:
             self.compute_properties()
         assert self.results is not None
+        config = FitburstRequestConfig.from_dict(config_data) if config_data else None
 
         masked, context = self._build_measurement_context_for_data()
         selected_band = np.asarray(masked[context.spec_lo : context.spec_hi + 1, :], dtype=float)
         selected_freqs = np.asarray(self.freqs[context.spec_lo : context.spec_hi + 1], dtype=float)
+
         peak_abs_bin = _primary_peak_bin(
             peak_bins_abs=self._current_peak_positions(),
             profile_sn=context.selected_profile_sn,
@@ -1137,17 +1140,43 @@ class BurstSession:
             event_rel_start=context.event_rel_start,
             event_rel_end=context.event_rel_end,
         )
-        peak_rel_bin = None if peak_abs_bin is None else int(peak_abs_bin - self.crop_start)
+
+        # Apply decimation if time_factor > 1
+        tfac = max(1, int(self.time_factor))
+        if tfac > 1:
+            selected_band = block_reduce_mean(selected_band, tfac=tfac)
+            num_bins = selected_band.shape[1]
+            time_axis_ms = context.time_axis_ms[::tfac][:num_bins]
+            event_rel_start = min(context.event_rel_start // tfac, num_bins)
+            event_rel_end = min(context.event_rel_end // tfac, num_bins)
+            
+            offpulse_bins = np.unique(context.offpulse_bins // tfac)
+            offpulse_bins = offpulse_bins[offpulse_bins < num_bins]
+            
+            tsamp_ms = self.tsamp_ms * tfac
+            if peak_abs_bin is not None:
+                peak_rel_bin = min(int((peak_abs_bin - self.crop_start) // tfac), num_bins - 1)
+            else:
+                peak_rel_bin = None
+        else:
+            time_axis_ms = context.time_axis_ms
+            event_rel_start = context.event_rel_start
+            event_rel_end = context.event_rel_end
+            offpulse_bins = context.offpulse_bins
+            tsamp_ms = self.tsamp_ms
+            peak_rel_bin = None if peak_abs_bin is None else int(peak_abs_bin - self.crop_start)
+
         fit_result = fit_scattering_selected_band(
             selected_band=selected_band,
             freqs_mhz=selected_freqs,
-            time_axis_ms=context.time_axis_ms,
-            event_rel_start=context.event_rel_start,
-            event_rel_end=context.event_rel_end,
-            offpulse_bins=context.offpulse_bins,
-            tsamp_ms=self.tsamp_ms,
+            time_axis_ms=time_axis_ms,
+            event_rel_start=event_rel_start,
+            event_rel_end=event_rel_end,
+            offpulse_bins=offpulse_bins,
+            tsamp_ms=tsamp_ms,
             peak_rel_bin=peak_rel_bin,
             width_guess_ms=self.results.width_ms_acf,
+            config=config,
         )
 
         updated_flags = list(self.results.measurement_flags)

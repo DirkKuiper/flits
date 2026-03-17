@@ -294,13 +294,51 @@
             <section class="analysis-panel" id="analysisFittingPanel" data-tab-panel="fitting" role="tabpanel" hidden>
               <div class="analysis-panel-head">
                 <h4>Model Fitting</h4>
-                <p>Run a fitburst-backed scattering fit on the current crop, event window, mask, and spectral window.</p>
+                <p>Run a fitburst-backed 2D model fit on the current crop, event window, mask, and spectral window.</p>
+              </div>
+              <div class="field-row">
+                <label class="field">
+                  <span>Components <span class="tooltip-icon" data-tooltip="Number of gaussian components to model in this fit.">?</span></span>
+                  <input id="fitComponentsInput" type="number" min="1" max="10" step="1" value="1">
+                </label>
+              </div>
+              <div class="field" style="grid-column: 1 / -1; margin-top: 4px;">
+                <span>Fixed Parameters <span class="tooltip-icon" data-tooltip="Checked parameters will not be varied by the fitburst optimizer.">?</span></span>
+                <div class="checkbox-grid" id="fitFixedParamsContainer">
+                  <label class="checkbox-label" data-tooltip="Usually fixed because data is already dedispersed.">
+                    <input type="checkbox" name="fixed_param" value="dm" checked> DM
+                  </label>
+                  <label class="checkbox-label" data-tooltip="Frequency dependence of DM. Expected to be -2.0.">
+                    <input type="checkbox" name="fixed_param" value="dm_index" checked> DM Index
+                  </label>
+                  <label class="checkbox-label" data-tooltip="Frequency dependence of scattering. Expected to be -4.0.">
+                    <input type="checkbox" name="fixed_param" value="scattering_index" checked> Scattering Index
+                  </label>
+                  <label class="checkbox-label" data-tooltip="Power-law index of the spectrum across the band.">
+                    <input type="checkbox" name="fixed_param" value="spectral_index" checked> Spectral Index
+                  </label>
+                  <label class="checkbox-label" data-tooltip="Running of the spectral index.">
+                    <input type="checkbox" name="fixed_param" value="spectral_running" checked> Spectral Running
+                  </label>
+                  <label class="checkbox-label" data-tooltip="Overall amplitude of the component.">
+                    <input type="checkbox" name="fixed_param" value="amplitude"> Amplitude
+                  </label>
+                  <label class="checkbox-label" data-tooltip="Arrival time (centroid) of the burst component.">
+                    <input type="checkbox" name="fixed_param" value="arrival_time"> Arrival Time
+                  </label>
+                  <label class="checkbox-label" data-tooltip="Intrinsic Gaussian width of the component.">
+                    <input type="checkbox" name="fixed_param" value="burst_width"> Width
+                  </label>
+                  <label class="checkbox-label" data-tooltip="Exponential scattering timescale (tau).">
+                    <input type="checkbox" name="fixed_param" value="scattering_timescale"> Scattering Timescale
+                  </label>
+                </div>
               </div>
               <div class="export-actions">
-                <button class="primary-button" id="fitScatteringButton">Run Scattering Fit</button>
+                <button class="primary-button" id="fitScatteringButton">Run 2D Model Fit</button>
               </div>
               <div id="fittingContent" class="results-content">
-                <div class="empty-state">No scattering fit yet. Run the fit on the current selection to inspect model width, scattering time, and residuals.</div>
+                <div class="empty-state">No 2D model fit yet. Run the fit on the current selection to inspect model width, scattering time, and residuals.</div>
               </div>
               <div class="plot fitting-spectrum-plot is-empty" id="fittingSpectrumPlot"></div>
               <div class="plot fitting-plot is-empty" id="fittingProfilePlot"></div>

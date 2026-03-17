@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from flits.analysis.spectral import run_averaged_spectral_analysis
+from flits.analysis.spectral.core import run_averaged_spectral_analysis
 from flits.models import FilterbankMetadata, SpectralAnalysisResult
 from flits.session import BurstSession
 from flits.settings import ObservationConfig

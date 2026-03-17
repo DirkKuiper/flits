@@ -72,6 +72,8 @@ const dmComponentsContent = document.getElementById("dmComponentsContent")
 const fittingContent = document.getElementById("fittingContent")
 const fittingSpectrumPlot = document.getElementById("fittingSpectrumPlot")
 const fittingProfilePlot = document.getElementById("fittingProfilePlot")
+const fitComponentsInput = document.getElementById("fitComponentsInput")
+const fitFixedParamsContainer = document.getElementById("fitFixedParamsContainer")
 const spectralContent = document.getElementById("spectralContent")
 const spectralPlot = document.getElementById("spectralPlot")
 const spectralSegmentInput = document.getElementById("spectralSegmentInput")
@@ -148,6 +150,7 @@ const busyLockControls = [
   dmHalfRangeInput,
   dmStepInput,
   spectralSegmentInput,
+  fitComponentsInput,
 ]
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -225,7 +228,15 @@ function bindControls() {
     dmInput.value = String(bestDm)
     postAction("set_dm", { dm: Number(bestDm) })
   })
-  fitScatteringButton.addEventListener("click", () => postAction("fit_scattering"))
+  fitScatteringButton.addEventListener("click", () => {
+    const checkboxes = document.querySelectorAll("#fitFixedParamsContainer input[type='checkbox']:checked");
+    const fixedParams = Array.from(checkboxes).map((cb) => cb.value);
+    const numComponents = Number(fitComponentsInput.value) || 1;
+    postAction("fit_scattering", {
+      fixed_parameters: fixedParams,
+      num_components: numComponents,
+    });
+  })
   runSpectralButton.addEventListener("click", () => {
     postAction("run_spectral_analysis", { segment_length_ms: Number(spectralSegmentInput.value) })
   })
@@ -1081,8 +1092,6 @@ function renderDmComponentSummary(optimization) {
 function renderFitting(results) {
   const diagnostics = results?.diagnostics || {}
   const scatteringFit = diagnostics?.scattering_fit
-  const gaussianFits = Array.isArray(diagnostics?.gaussian_fits) ? diagnostics.gaussian_fits : []
-  const gaussianSection = renderGaussianDiagnostics(gaussianFits)
 
   if (!results) {
     fittingContent.innerHTML =
@@ -1098,8 +1107,7 @@ function renderFitting(results) {
 
   if (!scatteringFit) {
     fittingContent.innerHTML = `
-      <div class="empty-state">No scattering fit yet. Run the fit on the current selection to inspect model width, scattering time, and residuals.</div>
-      ${gaussianSection}
+      <div class="empty-state">No 2D model fit yet. Run the fit on the current selection to inspect model width, scattering time, and residuals.</div>
     `
     fittingSpectrumPlot.classList.add("is-empty")
     Plotly.purge(fittingSpectrumPlot)
@@ -1148,28 +1156,6 @@ function renderFitting(results) {
         </div>
       </details>
     ` : ""}
-    ${gaussianSection}
-  `
-}
-
-function renderGaussianDiagnostics(gaussianFits) {
-  const count = Array.isArray(gaussianFits) ? gaussianFits.length : 0
-  const fitList = count
-    ? `<ol class="fit-list">${gaussianFits
-        .map(
-          (fit) =>
-            `<li>mu ${fmt(fit.mu_ms, 3)} ms, sigma ${fmt(fit.sigma_ms, 3)} ms, amp ${fmt(fit.amp, 3)}</li>`,
-        )
-        .join("")}</ol>`
-    : "<div class=\"empty-state\">No Gaussian/component fits were produced for the current component-region selection.</div>"
-
-  return `
-    <details class="details-card results-details">
-      <summary>Gaussian / Component Fits (${count})</summary>
-      <div class="results-fit-panel">
-        ${fitList}
-      </div>
-    </details>
   `
 }
 
@@ -1762,73 +1748,10 @@ async function renderDmResidualPlot(optimization) {
 }
 
 async function renderFittingProfilePlot(scatteringFit) {
-  if (!scatteringFit || scatteringFit.status !== "ok") {
-    fittingProfilePlot.classList.add("is-empty")
-    Plotly.purge(fittingProfilePlot)
-    fittingProfilePlot.replaceChildren()
-    return
-  }
-
-  fittingProfilePlot.classList.remove("is-empty")
-  await Plotly.react(
-    "fittingProfilePlot",
-    [
-      {
-        x: scatteringFit.time_axis_ms,
-        y: scatteringFit.data_profile_sn,
-        mode: "lines",
-        type: "scattergl",
-        name: "Data profile",
-        line: { color: "#162e3a", width: 2.2 },
-        hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra>Data profile</extra>",
-      },
-      {
-        x: scatteringFit.time_axis_ms,
-        y: scatteringFit.model_profile_sn,
-        mode: "lines",
-        type: "scattergl",
-        name: "Model profile",
-        line: { color: "#0f766e", width: 2.4 },
-        hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra>Model profile</extra>",
-      },
-      {
-        x: scatteringFit.time_axis_ms,
-        y: scatteringFit.residual_profile_sn,
-        mode: "lines",
-        type: "scattergl",
-        name: "Residual profile",
-        line: { color: "#b45309", width: 2.0, dash: "dot" },
-        hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra>Residual profile</extra>",
-      },
-    ],
-    {
-      margin: { l: 70, r: 24, t: 18, b: 54 },
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor: "rgba(255,255,255,0.55)",
-      showlegend: true,
-      legend: {
-        orientation: "h",
-        yanchor: "bottom",
-        y: 1.02,
-        xanchor: "right",
-        x: 1.0,
-      },
-      hovermode: "closest",
-      xaxis: {
-        title: "Time (ms)",
-        automargin: true,
-        gridcolor: "rgba(24,33,38,0.08)",
-      },
-      yaxis: {
-        title: "Normalized Intensity",
-        automargin: true,
-        zeroline: true,
-        zerolinecolor: "rgba(24,33,38,0.25)",
-        gridcolor: "rgba(24,33,38,0.08)",
-      },
-    },
-    { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
-  )
+  // Profile plot is now integrated into the spectrum plot as marginals
+  fittingProfilePlot.classList.add("is-empty")
+  Plotly.purge(fittingProfilePlot)
+  fittingProfilePlot.replaceChildren()
 }
 
 async function renderFittingSpectrumPlot(scatteringFit) {
@@ -1837,6 +1760,13 @@ async function renderFittingSpectrumPlot(scatteringFit) {
   const residualSpectrum = scatteringFit?.residual_dynamic_spectrum_sn
   const freqAxis = scatteringFit?.freq_axis_mhz
   const timeAxis = scatteringFit?.time_axis_ms
+  const dataProfile = scatteringFit?.data_profile_sn
+  const modelProfile = scatteringFit?.model_profile_sn
+  const residualProfile = scatteringFit?.residual_profile_sn
+  const dataFreqProfile = scatteringFit?.data_freq_profile_sn
+  const modelFreqProfile = scatteringFit?.model_freq_profile_sn
+  const residualFreqProfile = scatteringFit?.residual_freq_profile_sn
+
   if (
     !scatteringFit
     || scatteringFit.status !== "ok"
@@ -1858,116 +1788,148 @@ async function renderFittingSpectrumPlot(scatteringFit) {
   fittingSpectrumPlot.classList.remove("is-empty")
   const dataModelRange = combinedQuantileRange([dataSpectrum, modelSpectrum], 0.02, 0.995)
   const residualRange = symmetricQuantileRange(residualSpectrum, 0.995)
+
+  // Domain constants for tight 3-column layout with marginals
+  const colGap = 0.04
+  const freqMarginW = 0.05
+  const colW = (1.0 - 2 * colGap - 3 * freqMarginW) / 3
+  const col1Start = 0.0
+  const col1End = col1Start + colW
+  const freq1Start = col1End + 0.005
+  const freq1End = freq1Start + freqMarginW
+  const col2Start = freq1End + colGap
+  const col2End = col2Start + colW
+  const freq2Start = col2End + 0.005
+  const freq2End = freq2Start + freqMarginW
+  const col3Start = freq2End + colGap
+  const col3End = col3Start + colW
+  const freq3Start = col3End + 0.005
+  const freq3End = freq3Start + freqMarginW
+
+  const heatmapBottom = 0.0
+  const heatmapTop = 0.74
+  const profileBottom = 0.78
+  const profileTop = 1.0
+
+  const traces = [
+    // --- Heatmaps ---
+    {
+      x: timeAxis, y: freqAxis, z: dataSpectrum,
+      type: "heatmap", xaxis: "x", yaxis: "y", coloraxis: "coloraxis",
+      hovertemplate: "%{x:.3f} ms<br>%{y:.3f} MHz<br>%{z:.3f}<extra>Data</extra>",
+    },
+    {
+      x: timeAxis, y: freqAxis, z: modelSpectrum,
+      type: "heatmap", xaxis: "x2", yaxis: "y2", coloraxis: "coloraxis",
+      hovertemplate: "%{x:.3f} ms<br>%{y:.3f} MHz<br>%{z:.3f}<extra>Model</extra>",
+    },
+    {
+      x: timeAxis, y: freqAxis, z: residualSpectrum,
+      type: "heatmap", xaxis: "x3", yaxis: "y3", coloraxis: "coloraxis2",
+      hovertemplate: "%{x:.3f} ms<br>%{y:.3f} MHz<br>%{z:.3f}<extra>Residual</extra>",
+    },
+    // --- Time profiles (top marginals) ---
+    {
+      x: timeAxis, y: dataProfile,
+      type: "scatter", mode: "lines",
+      line: { color: "#162e3a", width: 1.5 },
+      xaxis: "x", yaxis: "y4",
+      hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra>Data</extra>",
+      showlegend: false,
+    },
+    {
+      x: timeAxis, y: modelProfile,
+      type: "scatter", mode: "lines",
+      line: { color: "#0f766e", width: 1.5 },
+      xaxis: "x", yaxis: "y4",
+      hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra>Model</extra>",
+      showlegend: false,
+    },
+    {
+      x: timeAxis, y: modelProfile,
+      type: "scatter", mode: "lines",
+      line: { color: "#0f766e", width: 1.5 },
+      xaxis: "x2", yaxis: "y5",
+      hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra>Model</extra>",
+      showlegend: false,
+    },
+    {
+      x: timeAxis, y: residualProfile,
+      type: "scatter", mode: "lines",
+      line: { color: "#b45309", width: 1.5, dash: "dot" },
+      xaxis: "x3", yaxis: "y6",
+      hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra>Residual</extra>",
+      showlegend: false,
+    },
+    // --- Freq profiles (right marginals) ---
+    {
+      x: dataFreqProfile, y: freqAxis,
+      type: "scatter", mode: "lines",
+      line: { color: "#162e3a", width: 1.2 },
+      xaxis: "x4", yaxis: "y",
+      hovertemplate: "%{y:.3f} MHz<br>%{x:.3f}<extra>Data</extra>",
+      showlegend: false,
+    },
+    {
+      x: modelFreqProfile, y: freqAxis,
+      type: "scatter", mode: "lines",
+      line: { color: "#0f766e", width: 1.2 },
+      xaxis: "x5", yaxis: "y2",
+      hovertemplate: "%{y:.3f} MHz<br>%{x:.3f}<extra>Model</extra>",
+      showlegend: false,
+    },
+    {
+      x: residualFreqProfile, y: freqAxis,
+      type: "scatter", mode: "lines",
+      line: { color: "#b45309", width: 1.2, dash: "dot" },
+      xaxis: "x6", yaxis: "y3",
+      hovertemplate: "%{y:.3f} MHz<br>%{x:.3f}<extra>Residual</extra>",
+      showlegend: false,
+    },
+  ]
+
+  const gridColor = "rgba(24,33,38,0.08)"
   await Plotly.react(
     "fittingSpectrumPlot",
-    [
-      {
-        x: timeAxis,
-        y: freqAxis,
-        z: dataSpectrum,
-        type: "heatmap",
-        xaxis: "x",
-        yaxis: "y",
-        coloraxis: "coloraxis",
-        hovertemplate: "%{x:.3f} ms<br>%{y:.3f} MHz<br>%{z:.3f}<extra>Data</extra>",
-      },
-      {
-        x: timeAxis,
-        y: freqAxis,
-        z: modelSpectrum,
-        type: "heatmap",
-        xaxis: "x2",
-        yaxis: "y2",
-        coloraxis: "coloraxis",
-        hovertemplate: "%{x:.3f} ms<br>%{y:.3f} MHz<br>%{z:.3f}<extra>Model</extra>",
-      },
-      {
-        x: timeAxis,
-        y: freqAxis,
-        z: residualSpectrum,
-        type: "heatmap",
-        xaxis: "x3",
-        yaxis: "y3",
-        coloraxis: "coloraxis2",
-        hovertemplate: "%{x:.3f} ms<br>%{y:.3f} MHz<br>%{z:.3f}<extra>Residual</extra>",
-      },
-    ],
+    traces,
     {
-      margin: { l: 78, r: 110, t: 32, b: 54 },
+      margin: { l: 78, r: 24, t: 32, b: 54 },
       paper_bgcolor: "rgba(0,0,0,0)",
       plot_bgcolor: "rgba(255,255,255,0.55)",
       showlegend: false,
       hovermode: "closest",
-      xaxis: {
-        domain: [0.0, 0.28],
-        anchor: "y",
-        title: "Time (ms)",
-        automargin: true,
-        gridcolor: "rgba(24,33,38,0.08)",
-      },
-      yaxis: {
-        domain: [0.0, 1.0],
-        anchor: "x",
-        title: "Frequency (MHz)",
-        automargin: true,
-        gridcolor: "rgba(24,33,38,0.08)",
-      },
-      xaxis2: {
-        domain: [0.36, 0.64],
-        anchor: "y2",
-        title: "Time (ms)",
-        automargin: true,
-        gridcolor: "rgba(24,33,38,0.08)",
-      },
-      yaxis2: {
-        domain: [0.0, 1.0],
-        anchor: "x2",
-        matches: "y",
-        showticklabels: false,
-        gridcolor: "rgba(24,33,38,0.08)",
-      },
-      xaxis3: {
-        domain: [0.72, 1.0],
-        anchor: "y3",
-        title: "Time (ms)",
-        automargin: true,
-        gridcolor: "rgba(24,33,38,0.08)",
-      },
-      yaxis3: {
-        domain: [0.0, 1.0],
-        anchor: "x3",
-        matches: "y",
-        showticklabels: false,
-        gridcolor: "rgba(24,33,38,0.08)",
-      },
+      // Heatmap x-axes
+      xaxis:  { domain: [col1Start, col1End], anchor: "y",  title: "Time (ms)", automargin: true, gridcolor: gridColor },
+      xaxis2: { domain: [col2Start, col2End], anchor: "y2", title: "Time (ms)", automargin: true, gridcolor: gridColor },
+      xaxis3: { domain: [col3Start, col3End], anchor: "y3", title: "Time (ms)", automargin: true, gridcolor: gridColor },
+      // Freq marginal x-axes (right of each heatmap)
+      xaxis4: { domain: [freq1Start, freq1End], anchor: "y",  showticklabels: false, zeroline: false, gridcolor: gridColor },
+      xaxis5: { domain: [freq2Start, freq2End], anchor: "y2", showticklabels: false, zeroline: false, gridcolor: gridColor },
+      xaxis6: { domain: [freq3Start, freq3End], anchor: "y3", showticklabels: false, zeroline: false, gridcolor: gridColor },
+      // Heatmap y-axes
+      yaxis:  { domain: [heatmapBottom, heatmapTop], anchor: "x",  title: "Frequency (MHz)", automargin: true, gridcolor: gridColor },
+      yaxis2: { domain: [heatmapBottom, heatmapTop], anchor: "x2", matches: "y", showticklabels: false, gridcolor: gridColor },
+      yaxis3: { domain: [heatmapBottom, heatmapTop], anchor: "x3", matches: "y", showticklabels: false, gridcolor: gridColor },
+      // Time marginal y-axes (top of each heatmap)
+      yaxis4: { domain: [profileBottom, profileTop], anchor: "x",  showticklabels: false, zeroline: true, zerolinecolor: "rgba(24,33,38,0.15)", gridcolor: gridColor },
+      yaxis5: { domain: [profileBottom, profileTop], anchor: "x2", showticklabels: false, zeroline: true, zerolinecolor: "rgba(24,33,38,0.15)", gridcolor: gridColor },
+      yaxis6: { domain: [profileBottom, profileTop], anchor: "x3", showticklabels: false, zeroline: true, zerolinecolor: "rgba(24,33,38,0.15)", gridcolor: gridColor },
       coloraxis: {
         colorscale: "Viridis",
         cmin: dataModelRange[0],
         cmax: dataModelRange[1],
-        colorbar: {
-          title: { text: "Data / Model" },
-          x: 1.04,
-          y: 0.73,
-          len: 0.44,
-          thickness: 12,
-        },
+        colorbar: { title: { text: "Data / Model" }, x: 1.02, y: 0.37, len: 0.35, thickness: 12 },
       },
       coloraxis2: {
         colorscale: "RdBu",
         cmin: residualRange[0],
         cmax: residualRange[1],
-        colorbar: {
-          title: { text: "Residual" },
-          x: 1.04,
-          y: 0.24,
-          len: 0.44,
-          thickness: 12,
-        },
+        colorbar: { title: { text: "Residual" }, x: 1.02, y: 0.04, len: 0.35, thickness: 12 },
       },
       annotations: [
-        panelLabel("Data", 0.0, 1.0),
-        panelLabel("Model", 0.36, 1.0),
-        panelLabel("Residual", 0.72, 1.0),
+        panelLabel("Data", col1Start, 1.0),
+        panelLabel("Model", col2Start, 1.0),
+        panelLabel("Residual", col3Start, 1.0),
       ],
     },
     { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
@@ -2015,6 +1977,11 @@ function renderScatteringParameterTable(parameters, uncertainties) {
     parameterRow("Intrinsic Width", parameters.burst_width?.[0], uncertainties.burst_width?.[0], 1e3, "ms"),
     parameterRow("Scattering Tau", parameters.scattering_timescale?.[0], uncertainties.scattering_timescale?.[0], 1e3, "ms"),
     parameterRow("Log Amplitude", parameters.amplitude?.[0], uncertainties.amplitude?.[0], 1.0, ""),
+    parameterRow("DM", parameters.dm?.[0], uncertainties.dm?.[0], 1.0, "pc/cm³"),
+    parameterRow("DM Index", parameters.dm_index?.[0], uncertainties.dm_index?.[0], 1.0, ""),
+    parameterRow("Spectral Index", parameters.spectral_index?.[0], uncertainties.spectral_index?.[0], 1.0, ""),
+    parameterRow("Spectral Running", parameters.spectral_running?.[0], uncertainties.spectral_running?.[0], 1.0, ""),
+    parameterRow("Scattering Index", parameters.scattering_index?.[0], uncertainties.scattering_index?.[0], 1.0, ""),
   ].filter(Boolean)
 
   if (!rows.length) {
@@ -2022,8 +1989,8 @@ function renderScatteringParameterTable(parameters, uncertainties) {
   }
 
   return `
-    <details class="details-card results-details">
-      <summary>Scattering Parameters</summary>
+    <details class="details-card results-details" open>
+      <summary>All Best-Fit Parameters</summary>
       <div class="residual-table-wrap">
         <table class="residual-table">
           <thead>

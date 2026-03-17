@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import io
 from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
@@ -21,6 +22,33 @@ MIN_FIT_TIME_BINS = 16
 MIN_WEIGHT_BINS = 8
 FIT_PARAMETERS = ("amplitude", "arrival_time", "burst_width", "scattering_timescale")
 FIXED_PARAMETERS = ("dm", "dm_index", "scattering_index", "spectral_index", "spectral_running")
+
+
+@dataclass(frozen=True)
+class FitburstRequestConfig:
+    num_components: int = 1
+    fixed_parameters: list[str] = field(default_factory=lambda: ["dm", "dm_index", "scattering_index", "spectral_index", "spectral_running"])
+    initial_parameters: dict[str, list[float]] | None = None
+    bounds: dict[str, list[tuple[float, float]]] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "num_components": int(self.num_components),
+            "fixed_parameters": list(self.fixed_parameters),
+            "initial_parameters": self.initial_parameters,
+            "bounds": self.bounds,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any] | None) -> "FitburstRequestConfig":
+        if payload is None:
+            return cls()
+        return cls(
+            num_components=int(payload.get("num_components", 1)),
+            fixed_parameters=[str(flag) for flag in payload.get("fixed_parameters", ["dm", "dm_index", "scattering_index", "spectral_index", "spectral_running"])],
+            initial_parameters=payload.get("initial_parameters"),
+            bounds=payload.get("bounds"),
+        )
 
 
 @dataclass(frozen=True)
@@ -45,6 +73,7 @@ def fit_scattering_selected_band(
     tsamp_ms: float,
     peak_rel_bin: int | None,
     width_guess_ms: float | None,
+    config: "FitburstRequestConfig" | None = None,
 ) -> FitburstScatteringResult:
     if SpectrumModeler is None or LSFitter is None:
         return _failed_result(
@@ -73,16 +102,6 @@ def fit_scattering_selected_band(
             message=f"At least {MIN_FIT_CHANNELS} unmasked channels are required for scattering fits.",
         )
 
-    weight_range = _contiguous_weight_range(
-        num_time=data.shape[1],
-        event_rel_start=int(event_rel_start),
-        event_rel_end=int(event_rel_end),
-    )
-    if weight_range is None:
-        return _failed_result(
-            status="insufficient_offpulse",
-            message="A contiguous off-pulse region is required to estimate fit weights.",
-        )
 
     event_slice = np.asarray(
         np.nanmean(normalized_data[good_freq, event_rel_start:event_rel_end], axis=0),
@@ -98,6 +117,9 @@ def fit_scattering_selected_band(
         peak_rel_bin = int(event_rel_start + np.nanargmax(event_slice))
     peak_rel_bin = max(0, min(int(peak_rel_bin), data.shape[1] - 1))
 
+    if config is None:
+        config = FitburstRequestConfig()
+
     initial_parameters = _initial_parameters(
         normalized_data=normalized_data,
         freqs_mhz=freqs,
@@ -107,26 +129,34 @@ def fit_scattering_selected_band(
         event_rel_start=int(event_rel_start),
         event_rel_end=int(event_rel_end),
         width_guess_ms=width_guess_ms,
+        num_components=config.num_components,
     )
+    
+    if config.initial_parameters:
+        for key, val in config.initial_parameters.items():
+            if key in initial_parameters:
+                initial_parameters[key] = val
 
-    times_sec = (time_axis_ms - float(time_axis_ms[0])) / 1e3
+    fit_data = normalized_data[:, event_rel_start:event_rel_end]
+    fit_time_axis_ms = time_axis_ms[event_rel_start:event_rel_end]
+    times_sec = (fit_time_axis_ms - float(time_axis_ms[0])) / 1e3
+    
     model = SpectrumModeler(
         freqs,
         times_sec,
         dm_incoherent=0.0,
-        num_components=1,
+        num_components=config.num_components,
         is_dedispersed=True,
     )
     model.update_parameters(initial_parameters)
     fitter = LSFitter(
-        normalized_data,
+        fit_data,
         model,
         good_freq=good_freq,
-        weighted_fit=True,
-        weight_range=weight_range,
+        weighted_fit=False,
     )
     with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-        fitter.fix_parameter(list(FIXED_PARAMETERS))
+        fitter.fix_parameter(config.fixed_parameters)
         fitter.fit()
 
     results = getattr(fitter, "results", None)
@@ -147,12 +177,24 @@ def fit_scattering_selected_band(
     fit_parameters = list(getattr(fitter, "fit_parameters", []))
     full_best_parameters = dict(initial_parameters)
     full_best_parameters.update(bestfit_parameters)
+    
     model.update_parameters(full_best_parameters)
-    model_dynamic_spectrum = np.asarray(model.compute_model(data=normalized_data), dtype=float)
+    model_dynamic_spectrum = np.asarray(model.compute_model(data=fit_data), dtype=float)
 
-    data_profile = np.nanmean(normalized_data[good_freq, :], axis=0)
+    data_profile = np.nanmean(fit_data[good_freq, :], axis=0)
     model_profile = np.mean(model_dynamic_spectrum[good_freq, :], axis=0)
     residual_profile = data_profile - model_profile
+    
+    data_freq_profile = np.nanmean(fit_data, axis=1)
+    model_freq_profile = np.mean(model_dynamic_spectrum, axis=1)
+    residual_freq_profile = data_freq_profile - model_freq_profile
+
+    bad_freq = ~good_freq
+    fit_data[bad_freq, :] = np.nan
+    model_dynamic_spectrum[bad_freq, :] = np.nan
+    data_freq_profile[bad_freq] = np.nan
+    model_freq_profile[bad_freq] = np.nan
+    residual_freq_profile[bad_freq] = np.nan
 
     width_sec = _parameter_value(full_best_parameters, "burst_width")
     tau_sec = _parameter_value(full_best_parameters, "scattering_timescale")
@@ -163,21 +205,24 @@ def fit_scattering_selected_band(
         status="ok",
         message=str(getattr(results, "message", "") or "").strip() or None,
         fitter="fitburst",
-        component_count=1,
+        component_count=config.num_components,
         fit_parameters=fit_parameters,
-        fixed_parameters=list(FIXED_PARAMETERS),
+        fixed_parameters=config.fixed_parameters,
         initial_parameters=initial_parameters,
         bestfit_parameters=full_best_parameters,
         bestfit_uncertainties=bestfit_uncertainties,
         fit_statistics=_sanitize_fit_statistics(fit_statistics),
         freq_axis_mhz=np.asarray(freqs, dtype=float),
-        time_axis_ms=np.asarray(time_axis_ms, dtype=float),
-        data_dynamic_spectrum_sn=np.asarray(normalized_data, dtype=float),
+        time_axis_ms=np.asarray(fit_time_axis_ms, dtype=float),
+        data_dynamic_spectrum_sn=np.asarray(fit_data, dtype=float),
         model_dynamic_spectrum_sn=np.asarray(model_dynamic_spectrum, dtype=float),
-        residual_dynamic_spectrum_sn=np.asarray(normalized_data - model_dynamic_spectrum, dtype=float),
+        residual_dynamic_spectrum_sn=np.asarray(fit_data - model_dynamic_spectrum, dtype=float),
         data_profile_sn=np.asarray(data_profile, dtype=float),
         model_profile_sn=np.asarray(model_profile, dtype=float),
         residual_profile_sn=np.asarray(residual_profile, dtype=float),
+        data_freq_profile_sn=np.asarray(data_freq_profile, dtype=float),
+        model_freq_profile_sn=np.asarray(model_freq_profile, dtype=float),
+        residual_freq_profile_sn=np.asarray(residual_freq_profile, dtype=float),
     )
     return FitburstScatteringResult(
         status="ok",
@@ -241,6 +286,7 @@ def _initial_parameters(
     event_rel_start: int,
     event_rel_end: int,
     width_guess_ms: float | None,
+    num_components: int = 1,
 ) -> dict[str, list[float]]:
     event_window = normalized_data[:, event_rel_start:event_rel_end]
     peak_value = float(np.nanmax(event_window)) if event_window.size and np.isfinite(event_window).any() else 1.0
@@ -251,16 +297,16 @@ def _initial_parameters(
     tau_ms = max(tsamp_ms, width_ms / 4.0)
     ref_freq = float(np.min(freqs_mhz))
     return {
-        "amplitude": [amplitude_guess],
-        "arrival_time": [arrival_time_sec],
-        "burst_width": [float(width_ms / 1e3)],
-        "dm": [0.0],
-        "dm_index": [-2.0],
-        "ref_freq": [ref_freq],
-        "scattering_timescale": [float(tau_ms / 1e3)],
-        "scattering_index": [-4.0],
-        "spectral_index": [0.0],
-        "spectral_running": [0.0],
+        "amplitude": [amplitude_guess] * num_components,
+        "arrival_time": [arrival_time_sec] * num_components,
+        "burst_width": [float(width_ms / 1e3)] * num_components,
+        "dm": [0.0] * num_components,
+        "dm_index": [-2.0] * num_components,
+        "ref_freq": [ref_freq] * num_components,
+        "scattering_timescale": [float(tau_ms / 1e3)] * num_components,
+        "scattering_index": [-4.0] * num_components,
+        "spectral_index": [0.0] * num_components,
+        "spectral_running": [0.0] * num_components,
     }
 
 
