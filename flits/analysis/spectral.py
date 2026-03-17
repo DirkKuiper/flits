@@ -191,6 +191,33 @@ def run_averaged_spectral_analysis(
         df = float(getattr(spectrum, "df"))
 
     nyquist_hz = float(0.5 / dt_sec)
+
+    power_law_a = None
+    power_law_alpha = None
+    power_law_a_err = None
+    power_law_alpha_err = None
+
+    valid_mask = (freq_hz > 0) & (power > 0)
+    if np.count_nonzero(valid_mask) >= 3:
+        fit_f = np.log10(freq_hz[valid_mask])
+        fit_p = np.log10(power[valid_mask])
+        try:
+            popt, pcov = np.polyfit(fit_f, fit_p, 1, cov=True)
+            alpha = -popt[0]
+            log10_A = popt[1]
+            A = 10 ** log10_A
+
+            alpha_err = np.sqrt(pcov[0, 0])
+            c_err = np.sqrt(pcov[1, 1])
+            A_err = np.log(10) * A * c_err
+
+            power_law_a = float(A)
+            power_law_alpha = float(alpha)
+            power_law_a_err = float(A_err)
+            power_law_alpha_err = float(alpha_err)
+        except Exception:
+            pass
+
     return SpectralAnalysisResult(
         status="ok",
         message=None,
@@ -205,4 +232,8 @@ def run_averaged_spectral_analysis(
         nyquist_hz=nyquist_hz,
         freq_hz=np.asarray(freq_hz, dtype=float),
         power=np.asarray(power, dtype=float),
+        power_law_a=power_law_a,
+        power_law_alpha=power_law_alpha,
+        power_law_a_err=power_law_a_err,
+        power_law_alpha_err=power_law_alpha_err,
     )

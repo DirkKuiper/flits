@@ -28,7 +28,7 @@ class TelescopePreset:
     machine_ids: tuple[int, ...] = ()
     sefd_jy: float | None = None
     read_start_sec: float = 0.0
-    initial_crop_sec: float | None = None
+    read_end_sec: float | None = None
     normalization_tail_fraction: float = 0.25
 
     def to_dict(self) -> dict[str, Any]:
@@ -39,7 +39,7 @@ class TelescopePreset:
             "machine_ids": list(self.machine_ids),
             "sefd_jy": self.sefd_jy,
             "read_start_sec": self.read_start_sec,
-            "initial_crop_sec": self.initial_crop_sec,
+            "read_end_sec": self.read_end_sec,
             "normalization_tail_fraction": self.normalization_tail_fraction,
         }
 
@@ -66,7 +66,7 @@ PRESETS: dict[str, TelescopePreset] = {
         machine_ids=(),
         sefd_jy=None,
         read_start_sec=0.0,
-        initial_crop_sec=None,
+        read_end_sec=None,
         normalization_tail_fraction=0.25,
     ),
     "nrt": TelescopePreset(
@@ -76,7 +76,7 @@ PRESETS: dict[str, TelescopePreset] = {
         machine_ids=(),
         sefd_jy=35.0 / 1.4,
         read_start_sec=0.05,
-        initial_crop_sec=0.151,
+        read_end_sec=0.201,
         normalization_tail_fraction=0.25,
     ),
     "gbt": TelescopePreset(
@@ -86,7 +86,7 @@ PRESETS: dict[str, TelescopePreset] = {
         machine_ids=(),
         sefd_jy=None,
         read_start_sec=0.0,
-        initial_crop_sec=None,
+        read_end_sec=None,
         normalization_tail_fraction=0.25,
     ),
     "lofar": TelescopePreset(
@@ -96,7 +96,7 @@ PRESETS: dict[str, TelescopePreset] = {
         machine_ids=(11,),
         sefd_jy=None,
         read_start_sec=0.0,
-        initial_crop_sec=None,
+        read_end_sec=None,
         normalization_tail_fraction=0.25,
     ),
 }
@@ -222,7 +222,7 @@ class ObservationConfig:
     telescope_label: str = "Generic Filterbank"
     sefd_jy: float | None = None
     read_start_sec: float = 0.0
-    initial_crop_sec: float | None = None
+    read_end_sec: float | None = None
     normalization_tail_fraction: float = 0.25
     auto_mask_profile: str = "auto"
     distance_mpc: float | None = None
@@ -236,7 +236,7 @@ class ObservationConfig:
         *,
         sefd_jy: float | None = None,
         read_start_sec: float | None = None,
-        initial_crop_sec: float | None = None,
+        read_end_sec: float | None = None,
         auto_mask_profile: str | None = "auto",
         distance_mpc: float | None = None,
         redshift: float | None = None,
@@ -250,7 +250,7 @@ class ObservationConfig:
             telescope_label=preset.label,
             sefd_jy=preset.sefd_jy if sefd_jy is None else float(sefd_jy),
             read_start_sec=preset.read_start_sec if read_start_sec is None else float(read_start_sec),
-            initial_crop_sec=preset.initial_crop_sec if initial_crop_sec is None else float(initial_crop_sec),
+            read_end_sec=preset.read_end_sec if read_end_sec is None else float(read_end_sec),
             normalization_tail_fraction=preset.normalization_tail_fraction,
             auto_mask_profile=mask_profile.key,
             distance_mpc=distance_mpc,

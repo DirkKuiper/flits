@@ -576,7 +576,7 @@ def compute_burst_measurements(
     width_results: Sequence[WidthResult] | None = None,
     accepted_width: AcceptedWidthSelection | None = None,
 ) -> BurstMeasurements:
-    time_axis_ms = (int(crop_start_bin) + np.arange(masked.shape[1], dtype=float)) * float(tsamp_ms)
+    time_axis_ms = (int(crop_start_bin) + np.arange(masked.shape[1], dtype=float)) * float(tsamp_ms) + float(read_start_sec) * 1000.0
     context = build_measurement_context(
         masked=np.asarray(masked, dtype=float),
         time_axis_ms=time_axis_ms,
@@ -597,9 +597,9 @@ def compute_burst_measurements(
         event_rel_start,
         event_rel_end,
     )
-    peak_positions_ms = [float(int(peak_bin) * float(tsamp_ms)) for peak_bin in peak_bins_abs]
+    peak_positions_ms = [float(int(peak_bin) * float(tsamp_ms) + float(read_start_sec) * 1000.0) for peak_bin in peak_bins_abs]
     if not peak_positions_ms and peak_bin_abs is not None:
-        peak_positions_ms = [float(peak_bin_abs * float(tsamp_ms))]
+        peak_positions_ms = [float(peak_bin_abs * float(tsamp_ms) + float(read_start_sec) * 1000.0)]
 
     toa_topo_mjd = None
     if peak_bin_abs is not None:

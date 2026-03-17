@@ -30,7 +30,7 @@
           </div>
           <label class="field">
             <span>Known filterbanks</span>
-            <select id="fileSelect"></select>
+            <select id="fileSelect" required></select>
           </label>
           <label class="field">
             <span>File path</span>
@@ -38,7 +38,7 @@
           </label>
           <div class="field-row">
             <label class="field">
-              <span>DM</span>
+              <span>DM <span class="tooltip-icon" data-tooltip="Dispersion Measure (pc/cm³) used to de-disperse the filterbank data.">?</span></span>
               <input id="dmInput" type="number" step="0.001" value="527.851">
             </label>
             <label class="field">
@@ -46,27 +46,27 @@
               <select id="telescopeInput"></select>
             </label>
           </div>
-          <div class="field-row">
-            <label class="field">
-              <span>SEFD (Jy)</span>
-              <input id="sefdInput" type="number" step="0.1" placeholder="optional">
-            </label>
-            <label class="field">
-              <span>Read Start (s)</span>
-              <input id="readStartInput" type="number" step="0.001" placeholder="preset default">
-            </label>
-          </div>
           <label class="field">
-            <span>Initial Crop (s)</span>
-            <input id="initialCropInput" type="number" step="0.001" placeholder="preset default">
+            <span>SEFD (Jy) <span class="tooltip-icon" data-tooltip="System Equivalent Flux Density. Used to convert arbitrary data units into physical Janskys (Jy). Leave blank to remain in arbitrary units.">?</span></span>
+            <input id="sefdInput" type="number" step="0.1" placeholder="optional">
           </label>
           <div class="field-row">
             <label class="field">
-              <span>Distance (Mpc)</span>
+              <span>Read Start (s) <span class="tooltip-icon" data-tooltip="Offset in seconds from the start of the file to begin reading. Useful for skipping header artifacts or seeking into large files.">?</span></span>
+              <input id="readStartInput" type="text" inputmode="decimal" placeholder="preset default">
+            </label>
+            <label class="field">
+              <span>Read End (s) <span class="tooltip-icon" data-tooltip="Absolute time in seconds from the start of the file to stop reading. A smaller bounds speeds up load times and reduces memory usage.">?</span></span>
+              <input id="readEndInput" type="text" inputmode="decimal" placeholder="preset default">
+            </label>
+          </div>
+          <div class="field-row">
+            <label class="field">
+              <span>Distance (Mpc) <span class="tooltip-icon" data-tooltip="Luminosity distance to the source in Megaparsecs. Used to compute isotropic equivalent energy.">?</span></span>
               <input id="distanceInput" type="number" step="0.001" placeholder="optional">
             </label>
             <label class="field">
-              <span>Redshift</span>
+              <span>Redshift <span class="tooltip-icon" data-tooltip="Cosmological redshift of the source. Used to compute rest-frame properties (e.g. intrinsic frequency and energy).">?</span></span>
               <input id="redshiftInput" type="number" step="0.0001" placeholder="optional">
             </label>
           </div>
@@ -261,15 +261,15 @@
               </div>
               <div class="field-row">
                 <label class="field">
-                  <span>Metric</span>
+                  <span>Metric <span class="tooltip-icon" data-tooltip="The mathematical heuristic used to determine the 'best' DM.">?</span></span>
                   <select id="dmMetricInput"></select>
                 </label>
                 <label class="field">
-                  <span>Half-range</span>
+                  <span>Half-range <span class="tooltip-icon" data-tooltip="How far to search in pc/cm³ on either side of the current applied DM.">?</span></span>
                   <input id="dmHalfRangeInput" type="number" step="0.001" value="2.0">
                 </label>
                 <label class="field">
-                  <span>Step</span>
+                  <span>Step <span class="tooltip-icon" data-tooltip="Resolution of the DM search grid. Smaller steps create smoother optimization curves but take longer to compute.">?</span></span>
                   <input id="dmStepInput" type="number" step="0.001" value="0.1">
                 </label>
               </div>
@@ -313,7 +313,7 @@
               </div>
               <div class="field-row">
                 <label class="field">
-                  <span>Segment Length</span>
+                  <span>Segment Length <span class="tooltip-icon" data-tooltip="Length of each time segment used for the averaged power spectrum. Shorter segments decrease frequency resolution but increase averaging (less noise). Longer segments increase frequency resolution but reduce averaging (more noise).">?</span></span>
                   <input id="spectralSegmentInput" type="number" step="0.001" min="0.001">
                 </label>
               </div>

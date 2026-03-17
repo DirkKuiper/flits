@@ -757,6 +757,10 @@ class SpectralAnalysisResult:
     nyquist_hz: float | None
     freq_hz: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     power: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    power_law_a: float | None = None
+    power_law_alpha: float | None = None
+    power_law_a_err: float | None = None
+    power_law_alpha_err: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -773,6 +777,10 @@ class SpectralAnalysisResult:
             "nyquist_hz": _float_or_none(self.nyquist_hz),
             "freq_hz": _jsonable_1d(self.freq_hz, digits=6),
             "power": _jsonable_1d(self.power, digits=6),
+            "power_law_a": _float_or_none(self.power_law_a),
+            "power_law_alpha": _float_or_none(self.power_law_alpha),
+            "power_law_a_err": _float_or_none(self.power_law_a_err),
+            "power_law_alpha_err": _float_or_none(self.power_law_alpha_err),
         }
 
     @classmethod
@@ -793,6 +801,10 @@ class SpectralAnalysisResult:
             nyquist_hz=_float_or_none(payload.get("nyquist_hz")),
             freq_hz=_array_1d(payload.get("freq_hz"), dtype=float),
             power=_array_1d(payload.get("power"), dtype=float),
+            power_law_a=_float_or_none(payload.get("power_law_a")),
+            power_law_alpha=_float_or_none(payload.get("power_law_alpha")),
+            power_law_a_err=_float_or_none(payload.get("power_law_a_err")),
+            power_law_alpha_err=_float_or_none(payload.get("power_law_alpha_err")),
         )
 
 
@@ -1175,7 +1187,7 @@ class AnalysisSessionSnapshot:
     preset_key: str
     sefd_jy: float | None
     read_start_sec: float
-    initial_crop_sec: float | None
+    read_end_sec: float | None
     auto_mask_profile: str
     distance_mpc: float | None
     redshift: float | None
@@ -1206,7 +1218,7 @@ class AnalysisSessionSnapshot:
             "preset_key": self.preset_key,
             "sefd_jy": _float_or_none(self.sefd_jy),
             "read_start_sec": float(self.read_start_sec),
-            "initial_crop_sec": _float_or_none(self.initial_crop_sec),
+            "read_end_sec": _float_or_none(self.read_end_sec),
             "auto_mask_profile": self.auto_mask_profile,
             "distance_mpc": _float_or_none(self.distance_mpc),
             "redshift": _float_or_none(self.redshift),
@@ -1239,7 +1251,7 @@ class AnalysisSessionSnapshot:
             preset_key=str(payload.get("preset_key", "generic")),
             sefd_jy=_float_or_none(payload.get("sefd_jy")),
             read_start_sec=float(payload.get("read_start_sec", 0.0)),
-            initial_crop_sec=_float_or_none(payload.get("initial_crop_sec")),
+            read_end_sec=_float_or_none(payload.get("read_end_sec")),
             auto_mask_profile=str(payload.get("auto_mask_profile", "auto")),
             distance_mpc=_float_or_none(payload.get("distance_mpc")),
             redshift=_float_or_none(payload.get("redshift")),

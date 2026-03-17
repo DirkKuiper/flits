@@ -45,7 +45,7 @@ const dmInput = document.getElementById("dmInput")
 const telescopeInput = document.getElementById("telescopeInput")
 const sefdInput = document.getElementById("sefdInput")
 const readStartInput = document.getElementById("readStartInput")
-const initialCropInput = document.getElementById("initialCropInput")
+const readEndInput = document.getElementById("readEndInput")
 const distanceInput = document.getElementById("distanceInput")
 const redshiftInput = document.getElementById("redshiftInput")
 const autoMaskProfileInput = document.getElementById("autoMaskProfileInput")
@@ -139,7 +139,7 @@ const busyLockControls = [
   telescopeInput,
   sefdInput,
   readStartInput,
-  initialCropInput,
+  readEndInput,
   distanceInput,
   redshiftInput,
   autoMaskProfileInput,
@@ -160,11 +160,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadPresets()
   await loadAutoMaskProfiles()
   await loadFiles()
-  if (fileSelect.options.length > 0) {
-    fileInput.value = fileSelect.value
-    await detectSelectedFile()
-    await loadSession({ silent: true })
-  }
+  // Removed auto-loading logic. Waiting for explicit user action.
 })
 
 function initialAnalysisTab() {
@@ -416,15 +412,22 @@ async function loadFiles() {
   try {
     const payload = await api("/api/files")
     fileSelect.innerHTML = ""
+    
+    // Add default unselected placeholder option
+    const defaultOption = document.createElement("option")
+    defaultOption.value = ""
+    defaultOption.disabled = true
+    defaultOption.selected = true
+    defaultOption.textContent = "Choose a filterbank..."
+    fileSelect.appendChild(defaultOption)
+
     for (const file of payload.files) {
       const option = document.createElement("option")
       option.value = file
       option.textContent = file
       fileSelect.appendChild(option)
     }
-    if (payload.files.length > 0) {
-      fileSelect.value = payload.files[0]
-    }
+    // We intentionally do not auto-select the first file.
     updateControlStates()
   } catch (error) {
     setStatus(error.message, "error")
@@ -457,7 +460,7 @@ async function loadSession(options = {}) {
         telescope: telescopeInput.value,
         sefd_jy: parseOptionalNumber(sefdInput.value),
         read_start_sec: parseOptionalNumber(readStartInput.value),
-        initial_crop_sec: parseOptionalNumber(initialCropInput.value),
+        read_end_sec: parseOptionalNumber(readEndInput.value),
         distance_mpc: parseOptionalNumber(distanceInput.value),
         redshift: parseOptionalNumber(redshiftInput.value),
         auto_mask_profile: autoMaskProfileInput.value || "auto",
@@ -1192,6 +1195,7 @@ function renderSpectral(view) {
       resultTile("Resolution", spectralAnalysis.frequency_resolution_hz === null || spectralAnalysis.frequency_resolution_hz === undefined ? "n/a" : `${fmt(spectralAnalysis.frequency_resolution_hz, 3)} Hz`, "secondary"),
       resultTile("Nyquist", spectralAnalysis.nyquist_hz === null || spectralAnalysis.nyquist_hz === undefined ? "n/a" : `${fmt(spectralAnalysis.nyquist_hz, 3)} Hz`, "secondary"),
       resultTile("Bins", Array.isArray(spectralAnalysis.freq_hz) ? String(spectralAnalysis.freq_hz.length) : String(spectralAnalysis.freq_hz?.length || 0), "secondary"),
+      resultTile("Power-L. Index", spectralAnalysis.power_law_alpha === null || spectralAnalysis.power_law_alpha === undefined ? "n/a" : `${fmt(spectralAnalysis.power_law_alpha, 3)} ± ${fmt(spectralAnalysis.power_law_alpha_err, 3)}`, "secondary"),
     ]
     spectralBody = `
       <div class="results-section">
@@ -1240,19 +1244,33 @@ async function renderSpectralPlot(spectralAnalysis) {
   }
 
   spectralPlot.classList.remove("is-empty")
+  const traces = [
+    {
+      x: spectralAnalysis.freq_hz,
+      y: spectralAnalysis.power,
+      mode: "lines",
+      type: "scattergl",
+      line: { color: "#0f766e", width: 2 },
+      name: "Averaged power",
+      hovertemplate: "Frequency %{x:.3f} Hz<br>Power %{y:.4g}<extra></extra>",
+    },
+  ]
+  if (spectralAnalysis.power_law_a !== null && spectralAnalysis.power_law_a !== undefined && spectralAnalysis.power_law_alpha !== null && spectralAnalysis.power_law_alpha !== undefined && Array.isArray(spectralAnalysis.freq_hz) && spectralAnalysis.freq_hz.length > 0) {
+    const fitPower = spectralAnalysis.freq_hz.map(f => f > 0 ? spectralAnalysis.power_law_a * Math.pow(f, -spectralAnalysis.power_law_alpha) : null)
+    traces.push({
+      x: spectralAnalysis.freq_hz,
+      y: fitPower,
+      mode: "lines",
+      type: "scattergl",
+      line: { color: "#e11d48", width: 2, dash: "dash" },
+      name: "Power-law fit",
+      hovertemplate: "Fit Power %{y:.4g}<extra></extra>",
+    })
+  }
+
   await Plotly.react(
     "spectralPlot",
-    [
-      {
-        x: spectralAnalysis.freq_hz,
-        y: spectralAnalysis.power,
-        mode: "lines",
-        type: "scattergl",
-        line: { color: "#0f766e", width: 2 },
-        name: "Averaged power",
-        hovertemplate: "Frequency %{x:.3f} Hz<br>Power %{y:.4g}<extra></extra>",
-      },
-    ],
+    traces,
     {
       margin: { l: 70, r: 24, t: 18, b: 54 },
       paper_bgcolor: "rgba(0,0,0,0)",
@@ -2559,10 +2577,13 @@ function setStatus(text, tone = "info") {
 }
 
 function setPresetSelection(presetKey) {
+  const changed = telescopeInput.value !== presetKey
   syncingPresetSelection = true
   telescopeInput.value = presetKey
   syncingPresetSelection = false
-  syncPresetDefaults()
+  if (changed) {
+    syncPresetDefaults()
+  }
 }
 
 function renderDetectionHint(errorMessage = null) {
@@ -2613,13 +2634,22 @@ function syncPresetDefaults() {
   const preset = presetDefaults.get(telescopeInput.value)
   if (!preset) return
   sefdInput.placeholder = preset.sefd_jy === null ? "optional" : String(preset.sefd_jy)
-  readStartInput.placeholder = String(preset.read_start_sec)
-  initialCropInput.placeholder = preset.initial_crop_sec === null ? "full file" : String(preset.initial_crop_sec)
+  readStartInput.value = String(preset.read_start_sec)
+  if (preset.read_end_sec !== null) {
+    readEndInput.value = String(preset.read_end_sec)
+    readEndInput.placeholder = ""
+  } else {
+    readEndInput.value = ""
+    readEndInput.placeholder = "full file"
+  }
 }
 
 function parseOptionalNumber(value) {
-  const trimmed = value.trim()
-  return trimmed === "" ? null : Number(trimmed)
+  if (value === null || value === undefined) return null
+  const trimmed = String(value).trim().replace(",", ".")
+  if (trimmed === "") return null
+  const num = Number(trimmed)
+  return isNaN(num) ? null : num
 }
 
 function infoChip(label, value, tone = "neutral") {

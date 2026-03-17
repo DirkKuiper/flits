@@ -115,14 +115,18 @@ def load_filterbank_data(
         read_start_sec = config.read_start_for_file(source_path.name)
         nstart = min(max(int(read_start_sec / tsamp), 0), max(header.nspectra - 1, 0))
         nread = max(1, int(header.nspectra - nstart))
+        
+        if config.read_end_sec is not None:
+            # We want to read up to the absolute read_end_sec bound.
+            # To do this, we calculate the absolute bin index of the end,
+            # and subtract our starting bin index.
+            nend = max(nstart + 1, int(config.read_end_sec / tsamp))
+            requested_nread = nend - nstart
+            nread = min(nread, requested_nread)
 
         raw = reader.get_data(nstart, nread, npoln=header_npol)
         stokes_i, effective_npol = _build_stokes_i(raw)
         stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp)
-
-        if config.initial_crop_sec is not None:
-            crop_end = min(stokes_i.shape[1], max(1, int(config.initial_crop_sec / tsamp)))
-            stokes_i = stokes_i[:, :crop_end]
 
         tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
         offpulse_start = min(stokes_i.shape[1] - 1, int((1 - tail_fraction) * stokes_i.shape[1]))

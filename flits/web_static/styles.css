@@ -301,6 +301,10 @@ textarea:disabled {
   opacity: 0.7;
 }
 
+select:required:invalid {
+  color: var(--muted);
+}
+
 textarea {
   resize: vertical;
   min-height: 96px;
@@ -1127,6 +1131,79 @@ button.is-busy::after {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* --- Custom Tooltips --- */
+.tooltip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(92, 108, 115, 0.15);
+  color: var(--muted);
+  font-family: var(--font-mono, "IBM Plex Mono", monospace);
+  font-size: 0.65rem;
+  font-weight: 600;
+  margin-left: 6px;
+  vertical-align: text-top;
+  cursor: help;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+[data-tooltip]:hover.tooltip-icon {
+  background: var(--accent);
+  color: white;
+}
+
+[data-tooltip] {
+  position: relative;
+  cursor: help;
+}
+
+[data-tooltip]::after,
+[data-tooltip]::before {
+  position: absolute;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+[data-tooltip]:hover::after,
+[data-tooltip]:hover::before {
+  visibility: visible;
+  opacity: 1;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: var(--ink);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  white-space: normal;
+  width: max-content;
+  max-width: 260px;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(24, 33, 38, 0.2);
+}
+
+[data-tooltip]::before {
+  content: "";
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: var(--ink);
 }
 
 @media (max-width: 1200px) {

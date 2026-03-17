@@ -165,7 +165,7 @@ class BurstSession:
         *,
         sefd_jy: float | None = None,
         read_start_sec: float | None = None,
-        initial_crop_sec: float | None = None,
+        read_end_sec: float | None = None,
         auto_mask_profile: str | None = "auto",
         distance_mpc: float | None = None,
         redshift: float | None = None,
@@ -179,7 +179,7 @@ class BurstSession:
             preset_key=preset_key,
             sefd_jy=sefd_jy,
             read_start_sec=read_start_sec,
-            initial_crop_sec=initial_crop_sec,
+            read_end_sec=read_end_sec,
             auto_mask_profile=auto_mask_profile,
             distance_mpc=distance_mpc,
             redshift=redshift,
@@ -216,7 +216,7 @@ class BurstSession:
             telescope=snapshot.preset_key,
             sefd_jy=snapshot.sefd_jy,
             read_start_sec=snapshot.read_start_sec,
-            initial_crop_sec=snapshot.initial_crop_sec,
+            read_end_sec=snapshot.read_end_sec,
             auto_mask_profile=snapshot.auto_mask_profile,
             distance_mpc=snapshot.distance_mpc,
             redshift=snapshot.redshift,
@@ -348,10 +348,13 @@ class BurstSession:
         self.clear_spectral_analysis()
 
     def bin_to_ms(self, time_bin: int | float) -> float:
-        return float(time_bin) * self.tsamp_ms
+        return float(time_bin) * self.tsamp_ms + float(self.config.read_start_sec) * 1000.0
 
     def ms_to_bin(self, time_ms: float) -> int:
-        return int(round(float(time_ms) / self.tsamp_ms))
+        return int(round((float(time_ms) - float(self.config.read_start_sec) * 1000.0) / self.tsamp_ms))
+
+    def _bins_to_ms_array(self, time_bins: np.ndarray) -> np.ndarray:
+        return np.asarray(time_bins, dtype=float) * self.tsamp_ms + float(self.config.read_start_sec) * 1000.0
 
     def clamp_bin(self, value: int, is_end: bool = False) -> int:
         if is_end:
@@ -454,7 +457,7 @@ class BurstSession:
         spec_lo, spec_hi = self._selected_channel_bounds()
         context = build_measurement_context(
             masked=masked,
-            time_axis_ms=(self.crop_start + np.arange(masked.shape[1], dtype=float)) * self.tsamp_ms,
+            time_axis_ms=self._bins_to_ms_array(self.crop_start + np.arange(masked.shape[1], dtype=float)),
             freqs_mhz=self.freqs,
             event_rel_start=rel_start,
             event_rel_end=rel_end,
@@ -544,7 +547,7 @@ class BurstSession:
         spec_lo_mhz, spec_hi_mhz = self._selected_frequency_bounds_mhz()
 
         time_axis = (
-            (self.crop_start + np.arange(reduced.shape[1]) * self.time_factor) * self.tsamp_ms
+            self._bins_to_ms_array(self.crop_start + np.arange(reduced.shape[1]) * self.time_factor)
             if reduced.size
             else np.array([], dtype=float)
         )
@@ -1238,7 +1241,7 @@ class BurstSession:
             preset_key=self.config.preset_key,
             sefd_jy=self.config.sefd_jy,
             read_start_sec=float(self.config.read_start_sec),
-            initial_crop_sec=self.config.initial_crop_sec,
+            read_end_sec=self.config.read_end_sec,
             auto_mask_profile=self.config.auto_mask_profile,
             distance_mpc=self.config.distance_mpc,
             redshift=self.config.redshift,

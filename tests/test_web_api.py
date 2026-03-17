@@ -242,7 +242,7 @@ class WebApiTest(unittest.TestCase):
                 telescope=None,
                 sefd_jy=None,
                 read_start_sec=None,
-                initial_crop_sec=None,
+                read_end_sec=None,
                 auto_mask_profile="thorough",
                 distance_mpc=123.0,
                 redshift=0.12,

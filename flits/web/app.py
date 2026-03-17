@@ -30,7 +30,7 @@ class CreateSessionRequest(BaseModel):
     telescope: str | None = None
     sefd_jy: float | None = None
     read_start_sec: float | None = None
-    initial_crop_sec: float | None = None
+    read_end_sec: float | None = None
     auto_mask_profile: str | None = "auto"
     distance_mpc: float | None = None
     redshift: float | None = None
@@ -151,7 +151,7 @@ def create_session(request: CreateSessionRequest) -> dict[str, Any]:
         telescope=request.telescope,
         sefd_jy=request.sefd_jy,
         read_start_sec=request.read_start_sec,
-        initial_crop_sec=request.initial_crop_sec,
+        read_end_sec=request.read_end_sec,
         auto_mask_profile=request.auto_mask_profile,
         distance_mpc=request.distance_mpc,
         redshift=request.redshift,
