@@ -8,6 +8,7 @@ const state = {
   detection: null,
   userSelectedPreset: false,
   busyAction: null,
+  knownFileDirectories: [],
 }
 
 const modeLabels = {
@@ -39,6 +40,7 @@ const modeChip = document.getElementById("modeChip")
 const modeHelpEl = document.getElementById("modeHelp")
 const pendingBox = document.getElementById("pendingBox")
 const loadButton = document.getElementById("loadButton")
+const directorySelect = document.getElementById("directorySelect")
 const fileSelect = document.getElementById("fileSelect")
 const fileInput = document.getElementById("fileInput")
 const dmInput = document.getElementById("dmInput")
@@ -102,11 +104,50 @@ const freqUpButton = document.getElementById("freqUpButton")
 const toastStack = document.getElementById("toastStack")
 const presetDefaults = new Map()
 let syncingPresetSelection = false
+const ROOT_DIRECTORY_VALUE = "__flits_root__"
 const viewerDomains = {
   heatmap: { x: [0.0, 0.78], y: [0.0, 0.78] },
   time: { x: [0.0, 0.78], y: [0.82, 1.0] },
   spectrum: { x: [0.82, 1.0], y: [0.0, 0.78] },
 }
+const plotTheme = Object.freeze({
+  ink: "#323232",
+  muted: "#6A6A6A",
+  accent: "#7235a2",
+  accentStrong: "#5f2b88",
+  accentAlt: "#327cbc",
+  accentAltStrong: "#285f93",
+  accentSoft: "rgba(114, 53, 162, 0.12)",
+  accentAltSoft: "rgba(50, 124, 188, 0.14)",
+  warning: "#8e6ebd",
+  warningSoft: "rgba(142, 110, 189, 0.14)",
+  alert: "#a23b61",
+  neutral: "#6A6A6A",
+  neutralSoft: "#7d8290",
+  charcoal: "#191919",
+  charcoalSoft: "#2e2e2e",
+  paperBg: "rgba(0,0,0,0)",
+  plotBg: "rgba(255,255,255,0.72)",
+  grid: "rgba(50,50,50,0.08)",
+  gridStrong: "rgba(50,50,50,0.15)",
+  annotationBg: "rgba(255,255,255,0.84)",
+  annotationBorder: "rgba(50,50,50,0.1)",
+  heatmapScale: [
+    [0.0, "#191919"],
+    [0.16, "#2e2e2e"],
+    [0.42, "#4d326e"],
+    [0.68, "#7235a2"],
+    [0.86, "#b287d0"],
+    [1.0, "#f3eafb"],
+  ],
+  residualScale: [
+    [0.0, "#2e2e2e"],
+    [0.35, "#7d8290"],
+    [0.5, "#fbfbfd"],
+    [0.65, "#c5abd8"],
+    [1.0, "#7235a2"],
+  ],
+})
 const modeButtons = Array.from(document.querySelectorAll(".mode-button"))
 const analysisTabButtons = Array.from(document.querySelectorAll("[data-analysis-tab]"))
 const analysisPanels = Array.from(document.querySelectorAll("[data-tab-panel]"))
@@ -134,6 +175,7 @@ const sessionControls = [
 ]
 const busyLockControls = [
   loadButton,
+  directorySelect,
   fileSelect,
   fileInput,
   importSessionInput,
@@ -174,17 +216,28 @@ function initialAnalysisTab() {
 
 function bindControls() {
   fileInput.addEventListener("input", () => {
+    syncKnownFileSelection(fileInput.value.trim())
+    updateControlStates()
+  })
+
+  directorySelect.addEventListener("change", () => {
+    renderFileOptions(directoryPathFromValue(directorySelect.value), { resetSelection: true })
+    fileInput.value = ""
+    state.detection = null
+    renderDetectionHint()
     updateControlStates()
   })
 
   fileSelect.addEventListener("change", async () => {
     fileInput.value = fileSelect.value
+    syncKnownFileSelection(fileSelect.value)
     state.userSelectedPreset = false
     await detectSelectedFile()
     updateControlStates()
   })
 
   fileInput.addEventListener("change", async () => {
+    syncKnownFileSelection(fileInput.value.trim())
     state.userSelectedPreset = false
     await detectSelectedFile()
     updateControlStates()
@@ -238,7 +291,9 @@ function bindControls() {
     });
   })
   runSpectralButton.addEventListener("click", () => {
-    postAction("run_spectral_analysis", { segment_length_ms: Number(spectralSegmentInput.value) })
+    postAction("run_spectral_analysis", {
+      segment_length_ms: Number(spectralSegmentInput.value),
+    })
   })
   buildExportButton.addEventListener("click", () => postAction("export_results"))
   resetViewButton.addEventListener("click", () => postAction("reset_view"))
@@ -391,6 +446,123 @@ async function loadAutoMaskProfiles() {
   }
 }
 
+function normalizeKnownFilePath(path) {
+  const normalized = String(path || "").trim().replaceAll("\\", "/")
+  if (!normalized || normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized)) {
+    return normalized
+  }
+  return normalized.replace(/^\.\//, "")
+}
+
+function directoryOptionValue(path) {
+  return path === "" ? ROOT_DIRECTORY_VALUE : path
+}
+
+function directoryPathFromValue(value) {
+  return value === ROOT_DIRECTORY_VALUE ? "" : value
+}
+
+function findKnownDirectory(path) {
+  return state.knownFileDirectories.find((directory) => directory.path === path) || null
+}
+
+function groupKnownFiles(files) {
+  const grouped = new Map()
+  for (const rawPath of files) {
+    const path = normalizeKnownFilePath(rawPath)
+    const segments = path.split("/")
+    const name = segments[segments.length - 1]
+    const directoryPath = segments.length > 1 ? segments.slice(0, -1).join("/") : ""
+    if (!grouped.has(directoryPath)) {
+      grouped.set(directoryPath, [])
+    }
+    grouped.get(directoryPath).push({ path, name })
+  }
+
+  return Array.from(grouped.entries())
+    .sort(([left], [right]) => {
+      if (left === "") return -1
+      if (right === "") return 1
+      return left.localeCompare(right)
+    })
+    .map(([path, directoryFiles]) => ({
+      path,
+      label: path || "Data root",
+      file_count: directoryFiles.length,
+      files: directoryFiles.sort((left, right) => left.path.localeCompare(right.path)),
+    }))
+}
+
+function renderDirectoryOptions(selectedPath = null) {
+  directorySelect.innerHTML = ""
+
+  const placeholder = document.createElement("option")
+  placeholder.value = ""
+  placeholder.selected = selectedPath == null
+  placeholder.disabled = state.knownFileDirectories.length > 0
+  placeholder.textContent = state.knownFileDirectories.length > 0
+    ? "Choose a folder..."
+    : "No mounted filterbanks found"
+  directorySelect.appendChild(placeholder)
+
+  for (const directory of state.knownFileDirectories) {
+    const option = document.createElement("option")
+    option.value = directoryOptionValue(directory.path)
+    option.textContent = `${directory.label} (${directory.file_count})`
+    option.selected = directory.path === selectedPath
+    directorySelect.appendChild(option)
+  }
+}
+
+function renderFileOptions(directoryPath, options = {}) {
+  const { selectedFile = "", resetSelection = false } = options
+  const normalizedSelection = normalizeKnownFilePath(selectedFile)
+  const directory = findKnownDirectory(directoryPath)
+  const files = directory?.files || []
+
+  fileSelect.innerHTML = ""
+
+  const placeholder = document.createElement("option")
+  placeholder.value = ""
+  placeholder.selected = true
+  placeholder.disabled = true
+  placeholder.textContent = directory == null
+    ? (state.knownFileDirectories.length > 0 ? "Choose a folder first" : "No mounted filterbanks found")
+    : "Choose a filterbank..."
+  fileSelect.appendChild(placeholder)
+
+  for (const file of files) {
+    const option = document.createElement("option")
+    option.value = file.path
+    option.textContent = file.name
+    option.title = file.path
+    option.selected = !resetSelection && file.path === normalizedSelection
+    fileSelect.appendChild(option)
+  }
+}
+
+function syncKnownFileSelection(path) {
+  const normalizedPath = normalizeKnownFilePath(path)
+  const directory = state.knownFileDirectories.find((candidate) =>
+    candidate.files.some((file) => file.path === normalizedPath),
+  )
+
+  if (!directory) {
+    const defaultDirectory = state.knownFileDirectories.length === 1 ? state.knownFileDirectories[0].path : null
+    renderDirectoryOptions(defaultDirectory)
+    renderFileOptions(defaultDirectory, { resetSelection: true })
+    if (defaultDirectory != null) {
+      directorySelect.value = directoryOptionValue(defaultDirectory)
+    }
+    return
+  }
+
+  renderDirectoryOptions(directory.path)
+  renderFileOptions(directory.path, { selectedFile: normalizedPath })
+  directorySelect.value = directoryOptionValue(directory.path)
+  fileSelect.value = normalizedPath
+}
+
 async function detectSelectedFile() {
   const bfile = fileInput.value.trim() || fileSelect.value
   if (!bfile) {
@@ -422,23 +594,15 @@ async function detectSelectedFile() {
 async function loadFiles() {
   try {
     const payload = await api("/api/files")
-    fileSelect.innerHTML = ""
-    
-    // Add default unselected placeholder option
-    const defaultOption = document.createElement("option")
-    defaultOption.value = ""
-    defaultOption.disabled = true
-    defaultOption.selected = true
-    defaultOption.textContent = "Choose a filterbank..."
-    fileSelect.appendChild(defaultOption)
-
-    for (const file of payload.files) {
-      const option = document.createElement("option")
-      option.value = file
-      option.textContent = file
-      fileSelect.appendChild(option)
+    state.knownFileDirectories = Array.isArray(payload.directories)
+      ? payload.directories
+      : groupKnownFiles(Array.isArray(payload.files) ? payload.files : [])
+    const defaultDirectory = state.knownFileDirectories.length === 1 ? state.knownFileDirectories[0].path : null
+    renderDirectoryOptions(defaultDirectory)
+    renderFileOptions(defaultDirectory, { resetSelection: true })
+    if (defaultDirectory != null) {
+      directorySelect.value = directoryOptionValue(defaultDirectory)
     }
-    // We intentionally do not auto-select the first file.
     updateControlStates()
   } catch (error) {
     setStatus(error.message, "error")
@@ -584,11 +748,7 @@ function dmMetricOptions(view) {
   }
   return [
     { key: "integrated_event_snr", label: "Integrated-event S/N", summary: "Legacy sweep metric.", formula: "", origin: "", references: [] },
-    { key: "peak_snr", label: "Peak S/N", summary: "Maximize the event-window peak sample.", formula: "", origin: "", references: [] },
-    { key: "profile_sharpness", label: "Profile Sharpness", summary: "Favor concentrated pulse power.", formula: "", origin: "", references: [] },
-    { key: "burst_compactness", label: "Burst Compactness", summary: "Favor narrow bursts at fixed fluence.", formula: "", origin: "", references: [] },
-    { key: "minimal_residual_drift", label: "Minimal Residual Drift", summary: "Flatten sub-band residual delay.", formula: "", origin: "", references: [] },
-    { key: "maximal_structure", label: "Maximal Structure", summary: "Align fine temporal structure.", formula: "", origin: "", references: [] },
+    { key: "dm_phase", label: "DMphase", summary: "Use the automatic DMphase coherent-power curve on the selected reduced waterfall.", formula: "", origin: "", references: [] },
   ]
 }
 
@@ -633,10 +793,7 @@ function defaultSpectralSegmentMs(view) {
   if (!sampleMs || bins <= 0) {
     return null
   }
-  const preferredBins = Math.max(4, Math.floor(bins / 4))
-  const maxBins = Math.max(1, Math.floor(bins / 2))
-  const segmentBins = Math.min(preferredBins, maxBins)
-  return Math.max(segmentBins * sampleMs, sampleMs)
+  return bins * sampleMs
 }
 
 function spectralSegmentIsValid(view, segmentMs) {
@@ -646,7 +803,7 @@ function spectralSegmentIsValid(view, segmentMs) {
     return false
   }
   const segmentBins = Math.max(1, Math.round(Number(segmentMs) / sampleMs))
-  return Math.floor(bins / segmentBins) >= 2
+  return Math.floor(bins / segmentBins) >= 1
 }
 
 function syncSpectralSegmentInput(view) {
@@ -940,24 +1097,28 @@ function renderDmOptimization(view) {
   dmOptimizeBadge.textContent = fitTone === "success" ? "Fit Ready" : "Sweep Ready"
   dmOptimizeBadge.dataset.tone = fitTone
   const snrLabel = snrMetricLabel(optimization.snr_metric)
+  const scoreLabel = optimization.snr_metric === "dm_phase" ? "DMphase Score" : snrLabel
   const metricSummary = definition?.summary || snrMetricSummary(optimization.snr_metric)
   const residualTone = residualStatusTone(optimization.residual_status)
   const residualBandCount = Array.isArray(optimization.subband_freqs_mhz) ? optimization.subband_freqs_mhz.length : 0
+  const metricContextNote = optimization.snr_metric === "dm_phase"
+    ? "Sampled Peak DM is the discrete argmax of the DMphase curve. Best DM is the upstream-style weighted polynomial refinement used for comparison with DM_phase."
+    : "Sampled Peak DM is the best discrete grid point. Best DM is the local quadratic refinement around that sampled peak."
 
   const primaryTiles = [
-    resultTile("Best DM", fmt(optimization.best_dm, 6), "primary"),
-    resultTile("Uncertainty", optimization.best_dm_uncertainty === null ? "n/a" : `±${fmt(optimization.best_dm_uncertainty, 6)}`, "primary"),
-    resultTile(`Best ${snrLabel}`, fmt(optimization.best_sn, 3), "primary"),
+    resultTile("Best DM", fmt(optimization.best_dm, 6), "primary", "Refined best-fit DM reported by the selected metric model."),
+    resultTile("DM Uncertainty", optimization.best_dm_uncertainty === null ? "n/a" : `±${fmt(optimization.best_dm_uncertainty, 6)}`, "primary", "Reported 1-sigma uncertainty on the refined best DM when the fit model can provide one."),
+    resultTile(`Best ${scoreLabel}`, fmt(optimization.best_sn, 3), "primary", `Best fitted ${scoreLabel.toLowerCase()} at the refined DM solution.`),
   ]
 
   const secondaryTiles = [
-    resultTile("Scored Metric", snrLabel, "secondary"),
-    resultTile("Sweep Center", fmt(optimization.center_dm, 6), "secondary"),
-    resultTile("Sampled Best", fmt(optimization.sampled_best_dm, 6), "secondary"),
-    resultTile(`Sampled ${snrLabel}`, fmt(optimization.sampled_best_sn, 3), "secondary"),
-    resultTile("Half-range", fmt(optimization.actual_half_range, 3), "secondary"),
-    resultTile("Step", fmt(optimization.step, 3), "secondary"),
-    resultTile("Sweep Applied DM", fmt(optimization.applied_dm, 6), "secondary"),
+    resultTile("Selected Metric", snrLabel, "secondary", "Metric currently used to score every trial DM in this sweep."),
+    resultTile("Sweep Center DM", fmt(optimization.center_dm, 6), "secondary", "DM around which the symmetric trial grid was generated."),
+    resultTile("Sampled Peak DM", fmt(optimization.sampled_best_dm, 6), "secondary", "Best discrete DM bin before any peak refinement is applied."),
+    resultTile(`Sampled Peak ${scoreLabel}`, fmt(optimization.sampled_best_sn, 3), "secondary", `Raw ${scoreLabel.toLowerCase()} at the best discrete trial DM.`),
+    resultTile("Half-range", fmt(optimization.actual_half_range, 3), "secondary", "Actual symmetric search half-range covered by the discrete trial grid."),
+    resultTile("Step", fmt(optimization.step, 3), "secondary", "Spacing between adjacent trial DMs in the sweep."),
+    resultTile("Applied DM During Sweep", fmt(optimization.applied_dm, 6), "secondary", "DM that was applied to the session data before the sweep was run."),
   ]
 
   dmOptimizationContent.innerHTML = `
@@ -970,6 +1131,10 @@ function renderDmOptimization(view) {
     <div class="dm-fit-note" data-tone="neutral">
       <strong>${escapeHtml(snrLabel)}</strong>
       <span>${escapeHtml(metricSummary)}</span>
+    </div>
+    <div class="dm-fit-note" data-tone="neutral">
+      <strong>${escapeHtml(optimization.snr_metric === "dm_phase" ? "How To Read DMphase" : "How To Read This Sweep")}</strong>
+      <span>${escapeHtml(metricContextNote)}</span>
     </div>
     <div class="dm-fit-note" data-tone="${escapeHtml(fitTone)}">
       <strong>${escapeHtml(fitStatusLabel(optimization.fit_status))}</strong>
@@ -1016,23 +1181,29 @@ function renderDmMetricDefinition(definition) {
     return ""
   }
   const references = Array.isArray(definition.references) ? definition.references : []
-  const referencesMarkup = references.length
+  const showReferences = definition.key === "dm_phase" && references.length
+  const referencesMarkup = showReferences
     ? `<ul class="reference-list">${references.map(renderDmMetricReference).join("")}</ul>`
-    : '<div class="empty-state compact">No external reference stored for this metric yet.</div>'
+    : ""
+  const referencesSection = showReferences
+    ? `
+      <div class="references-block">
+        <h5>DMphase Reference</h5>
+        ${referencesMarkup}
+      </div>
+    `
+    : ""
 
   return `
     <details class="details-card results-details">
-      <summary>Metric Definition</summary>
+      <summary>Selected Metric</summary>
       <div class="kv-list">
         <div class="kv-item"><span>Metric</span><strong>${escapeHtml(definition.label || definition.key || "n/a")}</strong></div>
         <div class="kv-item"><span>Definition</span><strong>${escapeHtml(definition.summary || "n/a")}</strong></div>
         <div class="kv-item"><span>Formula</span><strong>${escapeHtml(definition.formula || "n/a")}</strong></div>
         <div class="kv-item"><span>Origin</span><strong>${escapeHtml(definition.origin || "n/a")}</strong></div>
       </div>
-      <div class="references-block">
-        <h5>References</h5>
-        ${referencesMarkup}
-      </div>
+      ${referencesSection}
     </details>
   `
 }
@@ -1182,6 +1353,7 @@ function renderSpectral(view) {
       resultTile("Nyquist", spectralAnalysis.nyquist_hz === null || spectralAnalysis.nyquist_hz === undefined ? "n/a" : `${fmt(spectralAnalysis.nyquist_hz, 3)} Hz`, "secondary"),
       resultTile("Bins", Array.isArray(spectralAnalysis.freq_hz) ? String(spectralAnalysis.freq_hz.length) : String(spectralAnalysis.freq_hz?.length || 0), "secondary"),
       resultTile("Power-L. Index", spectralAnalysis.power_law_alpha === null || spectralAnalysis.power_law_alpha === undefined ? "n/a" : `${fmt(spectralAnalysis.power_law_alpha, 3)} ± ${fmt(spectralAnalysis.power_law_alpha_err, 3)}`, "secondary"),
+      resultTile("Noise Floor (C)", spectralAnalysis.power_law_c === null || spectralAnalysis.power_law_c === undefined ? "n/a" : `${fmt(spectralAnalysis.power_law_c, 3)} ± ${fmt(spectralAnalysis.power_law_c_err, 3)}`, "secondary"),
     ]
     spectralBody = `
       <div class="results-section">
@@ -1191,6 +1363,10 @@ function renderSpectral(view) {
         </div>
         <div class="results-secondary">
           ${resultTiles.join("")}
+        </div>
+        <div class="dm-fit-note" data-tone="neutral" style="margin-top: 1rem;">
+          <strong>Power-law Fit (MLE)</strong>
+          <span>The power-law parameters are estimated using Maximum Likelihood Estimation (MLE) maximizing the Whittle likelihood. Frequencies are normalized by their geometric mean to decouple the amplitude from the spectral index.</span>
         </div>
       </div>
       ${spectralAnalysis.message ? `<div class="empty-state">${escapeHtml(spectralAnalysis.message)}</div>` : ""}
@@ -1236,19 +1412,20 @@ async function renderSpectralPlot(spectralAnalysis) {
       y: spectralAnalysis.power,
       mode: "lines",
       type: "scattergl",
-      line: { color: "#0f766e", width: 2 },
+      line: { color: plotTheme.accent, width: 2 },
       name: "Averaged power",
       hovertemplate: "Frequency %{x:.3f} Hz<br>Power %{y:.4g}<extra></extra>",
     },
   ]
   if (spectralAnalysis.power_law_a !== null && spectralAnalysis.power_law_a !== undefined && spectralAnalysis.power_law_alpha !== null && spectralAnalysis.power_law_alpha !== undefined && Array.isArray(spectralAnalysis.freq_hz) && spectralAnalysis.freq_hz.length > 0) {
-    const fitPower = spectralAnalysis.freq_hz.map(f => f > 0 ? spectralAnalysis.power_law_a * Math.pow(f, -spectralAnalysis.power_law_alpha) : null)
+    const powerC = typeof spectralAnalysis.power_law_c === "number" ? spectralAnalysis.power_law_c : 0
+    const fitPower = spectralAnalysis.freq_hz.map(f => f > 0 ? spectralAnalysis.power_law_a * Math.pow(f, -spectralAnalysis.power_law_alpha) + powerC : null)
     traces.push({
       x: spectralAnalysis.freq_hz,
       y: fitPower,
       mode: "lines",
       type: "scattergl",
-      line: { color: "#e11d48", width: 2, dash: "dash" },
+      line: { color: plotTheme.accentAlt, width: 2, dash: "dash" },
       name: "Power-law fit",
       hovertemplate: "Fit Power %{y:.4g}<extra></extra>",
     })
@@ -1259,16 +1436,18 @@ async function renderSpectralPlot(spectralAnalysis) {
     traces,
     {
       margin: { l: 70, r: 24, t: 18, b: 54 },
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor: "rgba(255,255,255,0.55)",
+      paper_bgcolor: plotTheme.paperBg,
+      plot_bgcolor: plotTheme.plotBg,
       showlegend: false,
       xaxis: {
         title: "Frequency (Hz)",
-        gridcolor: "rgba(24,33,38,0.08)",
+        type: "log",
+        gridcolor: plotTheme.grid,
       },
       yaxis: {
         title: "Power",
-        gridcolor: "rgba(24,33,38,0.08)",
+        type: "log",
+        gridcolor: plotTheme.grid,
       },
     },
     { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
@@ -1313,8 +1492,11 @@ function renderExportManifest() {
   `
 }
 
-function resultTile(label, value, variant) {
-  return `<div class="result-tile ${variant}"><span class="results-label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
+function resultTile(label, value, variant, tooltip = "") {
+  const tooltipMarkup = tooltip
+    ? ` <span class="tooltip-icon" data-tooltip="${escapeHtml(tooltip)}">?</span>`
+    : ""
+  return `<div class="result-tile ${variant}"><span class="results-label">${escapeHtml(label)}${tooltipMarkup}</span><strong>${escapeHtml(value)}</strong></div>`
 }
 
 function renderMeasurementCard(label, value, { uncertainty = null, method = null, flags = [], details = "" } = {}) {
@@ -1480,7 +1662,7 @@ async function renderPlots(view) {
         yaxis: "y2",
         mode: "lines",
         type: "scattergl",
-        line: { color: "#162e3a", width: 2.2 },
+        line: { color: plotTheme.charcoalSoft, width: 2.2 },
         hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra></extra>",
       },
       {
@@ -1490,7 +1672,7 @@ async function renderPlots(view) {
         xaxis: "x",
         yaxis: "y",
         type: "heatmap",
-        colorscale: "Viridis",
+        colorscale: plotTheme.heatmapScale,
         zmin: view.plot.heatmap.zmin,
         zmax: view.plot.heatmap.zmax,
         hovertemplate: "%{x:.3f} ms<br>%{y:.3f} MHz<br>%{z:.3f}<extra></extra>",
@@ -1509,14 +1691,14 @@ async function renderPlots(view) {
         yaxis: "y3",
         mode: "lines",
         type: "scattergl",
-        line: { color: "#8b4513", width: 2.2 },
+        line: { color: plotTheme.accentAlt, width: 2.2 },
         hovertemplate: "%{x:.3f}<br>%{y:.3f} MHz<extra></extra>",
       },
     ],
     {
       margin: { l: 76, r: 118, t: 18, b: 54 },
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor: "rgba(255,255,255,0.55)",
+      paper_bgcolor: plotTheme.paperBg,
+      plot_bgcolor: plotTheme.plotBg,
       showlegend: false,
       hovermode: "closest",
       xaxis: {
@@ -1536,28 +1718,28 @@ async function renderPlots(view) {
         anchor: "y2",
         matches: "x",
         showticklabels: false,
-        gridcolor: "rgba(24,33,38,0.08)",
+        gridcolor: plotTheme.grid,
       },
       yaxis2: {
         domain: viewerDomains.time.y,
         anchor: "x2",
         title: "Summed Intensity",
         automargin: true,
-        gridcolor: "rgba(24,33,38,0.08)",
+        gridcolor: plotTheme.grid,
       },
       xaxis3: {
         domain: viewerDomains.spectrum.x,
         anchor: "y3",
         title: "Summed Intensity",
         automargin: true,
-        gridcolor: "rgba(24,33,38,0.08)",
+        gridcolor: plotTheme.grid,
       },
       yaxis3: {
         domain: viewerDomains.spectrum.y,
         anchor: "x3",
         matches: "y",
         showticklabels: false,
-        gridcolor: "rgba(24,33,38,0.08)",
+        gridcolor: plotTheme.grid,
       },
       shapes: buildViewerShapes(view),
       annotations: buildViewerAnnotations(),
@@ -1588,8 +1770,8 @@ async function renderDmOptimizationPlot(optimization, appliedDm) {
       type: "scatter",
       mode: "lines",
       fill: "toself",
-      line: { width: 0, color: "rgba(15, 118, 110, 0)" },
-      fillcolor: "rgba(15, 118, 110, 0.12)",
+      line: { width: 0, color: "rgba(114, 53, 162, 0)" },
+      fillcolor: plotTheme.accentSoft,
       hoverinfo: "skip",
       showlegend: false,
     })
@@ -1600,8 +1782,8 @@ async function renderDmOptimizationPlot(optimization, appliedDm) {
     y: optimization.snr,
     mode: "lines+markers",
     type: "scattergl",
-    line: { color: "#0f766e", width: 2.5 },
-    marker: { color: "#0c5f58", size: 8 },
+    line: { color: plotTheme.accent, width: 2.5 },
+    marker: { color: plotTheme.accentStrong, size: 8 },
     hovertemplate: `DM %{x:.6f}<br>${escapeHtml(snrLabel)} %{y:.3f}<extra></extra>`,
     name: `${snrLabel} sweep`,
   })
@@ -1628,8 +1810,8 @@ async function renderDmOptimizationPlot(optimization, appliedDm) {
     traces,
     {
       margin: { l: 70, r: 24, t: 18, b: 54 },
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor: "rgba(255,255,255,0.55)",
+      paper_bgcolor: plotTheme.paperBg,
+      plot_bgcolor: plotTheme.plotBg,
       showlegend: traces.length > 2,
       legend: {
         orientation: "h",
@@ -1642,13 +1824,13 @@ async function renderDmOptimizationPlot(optimization, appliedDm) {
       xaxis: {
         title: "Dispersion Measure",
         automargin: true,
-        gridcolor: "rgba(24,33,38,0.08)",
+        gridcolor: plotTheme.grid,
       },
       yaxis: {
         title: snrLabel,
         automargin: true,
         range: yRange,
-        gridcolor: "rgba(24,33,38,0.08)",
+        gridcolor: plotTheme.grid,
       },
       shapes: buildDmOptimizationShapes(optimization, appliedDm, yRange),
       annotations: buildDmOptimizationAnnotations(optimization, yRange),
@@ -1702,8 +1884,8 @@ async function renderDmResidualPlot(optimization) {
         mode: "lines+markers",
         type: "scattergl",
         name: "Sweep applied DM",
-        line: { color: "#b45309", width: 2.2 },
-        marker: { color: "#d97706", size: 8 },
+        line: { color: plotTheme.accentAlt, width: 2.2 },
+        marker: { color: plotTheme.accentAltStrong, size: 8 },
         hovertemplate: "%{x:.3f} MHz<br>Residual %{y:.4f} ms<extra>Sweep applied DM</extra>",
       },
       {
@@ -1712,15 +1894,15 @@ async function renderDmResidualPlot(optimization) {
         mode: "lines+markers",
         type: "scattergl",
         name: "Best-fit DM",
-        line: { color: "#0f766e", width: 2.4 },
-        marker: { color: "#0c5f58", size: 8 },
+        line: { color: plotTheme.accent, width: 2.4 },
+        marker: { color: plotTheme.accentStrong, size: 8 },
         hovertemplate: "%{x:.3f} MHz<br>Residual %{y:.4f} ms<extra>Best-fit DM</extra>",
       },
     ],
     {
       margin: { l: 70, r: 24, t: 18, b: 54 },
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor: "rgba(255,255,255,0.55)",
+      paper_bgcolor: plotTheme.paperBg,
+      plot_bgcolor: plotTheme.plotBg,
       showlegend: true,
       legend: {
         orientation: "h",
@@ -1733,14 +1915,14 @@ async function renderDmResidualPlot(optimization) {
       xaxis: {
         title: "Sub-band Center Frequency (MHz)",
         automargin: true,
-        gridcolor: "rgba(24,33,38,0.08)",
+        gridcolor: plotTheme.grid,
       },
       yaxis: {
         title: "Arrival-time Residual (ms)",
         automargin: true,
         zeroline: true,
-        zerolinecolor: "rgba(24,33,38,0.25)",
-        gridcolor: "rgba(24,33,38,0.08)",
+        zerolinecolor: plotTheme.gridStrong,
+        gridcolor: plotTheme.grid,
       },
     },
     { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
@@ -1832,7 +2014,7 @@ async function renderFittingSpectrumPlot(scatteringFit) {
     {
       x: timeAxis, y: dataProfile,
       type: "scatter", mode: "lines",
-      line: { color: "#162e3a", width: 1.5 },
+      line: { color: plotTheme.charcoalSoft, width: 1.5 },
       xaxis: "x", yaxis: "y4",
       hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra>Data</extra>",
       showlegend: false,
@@ -1840,7 +2022,7 @@ async function renderFittingSpectrumPlot(scatteringFit) {
     {
       x: timeAxis, y: modelProfile,
       type: "scatter", mode: "lines",
-      line: { color: "#0f766e", width: 1.5 },
+      line: { color: plotTheme.accent, width: 1.5 },
       xaxis: "x", yaxis: "y4",
       hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra>Model</extra>",
       showlegend: false,
@@ -1848,7 +2030,7 @@ async function renderFittingSpectrumPlot(scatteringFit) {
     {
       x: timeAxis, y: modelProfile,
       type: "scatter", mode: "lines",
-      line: { color: "#0f766e", width: 1.5 },
+      line: { color: plotTheme.accent, width: 1.5 },
       xaxis: "x2", yaxis: "y5",
       hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra>Model</extra>",
       showlegend: false,
@@ -1856,7 +2038,7 @@ async function renderFittingSpectrumPlot(scatteringFit) {
     {
       x: timeAxis, y: residualProfile,
       type: "scatter", mode: "lines",
-      line: { color: "#b45309", width: 1.5, dash: "dot" },
+      line: { color: plotTheme.accentAlt, width: 1.5, dash: "dot" },
       xaxis: "x3", yaxis: "y6",
       hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra>Residual</extra>",
       showlegend: false,
@@ -1865,7 +2047,7 @@ async function renderFittingSpectrumPlot(scatteringFit) {
     {
       x: dataFreqProfile, y: freqAxis,
       type: "scatter", mode: "lines",
-      line: { color: "#162e3a", width: 1.2 },
+      line: { color: plotTheme.charcoalSoft, width: 1.2 },
       xaxis: "x4", yaxis: "y",
       hovertemplate: "%{y:.3f} MHz<br>%{x:.3f}<extra>Data</extra>",
       showlegend: false,
@@ -1873,7 +2055,7 @@ async function renderFittingSpectrumPlot(scatteringFit) {
     {
       x: modelFreqProfile, y: freqAxis,
       type: "scatter", mode: "lines",
-      line: { color: "#0f766e", width: 1.2 },
+      line: { color: plotTheme.accent, width: 1.2 },
       xaxis: "x5", yaxis: "y2",
       hovertemplate: "%{y:.3f} MHz<br>%{x:.3f}<extra>Model</extra>",
       showlegend: false,
@@ -1881,21 +2063,21 @@ async function renderFittingSpectrumPlot(scatteringFit) {
     {
       x: residualFreqProfile, y: freqAxis,
       type: "scatter", mode: "lines",
-      line: { color: "#b45309", width: 1.2, dash: "dot" },
+      line: { color: plotTheme.accentAlt, width: 1.2, dash: "dot" },
       xaxis: "x6", yaxis: "y3",
       hovertemplate: "%{y:.3f} MHz<br>%{x:.3f}<extra>Residual</extra>",
       showlegend: false,
     },
   ]
 
-  const gridColor = "rgba(24,33,38,0.08)"
+  const gridColor = plotTheme.grid
   await Plotly.react(
     "fittingSpectrumPlot",
     traces,
     {
       margin: { l: 78, r: 24, t: 32, b: 54 },
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor: "rgba(255,255,255,0.55)",
+      paper_bgcolor: plotTheme.paperBg,
+      plot_bgcolor: plotTheme.plotBg,
       showlegend: false,
       hovermode: "closest",
       // Heatmap x-axes
@@ -1911,17 +2093,17 @@ async function renderFittingSpectrumPlot(scatteringFit) {
       yaxis2: { domain: [heatmapBottom, heatmapTop], anchor: "x2", matches: "y", showticklabels: false, gridcolor: gridColor },
       yaxis3: { domain: [heatmapBottom, heatmapTop], anchor: "x3", matches: "y", showticklabels: false, gridcolor: gridColor },
       // Time marginal y-axes (top of each heatmap)
-      yaxis4: { domain: [profileBottom, profileTop], anchor: "x",  showticklabels: false, zeroline: true, zerolinecolor: "rgba(24,33,38,0.15)", gridcolor: gridColor },
-      yaxis5: { domain: [profileBottom, profileTop], anchor: "x2", showticklabels: false, zeroline: true, zerolinecolor: "rgba(24,33,38,0.15)", gridcolor: gridColor },
-      yaxis6: { domain: [profileBottom, profileTop], anchor: "x3", showticklabels: false, zeroline: true, zerolinecolor: "rgba(24,33,38,0.15)", gridcolor: gridColor },
+      yaxis4: { domain: [profileBottom, profileTop], anchor: "x",  showticklabels: false, zeroline: true, zerolinecolor: plotTheme.gridStrong, gridcolor: gridColor },
+      yaxis5: { domain: [profileBottom, profileTop], anchor: "x2", showticklabels: false, zeroline: true, zerolinecolor: plotTheme.gridStrong, gridcolor: gridColor },
+      yaxis6: { domain: [profileBottom, profileTop], anchor: "x3", showticklabels: false, zeroline: true, zerolinecolor: plotTheme.gridStrong, gridcolor: gridColor },
       coloraxis: {
-        colorscale: "Viridis",
+        colorscale: plotTheme.heatmapScale,
         cmin: dataModelRange[0],
         cmax: dataModelRange[1],
         colorbar: { title: { text: "Data / Model" }, x: 1.02, y: 0.37, len: 0.35, thickness: 12 },
       },
       coloraxis2: {
-        colorscale: "RdBu",
+        colorscale: plotTheme.residualScale,
         cmin: residualRange[0],
         cmax: residualRange[1],
         colorbar: { title: { text: "Residual" }, x: 1.02, y: 0.04, len: 0.35, thickness: 12 },
@@ -2177,19 +2359,19 @@ function buildViewerAnnotations() {
 
 function buildDmOptimizationShapes(optimization, appliedDm, yRange) {
   return [
-    verticalLine(optimization.center_dm, yRange[0], yRange[1], "#475569", "dot"),
-    verticalLine(optimization.sampled_best_dm, yRange[0], yRange[1], "#d97706", "dash"),
-    verticalLine(optimization.best_dm, yRange[0], yRange[1], "#15803d", "solid"),
-    verticalLine(appliedDm, yRange[0], yRange[1], "#b91c1c", "dot"),
+    verticalLine(optimization.center_dm, yRange[0], yRange[1], plotTheme.neutral, "dot"),
+    verticalLine(optimization.sampled_best_dm, yRange[0], yRange[1], plotTheme.accentAlt, "dash"),
+    verticalLine(optimization.best_dm, yRange[0], yRange[1], plotTheme.accent, "solid"),
+    verticalLine(appliedDm, yRange[0], yRange[1], plotTheme.alert, "dot"),
   ]
 }
 
 function buildDmOptimizationAnnotations(optimization, yRange) {
   const y = yRange[1]
   return [
-    dmOptimizationLabel("Center", optimization.center_dm, y, "#475569"),
-    dmOptimizationLabel("Sampled", optimization.sampled_best_dm, y, "#d97706"),
-    dmOptimizationLabel("Best", optimization.best_dm, y, "#15803d"),
+    dmOptimizationLabel("Center", optimization.center_dm, y, plotTheme.neutral),
+    dmOptimizationLabel("Sampled", optimization.sampled_best_dm, y, plotTheme.accentAlt),
+    dmOptimizationLabel("Best", optimization.best_dm, y, plotTheme.accent),
   ]
 }
 
@@ -2209,8 +2391,8 @@ function dmOptimizationLabel(text, x, y, color) {
       size: 11,
       color,
     },
-    bgcolor: "rgba(255,255,255,0.78)",
-    bordercolor: "rgba(24, 33, 38, 0.08)",
+    bgcolor: plotTheme.annotationBg,
+    bordercolor: plotTheme.annotationBorder,
     borderpad: 3,
   }
 }
@@ -2230,7 +2412,7 @@ function panelLabel(text, x, y) {
     font: {
       family: '"IBM Plex Mono", monospace',
       size: 11,
-      color: "#5c6c73",
+      color: plotTheme.muted,
     },
   }
 }
@@ -2239,8 +2421,8 @@ function buildTimeShapes(view) {
   const yMin = minFinite(view.plot.time_profile.y)
   const yMax = maxFinite(view.plot.time_profile.y)
   const shapes = [
-    verticalLine(view.state.event_ms[0], yMin, yMax, "#d97706", "solid", "x2", "y2"),
-    verticalLine(view.state.event_ms[1], yMin, yMax, "#d97706", "solid", "x2", "y2"),
+    verticalLine(view.state.event_ms[0], yMin, yMax, plotTheme.accentAlt, "solid", "x2", "y2"),
+    verticalLine(view.state.event_ms[1], yMin, yMax, plotTheme.accentAlt, "solid", "x2", "y2"),
   ]
 
   for (const region of view.state.offpulse_ms || []) {
@@ -2252,7 +2434,7 @@ function buildTimeShapes(view) {
       x1: region[1],
       y0: yMin,
       y1: yMax,
-      fillcolor: "rgba(37, 99, 235, 0.14)",
+      fillcolor: plotTheme.accentAltSoft,
       line: { width: 0 },
     })
   }
@@ -2266,13 +2448,13 @@ function buildTimeShapes(view) {
       x1: region[1],
       y0: yMin,
       y1: yMax,
-      fillcolor: "rgba(22, 163, 74, 0.14)",
+      fillcolor: plotTheme.warningSoft,
       line: { width: 0 },
     })
   }
 
   for (const peak of view.state.peak_ms) {
-    shapes.push(verticalLine(peak, yMin, yMax, "#dc2626", "dot", "x2", "y2"))
+    shapes.push(verticalLine(peak, yMin, yMax, plotTheme.alert, "dot", "x2", "y2"))
   }
   return shapes
 }
@@ -2283,10 +2465,10 @@ function buildHeatmapShapes(view) {
   const y0 = view.meta.freq_range_mhz[0]
   const y1 = view.meta.freq_range_mhz[1]
   const shapes = [
-    verticalLine(view.state.event_ms[0], y0, y1, "#d97706", "solid", "x", "y"),
-    verticalLine(view.state.event_ms[1], y0, y1, "#d97706", "solid", "x", "y"),
-    horizontalLine(view.state.spectral_extent_mhz[0], x0, x1, "#7c3aed", "solid", "x", "y"),
-    horizontalLine(view.state.spectral_extent_mhz[1], x0, x1, "#7c3aed", "solid", "x", "y"),
+    verticalLine(view.state.event_ms[0], y0, y1, plotTheme.accentAlt, "solid", "x", "y"),
+    verticalLine(view.state.event_ms[1], y0, y1, plotTheme.accentAlt, "solid", "x", "y"),
+    horizontalLine(view.state.spectral_extent_mhz[0], x0, x1, plotTheme.accent, "solid", "x", "y"),
+    horizontalLine(view.state.spectral_extent_mhz[1], x0, x1, plotTheme.accent, "solid", "x", "y"),
   ]
 
   for (const region of view.state.offpulse_ms || []) {
@@ -2298,13 +2480,13 @@ function buildHeatmapShapes(view) {
       x1: region[1],
       y0,
       y1,
-      fillcolor: "rgba(37, 99, 235, 0.08)",
+      fillcolor: plotTheme.accentAltSoft,
       line: { width: 0 },
     })
   }
 
   for (const peak of view.state.peak_ms) {
-    shapes.push(verticalLine(peak, y0, y1, "#dc2626", "dot", "x", "y"))
+    shapes.push(verticalLine(peak, y0, y1, plotTheme.alert, "dot", "x", "y"))
   }
   return shapes
 }
@@ -2313,8 +2495,8 @@ function buildSpectrumShapes(view) {
   const xMin = minFinite(view.plot.spectrum.x)
   const xMax = maxFinite(view.plot.spectrum.x)
   return [
-    horizontalLine(view.state.spectral_extent_mhz[0], xMin, xMax, "#7c3aed", "solid", "x3", "y3"),
-    horizontalLine(view.state.spectral_extent_mhz[1], xMin, xMax, "#7c3aed", "solid", "x3", "y3"),
+    horizontalLine(view.state.spectral_extent_mhz[0], xMin, xMax, plotTheme.accent, "solid", "x3", "y3"),
+    horizontalLine(view.state.spectral_extent_mhz[1], xMin, xMax, plotTheme.accent, "solid", "x3", "y3"),
   ]
 }
 
@@ -2680,6 +2862,7 @@ function formatToaUncertainty(daysValue) {
 function snrMetricLabel(metric) {
   const labels = {
     integrated_event_snr: "Integrated Event S/N",
+    dm_phase: "DMphase",
     peak_snr: "Peak S/N",
     profile_sharpness: "Profile Sharpness",
     burst_compactness: "Burst Compactness",
@@ -2692,6 +2875,7 @@ function snrMetricLabel(metric) {
 function snrMetricSummary(metric) {
   const labels = {
     integrated_event_snr: "Sum the event-profile S/N across the selected event window. This is the legacy FLITS DM sweep metric.",
+    dm_phase: "Use the automatic DMphase coherent-power curve on the selected reduced waterfall.",
     peak_snr: "Use the single highest-S/N time bin inside the selected event window.",
     profile_sharpness: "Use the smoothed in-window profile power to favor temporally sharp dedispersion solutions.",
     burst_compactness: "Use a fluence-to-width compactness score so broader smeared solutions are penalized.",
@@ -2702,7 +2886,7 @@ function snrMetricSummary(metric) {
 }
 
 function dmComponentColor(index) {
-  const palette = ["#9a3412", "#7c3aed", "#0f766e", "#be123c", "#0369a1", "#65a30d"]
+  const palette = ["#7235a2", "#327cbc", "#8e6ebd", "#a23b61", "#5f2b88", "#2e2e2e"]
   return palette[index % palette.length]
 }
 
@@ -2764,6 +2948,8 @@ function symmetricQuantileRange(values, quantile = 0.995) {
 function fitStatusTone(status) {
   if (status === "quadratic_peak_fit") return "success"
   if (status === "quadratic_peak_fit_uncertainty_unavailable") return "warning"
+  if (status === "dmphase_weighted_polyfit") return "success"
+  if (status === "dmphase_weighted_polyfit_uncertainty_unavailable") return "warning"
   return "warning"
 }
 
@@ -2804,6 +2990,10 @@ function fitStatusLabel(status) {
   const labels = {
     quadratic_peak_fit: "Quadratic peak fit accepted",
     quadratic_peak_fit_uncertainty_unavailable: "Quadratic fit accepted without uncertainty",
+    dmphase_weighted_polyfit: "DMphase weighted polynomial fit accepted",
+    dmphase_weighted_polyfit_uncertainty_unavailable: "DMphase fit accepted without uncertainty",
+    dmphase_weighted_polyfit_failed: "DMphase fit failed",
+    dmphase_weighted_polyfit_fallback: "DMphase fit fell back to the sampled peak",
     peak_on_sweep_edge: "Sampled best DM is on the sweep edge",
     insufficient_peak_window: "Peak window is too sparse for a fit",
     quadratic_fit_failed: "Quadratic fit failed",
@@ -2817,6 +3007,10 @@ function fitStatusCopy(status) {
   const labels = {
     quadratic_peak_fit: "The fitted best DM and uncertainty come from a local quadratic model around the sampled peak.",
     quadratic_peak_fit_uncertainty_unavailable: "The local fit found a best DM, but the sampled range was not sufficient to derive a stable uncertainty band.",
+    dmphase_weighted_polyfit: "The fitted best DM and uncertainty come from an upstream-style weighted polynomial fit applied to the DMphase curve.",
+    dmphase_weighted_polyfit_uncertainty_unavailable: "The DMphase fit found a best DM, but the weighted polynomial model did not yield a stable uncertainty.",
+    dmphase_weighted_polyfit_failed: "The DMphase weighted polynomial fit failed, so the sampled peak was retained.",
+    dmphase_weighted_polyfit_fallback: "The DMphase peak fit could not define a stable fitting window, so the discrete sampled peak was retained.",
     peak_on_sweep_edge: "Expand the DM half-range so the peak is bracketed before trusting the best-DM estimate.",
     insufficient_peak_window: "Use a smaller step or a broader sweep so the local peak has enough neighboring samples for a fit.",
     quadratic_fit_failed: "The sampled S/N curve could not support a stable local quadratic fit.",

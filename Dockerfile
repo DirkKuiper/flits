@@ -9,6 +9,7 @@ WORKDIR /app
 
 COPY pyproject.toml README.md requirements.txt MANIFEST.in ./
 COPY flits ./flits
+COPY tools ./tools
 
 RUN pip install --no-cache-dir .
 

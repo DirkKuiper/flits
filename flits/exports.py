@@ -16,8 +16,10 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.colors import LinearSegmentedColormap
 
 from flits import __version__
+from flits.analysis.dm_optimization import dm_metric_definition
 from flits.measurements import _acf_width
 from flits.models import ExportArtifact, ExportManifest
 
@@ -26,13 +28,30 @@ if TYPE_CHECKING:
     from flits.session import BurstSession
 
 
-EXPORT_SCHEMA_VERSION = "1.0"
+EXPORT_SCHEMA_VERSION = "1.1"
 DEFAULT_EXPORT_INCLUDE = ("json", "csv", "npz", "plots")
 DEFAULT_PLOT_FORMATS = ("png", "svg")
 MAX_EXPORT_SNAPSHOTS = 3
 
 _VALID_INCLUDE = frozenset(DEFAULT_EXPORT_INCLUDE)
 _VALID_PLOT_FORMATS = frozenset(DEFAULT_PLOT_FORMATS)
+
+ASTROFLASH_COLORS = {
+    "ink": "#323232",
+    "muted": "#6A6A6A",
+    "border": "#d9d9d9",
+    "accent": "#7235a2",
+    "accent_strong": "#5f2b88",
+    "accent_alt": "#327cbc",
+    "warning": "#8e6ebd",
+    "alert": "#a23b61",
+    "neutral": "#7d8290",
+    "grid": "#e9e9ee",
+}
+ASTROFLASH_HEATMAP_CMAP = LinearSegmentedColormap.from_list(
+    "astroflash_heatmap",
+    ["#191919", "#2e2e2e", "#4d326e", "#7235a2", "#b287d0", "#f3eafb"],
+)
 
 
 @dataclass(frozen=True)
@@ -208,13 +227,28 @@ def _build_snapshot_data(session: "BurstSession") -> ExportSnapshotData:
     bundle_name = f"{_slugify(Path(session.burst_file).stem)}_{created.strftime('%Y%m%dT%H%M%SZ')}_{export_id[:8]}"
 
     view = session.get_view()
-    masked, context = session._build_measurement_context_for_data()
-    spec_lo, spec_hi = session._selected_channel_bounds()
-    event_start_ms, event_end_ms = _event_window_ms(context.time_axis_ms, session.tsamp_ms, context.event_rel_start, context.event_rel_end)
-    spectral_extent = tuple(sorted((float(session.freqs[spec_lo]), float(session.freqs[spec_hi]))))
-    peak_positions = np.asarray([session.bin_to_ms(peak) for peak in session._current_peak_positions()], dtype=float)
-    temporal_acf_lags_ms, temporal_acf = _acf_width(context.event_profile_sn, session.tsamp_ms)[1:]
-    spectral_acf_lags_mhz, spectral_acf = _acf_width(context.spectrum_sn, abs(session.freqres))[1:]
+    grid, context = session._build_measurement_context_for_data()
+    event_start_ms, event_end_ms = _event_window_ms(
+        context.time_axis_ms,
+        grid.effective_tsamp_ms,
+        context.event_rel_start,
+        context.event_rel_end,
+    )
+    spectral_extent = (
+        tuple(sorted((float(np.min(context.spectral_axis_mhz)), float(np.max(context.spectral_axis_mhz)))))
+        if context.spectral_axis_mhz.size
+        else (0.0, 0.0)
+    )
+    peak_positions = np.asarray(
+        [
+            float(grid.time_axis_ms[peak])
+            for peak in grid.peak_bins
+            if 0 <= int(peak) < grid.time_axis_ms.size
+        ],
+        dtype=float,
+    )
+    temporal_acf_lags_ms, temporal_acf = _acf_width(context.event_profile_sn, grid.effective_tsamp_ms)[1:]
+    spectral_acf_lags_mhz, spectral_acf = _acf_width(context.spectrum_sn, grid.effective_freqres_mhz)[1:]
 
     return ExportSnapshotData(
         export_id=export_id,
@@ -225,9 +259,9 @@ def _build_snapshot_data(session: "BurstSession") -> ExportSnapshotData:
         results=session.results.to_dict() if session.results is not None else None,
         width_analysis=session.width_analysis.to_dict() if session.width_analysis is not None else None,
         dm_optimization=session.dm_optimization.to_dict() if session.dm_optimization is not None else None,
-        dynamic_spectrum=np.asarray(masked, dtype=float),
+        dynamic_spectrum=np.asarray(grid.masked, dtype=float),
         time_axis_ms=np.asarray(context.time_axis_ms, dtype=float),
-        freq_axis_mhz=np.asarray(session.freqs, dtype=float),
+        freq_axis_mhz=np.asarray(grid.freqs_mhz, dtype=float),
         burst_only_profile_sn=np.asarray(context.selected_profile_sn, dtype=float),
         time_profile_sn=np.asarray(context.time_profile_sn, dtype=float),
         event_profile_sn=np.asarray(context.event_profile_sn, dtype=float),
@@ -239,12 +273,12 @@ def _build_snapshot_data(session: "BurstSession") -> ExportSnapshotData:
         spectral_axis_mhz=np.asarray(context.spectral_axis_mhz, dtype=float),
         event_window_ms=(event_start_ms, event_end_ms),
         spectral_extent_mhz=spectral_extent,
-        crop_start_bin=int(session.crop_start),
-        crop_end_bin=int(session.crop_end),
+        crop_start_bin=0,
+        crop_end_bin=int(grid.masked.shape[1]),
         event_start_rel_bin=int(context.event_rel_start),
         event_end_rel_bin=int(context.event_rel_end),
-        selected_channel_start=int(spec_lo),
-        selected_channel_end=int(spec_hi),
+        selected_channel_start=int(context.spec_lo),
+        selected_channel_end=int(context.spec_hi),
         masked_channels=np.asarray(view["state"]["masked_channels"], dtype=int),
         peak_positions_ms=peak_positions,
     )
@@ -533,30 +567,32 @@ def _dynamic_spectrum_figure(snapshot: ExportSnapshotData) -> plt.Figure:
         aspect="auto",
         origin="lower",
         extent=[time_start, time_end, freq_start, freq_end],
-        cmap="magma",
+        cmap=ASTROFLASH_HEATMAP_CMAP,
         vmin=_robust_limits(dynamic)[0],
         vmax=_robust_limits(dynamic)[1],
     )
-    ax.axvline(snapshot.event_window_ms[0], color="#e16a1c", linewidth=1.5)
-    ax.axvline(snapshot.event_window_ms[1], color="#e16a1c", linewidth=1.5)
-    ax.axhline(snapshot.spectral_extent_mhz[0], color="#0f766e", linewidth=1.4, linestyle="--")
-    ax.axhline(snapshot.spectral_extent_mhz[1], color="#0f766e", linewidth=1.4, linestyle="--")
+    ax.axvline(snapshot.event_window_ms[0], color=ASTROFLASH_COLORS["accent_alt"], linewidth=1.5)
+    ax.axvline(snapshot.event_window_ms[1], color=ASTROFLASH_COLORS["accent_alt"], linewidth=1.5)
+    ax.axhline(snapshot.spectral_extent_mhz[0], color=ASTROFLASH_COLORS["accent"], linewidth=1.4, linestyle="--")
+    ax.axhline(snapshot.spectral_extent_mhz[1], color=ASTROFLASH_COLORS["accent"], linewidth=1.4, linestyle="--")
     for peak in snapshot.peak_positions_ms:
-        ax.axvline(float(peak), color="#c92d2d", linewidth=1.2, linestyle=":")
+        ax.axvline(float(peak), color=ASTROFLASH_COLORS["alert"], linewidth=1.2, linestyle=":")
     ax.set_title("Dynamic Spectrum")
     ax.set_xlabel("Time (ms)")
     ax.set_ylabel("Frequency (MHz)")
-    fig.colorbar(image, ax=ax, pad=0.01, label="Intensity (arb.)")
+    colorbar = fig.colorbar(image, ax=ax, pad=0.01, label="Intensity (arb.)")
+    _style_export_axis(ax, grid=False)
+    _style_colorbar(colorbar)
     return fig
 
 
 def _profile_diagnostics_figure(snapshot: ExportSnapshotData) -> plt.Figure:
     fig, (ax_time, ax_spec) = plt.subplots(2, 1, figsize=(9.0, 6.4), constrained_layout=True)
-    ax_time.plot(snapshot.time_axis_ms, snapshot.time_profile_sn, color="#475569", linewidth=1.5, label="Full-band profile")
-    ax_time.plot(snapshot.time_axis_ms, snapshot.burst_only_profile_sn, color="#0f766e", linewidth=1.5, label="Selected-band profile")
-    ax_time.axvspan(snapshot.event_window_ms[0], snapshot.event_window_ms[1], color="#f59e0b", alpha=0.14)
+    ax_time.plot(snapshot.time_axis_ms, snapshot.time_profile_sn, color=ASTROFLASH_COLORS["neutral"], linewidth=1.5, label="Full-band profile")
+    ax_time.plot(snapshot.time_axis_ms, snapshot.burst_only_profile_sn, color=ASTROFLASH_COLORS["accent"], linewidth=1.5, label="Selected-band profile")
+    ax_time.axvspan(snapshot.event_window_ms[0], snapshot.event_window_ms[1], color=ASTROFLASH_COLORS["accent_alt"], alpha=0.14)
     for peak in snapshot.peak_positions_ms:
-        ax_time.axvline(float(peak), color="#c92d2d", linewidth=1.2, linestyle=":")
+        ax_time.axvline(float(peak), color=ASTROFLASH_COLORS["alert"], linewidth=1.2, linestyle=":")
     ax_time.set_title("Profile Diagnostics")
     ax_time.set_ylabel("S/N")
     ax_time.legend(loc="upper right", frameon=False)
@@ -566,27 +602,31 @@ def _profile_diagnostics_figure(snapshot: ExportSnapshotData) -> plt.Figure:
     if freqs.size and freqs[0] > freqs[-1]:
         freqs = freqs[::-1]
         spectrum = spectrum[::-1]
-    ax_spec.plot(freqs, spectrum, color="#1d4ed8", linewidth=1.5)
+    ax_spec.plot(freqs, spectrum, color=ASTROFLASH_COLORS["accent_alt"], linewidth=1.5)
     ax_spec.set_xlabel("Frequency (MHz)")
     ax_spec.set_ylabel("S/N")
+    _style_export_axis(ax_time)
+    _style_export_axis(ax_spec)
     return fig
 
 
 def _acf_panel_figure(snapshot: ExportSnapshotData) -> plt.Figure:
     fig, (ax_time, ax_spec) = plt.subplots(1, 2, figsize=(9.0, 4.2), constrained_layout=True)
-    ax_time.plot(snapshot.temporal_acf_lags_ms, snapshot.temporal_acf, color="#0f766e", linewidth=1.5)
-    ax_time.axhline(0.5, color="#a85516", linewidth=1.0, linestyle="--")
+    ax_time.plot(snapshot.temporal_acf_lags_ms, snapshot.temporal_acf, color=ASTROFLASH_COLORS["accent"], linewidth=1.5)
+    ax_time.axhline(0.5, color=ASTROFLASH_COLORS["warning"], linewidth=1.0, linestyle="--")
     ax_time.set_title("Temporal ACF")
     ax_time.set_xlabel("Lag (ms)")
     ax_time.set_ylabel("Normalized ACF")
     ax_time.set_ylim(-0.05, 1.05)
 
-    ax_spec.plot(snapshot.spectral_acf_lags_mhz, snapshot.spectral_acf, color="#7c3aed", linewidth=1.5)
-    ax_spec.axhline(0.5, color="#a85516", linewidth=1.0, linestyle="--")
+    ax_spec.plot(snapshot.spectral_acf_lags_mhz, snapshot.spectral_acf, color=ASTROFLASH_COLORS["accent_alt"], linewidth=1.5)
+    ax_spec.axhline(0.5, color=ASTROFLASH_COLORS["warning"], linewidth=1.0, linestyle="--")
     ax_spec.set_title("Spectral ACF")
     ax_spec.set_xlabel("Lag (MHz)")
     ax_spec.set_ylabel("Normalized ACF")
     ax_spec.set_ylim(-0.05, 1.05)
+    _style_export_axis(ax_time)
+    _style_export_axis(ax_spec)
     return fig
 
 
@@ -594,15 +634,19 @@ def _dm_curve_figure(snapshot: ExportSnapshotData) -> plt.Figure:
     optimization = snapshot.dm_optimization or {}
     fig, ax = plt.subplots(figsize=(8.6, 4.8), constrained_layout=True)
     trial_dms = np.asarray(optimization.get("trial_dms", []), dtype=float)
-    snr = np.asarray(optimization.get("snr", []), dtype=float)
-    ax.plot(trial_dms, snr, color="#1d4ed8", linewidth=1.5, marker="o", markersize=3.5)
-    ax.axvline(float(optimization.get("center_dm", np.nan)), color="#64748b", linewidth=1.0, linestyle=":")
-    ax.axvline(float(optimization.get("sampled_best_dm", np.nan)), color="#d97706", linewidth=1.2, linestyle="--")
-    ax.axvline(float(optimization.get("best_dm", np.nan)), color="#15803d", linewidth=1.4)
-    ax.axvline(float(optimization.get("applied_dm", np.nan)), color="#b91c1c", linewidth=1.0, linestyle=":")
+    scores = np.asarray(optimization.get("snr", []), dtype=float)
+    metric_key = str(optimization.get("snr_metric", "integrated_event_snr"))
+    metric_definition = dm_metric_definition(metric_key)
+    metric_label = metric_definition.label if metric_definition is not None else "DM Metric"
+    ax.plot(trial_dms, scores, color=ASTROFLASH_COLORS["accent"], linewidth=1.5, marker="o", markersize=3.5)
+    ax.axvline(float(optimization.get("center_dm", np.nan)), color=ASTROFLASH_COLORS["neutral"], linewidth=1.0, linestyle=":")
+    ax.axvline(float(optimization.get("sampled_best_dm", np.nan)), color=ASTROFLASH_COLORS["accent_alt"], linewidth=1.2, linestyle="--")
+    ax.axvline(float(optimization.get("best_dm", np.nan)), color=ASTROFLASH_COLORS["accent_strong"], linewidth=1.4)
+    ax.axvline(float(optimization.get("applied_dm", np.nan)), color=ASTROFLASH_COLORS["alert"], linewidth=1.0, linestyle=":")
     ax.set_title("DM Curve")
     ax.set_xlabel("Dispersion Measure")
-    ax.set_ylabel("Integrated Event S/N")
+    ax.set_ylabel(metric_label)
+    _style_export_axis(ax)
     return fig
 
 
@@ -612,13 +656,14 @@ def _dm_residuals_figure(snapshot: ExportSnapshotData) -> plt.Figure:
     applied = np.asarray(optimization.get("residuals_applied_ms", []), dtype=float)
     best = np.asarray(optimization.get("residuals_best_ms", []), dtype=float)
     fig, ax = plt.subplots(figsize=(8.6, 4.8), constrained_layout=True)
-    ax.plot(freqs, applied, color="#b91c1c", linewidth=1.4, marker="o", markersize=4, label="Applied DM")
-    ax.plot(freqs, best, color="#15803d", linewidth=1.4, marker="o", markersize=4, label="Best-fit DM")
-    ax.axhline(0.0, color="#64748b", linewidth=1.0, linestyle="--")
+    ax.plot(freqs, applied, color=ASTROFLASH_COLORS["accent_alt"], linewidth=1.4, marker="o", markersize=4, label="Applied DM")
+    ax.plot(freqs, best, color=ASTROFLASH_COLORS["accent"], linewidth=1.4, marker="o", markersize=4, label="Best-fit DM")
+    ax.axhline(0.0, color=ASTROFLASH_COLORS["neutral"], linewidth=1.0, linestyle="--")
     ax.set_title("DM Residuals")
     ax.set_xlabel("Sub-band Center Frequency (MHz)")
     ax.set_ylabel("Residual Arrival Time (ms)")
     ax.legend(frameon=False, loc="best")
+    _style_export_axis(ax)
     return fig
 
 
@@ -643,6 +688,25 @@ def _robust_limits(values: np.ndarray) -> tuple[float, float]:
     if upper <= lower:
         upper = lower + 1.0
     return lower, upper
+
+
+def _style_export_axis(ax: plt.Axes, *, grid: bool = True) -> None:
+    ax.set_facecolor("white")
+    if grid:
+        ax.grid(True, color=ASTROFLASH_COLORS["grid"], linewidth=0.8)
+    else:
+        ax.grid(False)
+    for spine in ax.spines.values():
+        spine.set_color(ASTROFLASH_COLORS["border"])
+    ax.tick_params(colors=ASTROFLASH_COLORS["muted"], labelcolor=ASTROFLASH_COLORS["muted"])
+    ax.xaxis.label.set_color(ASTROFLASH_COLORS["ink"])
+    ax.yaxis.label.set_color(ASTROFLASH_COLORS["ink"])
+    ax.title.set_color(ASTROFLASH_COLORS["ink"])
+
+
+def _style_colorbar(colorbar: Any) -> None:
+    colorbar.ax.yaxis.label.set_color(ASTROFLASH_COLORS["ink"])
+    colorbar.ax.tick_params(color=ASTROFLASH_COLORS["muted"], labelcolor=ASTROFLASH_COLORS["muted"])
 
 
 def _figure_bytes(figure: plt.Figure, fmt: str) -> bytes:

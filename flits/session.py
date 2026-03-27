@@ -8,7 +8,7 @@ import warnings
 
 import numpy as np
 
-from flits.analysis.dm_optimization import available_dm_metrics, optimize_dm_trials
+from flits.analysis.dm_optimization import DMMetricInput, available_dm_metrics, optimize_dm_trials
 from flits.analysis.spectral.core import run_averaged_spectral_analysis
 from flits.analysis.morphology import compute_width_analysis
 from flits.exports import MAX_EXPORT_SNAPSHOTS, StoredExportSnapshot, create_export_snapshot
@@ -53,7 +53,7 @@ except Exception:  # pragma: no cover - optional dependency
     jess = SimpleNamespace(channel_masks=SimpleNamespace(channel_masker=None))
 
 
-SESSION_SNAPSHOT_SCHEMA_VERSION = "1.0"
+SESSION_SNAPSHOT_SCHEMA_VERSION = "1.1"
 JESS_MASK_DTYPE = np.float32
 JESS_WORKING_COPY_FACTOR = 6
 JESS_TEST_SEQUENCE = ("skew", "stand-dev")
@@ -125,6 +125,23 @@ def _coerce_snapshot(snapshot: AnalysisSessionSnapshot | dict[str, Any]) -> Anal
     if isinstance(snapshot, AnalysisSessionSnapshot):
         return snapshot
     return AnalysisSessionSnapshot.from_dict(snapshot)
+
+
+@dataclass(frozen=True)
+class ReducedAnalysisGrid:
+    masked: np.ndarray
+    display: np.ndarray
+    time_axis_ms: np.ndarray
+    freqs_mhz: np.ndarray
+    event_rel_start: int
+    event_rel_end: int
+    spec_lo: int
+    spec_hi: int
+    burst_regions_rel: list[tuple[int, int]]
+    offpulse_regions_rel: list[tuple[int, int]]
+    peak_bins: list[int]
+    effective_tsamp_ms: float
+    effective_freqres_mhz: float
 
 
 @dataclass
@@ -260,12 +277,13 @@ class BurstSession:
         session.noise_settings = snapshot.noise_settings
         session.width_settings = snapshot.width_settings
         session.notes = snapshot.notes
-        session.results = snapshot.results
-        session.width_analysis = snapshot.width_analysis
-        session.dm_optimization = snapshot.dm_optimization
-        session.spectral_analysis = snapshot.spectral_analysis
-        if session.results is not None:
-            session._apply_width_analysis_to_results()
+        if snapshot.schema_version != "1.0":
+            session.results = snapshot.results
+            session.width_analysis = snapshot.width_analysis
+            session.dm_optimization = snapshot.dm_optimization
+            session.spectral_analysis = snapshot.spectral_analysis
+            if session.results is not None:
+                session._apply_width_analysis_to_results()
         return session
 
     @property
@@ -416,6 +434,165 @@ class BurstSession:
             if end - start >= 2
         ]
 
+    def _reduce_interval(
+        self,
+        start: int,
+        end: int,
+        *,
+        base: int,
+        factor: int,
+        max_bins: int,
+        require_nonempty: bool = False,
+    ) -> tuple[int, int] | None:
+        if max_bins <= 0:
+            return (0, 0) if require_nonempty else None
+
+        lo = int(np.floor((int(start) - int(base)) / int(factor)))
+        hi = int(np.ceil((int(end) - int(base)) / int(factor)))
+
+        if require_nonempty:
+            lo = max(0, min(lo, max_bins - 1))
+            hi = max(lo + 1, min(hi, max_bins))
+            return lo, hi
+
+        lo = max(0, min(lo, max_bins))
+        hi = max(lo, min(hi, max_bins))
+        if hi <= lo:
+            return None
+        return lo, hi
+
+    def _reduce_peak_bin(
+        self,
+        peak_bin_abs: int,
+        *,
+        base: int,
+        factor: int,
+        max_bins: int,
+    ) -> int | None:
+        if max_bins <= 0:
+            return None
+        if int(peak_bin_abs) < int(base):
+            return None
+        reduced = int(np.floor((int(peak_bin_abs) - int(base)) / int(factor)))
+        return max(0, min(reduced, max_bins - 1))
+
+    def _reduced_frequency_axis(self, num_channels: int) -> np.ndarray:
+        if num_channels <= 0:
+            return np.array([], dtype=float)
+        freq_axis = np.asarray(self.freqs[: num_channels * self.freq_factor], dtype=float)
+        if self.freq_factor > 1 and freq_axis.size:
+            freq_axis = np.nanmean(freq_axis.reshape(num_channels, self.freq_factor), axis=1)
+        return np.asarray(freq_axis, dtype=float)
+
+    def _reduced_analysis_grid(
+        self,
+        data: np.ndarray | None = None,
+        *,
+        event_bounds_abs: tuple[int, int] | None = None,
+    ) -> ReducedAnalysisGrid:
+        masked = self.get_masked_crop(data)
+        display = self.get_display_crop(data)
+        reduced_masked = block_reduce_mean(masked, tfac=self.time_factor, ffac=self.freq_factor)
+        reduced_display = block_reduce_mean(display, tfac=self.time_factor, ffac=self.freq_factor)
+
+        reduced_time_bins = int(reduced_masked.shape[1])
+        reduced_freq_bins = int(reduced_masked.shape[0])
+        time_axis_ms = (
+            self._bins_to_ms_array(self.crop_start + np.arange(reduced_time_bins, dtype=float) * self.time_factor)
+            if reduced_time_bins
+            else np.array([], dtype=float)
+        )
+        freqs_mhz = self._reduced_frequency_axis(reduced_freq_bins)
+
+        event_start_abs, event_end_abs = (
+            (self.event_start, self.event_end) if event_bounds_abs is None else sorted((int(event_bounds_abs[0]), int(event_bounds_abs[1])))
+        )
+        event_bounds = self._reduce_interval(
+            event_start_abs,
+            event_end_abs,
+            base=self.crop_start,
+            factor=self.time_factor,
+            max_bins=reduced_time_bins,
+            require_nonempty=True,
+        )
+        assert event_bounds is not None
+        event_rel_start, event_rel_end = event_bounds
+
+        spec_lo_abs, spec_hi_abs = self._selected_channel_bounds()
+        spec_bounds = self._reduce_interval(
+            spec_lo_abs,
+            spec_hi_abs + 1,
+            base=0,
+            factor=self.freq_factor,
+            max_bins=reduced_freq_bins,
+            require_nonempty=True,
+        )
+        assert spec_bounds is not None
+        spec_lo, spec_hi_exclusive = spec_bounds
+        spec_hi = max(spec_lo, spec_hi_exclusive - 1)
+
+        burst_regions_rel: list[tuple[int, int]] = []
+        for start_abs, end_abs in self.burst_regions:
+            mapped = self._reduce_interval(
+                start_abs,
+                end_abs,
+                base=self.crop_start,
+                factor=self.time_factor,
+                max_bins=reduced_time_bins,
+            )
+            if mapped is not None:
+                burst_regions_rel.append(mapped)
+
+        offpulse_regions_rel: list[tuple[int, int]] = []
+        for start_abs, end_abs in self.offpulse_regions:
+            mapped = self._reduce_interval(
+                start_abs,
+                end_abs,
+                base=self.crop_start,
+                factor=self.time_factor,
+                max_bins=reduced_time_bins,
+            )
+            if mapped is not None:
+                offpulse_regions_rel.append(mapped)
+
+        if self.manual_peaks and self.peak_positions:
+            peak_bins = sorted(
+                {
+                    reduced_peak
+                    for peak in self.peak_positions
+                    if self.crop_start <= int(peak) < self.crop_end
+                    for reduced_peak in [self._reduce_peak_bin(
+                        int(peak),
+                        base=self.crop_start,
+                        factor=self.time_factor,
+                        max_bins=reduced_time_bins,
+                    )]
+                    if reduced_peak is not None
+                }
+            )
+        else:
+            peak_bins = []
+            if reduced_display.size:
+                profile = np.nansum(reduced_display, axis=0)
+                if np.isfinite(profile).any():
+                    peak_bins = [int(np.nanargmax(profile))]
+
+        return ReducedAnalysisGrid(
+            masked=np.asarray(reduced_masked, dtype=float),
+            display=np.asarray(reduced_display, dtype=float),
+            time_axis_ms=np.asarray(time_axis_ms, dtype=float),
+            freqs_mhz=np.asarray(freqs_mhz, dtype=float),
+            event_rel_start=int(event_rel_start),
+            event_rel_end=int(event_rel_end),
+            spec_lo=int(spec_lo),
+            spec_hi=int(spec_hi),
+            burst_regions_rel=burst_regions_rel,
+            offpulse_regions_rel=offpulse_regions_rel,
+            peak_bins=peak_bins,
+            effective_tsamp_ms=float(self.tsamp_ms * self.time_factor),
+            effective_freqres_mhz=float(abs(self.freqres) * self.freq_factor),
+        )
+
     def get_masked_crop(self, data: np.ndarray | None = None) -> np.ndarray:
         source = self.data if data is None else data
         arr = np.array(source[:, self.crop_start:self.crop_end], copy=True)
@@ -447,28 +624,21 @@ class BurstSession:
         data: np.ndarray | None = None,
         *,
         event_bounds_abs: tuple[int, int] | None = None,
-    ) -> tuple[np.ndarray, MeasurementContext]:
-        masked = self.get_masked_crop(data)
-        if event_bounds_abs is None:
-            rel_start, rel_end = self._event_bounds_in_crop(masked.shape[1])
-        else:
-            start_abs, end_abs = sorted((int(event_bounds_abs[0]), int(event_bounds_abs[1])))
-            rel_start = max(0, min(masked.shape[1] - 1, start_abs - self.crop_start))
-            rel_end = max(rel_start + 1, min(masked.shape[1], end_abs - self.crop_start))
-        spec_lo, spec_hi = self._selected_channel_bounds()
+    ) -> tuple[ReducedAnalysisGrid, MeasurementContext]:
+        grid = self._reduced_analysis_grid(data, event_bounds_abs=event_bounds_abs)
         context = build_measurement_context(
-            masked=masked,
-            time_axis_ms=self._bins_to_ms_array(self.crop_start + np.arange(masked.shape[1], dtype=float)),
-            freqs_mhz=self.freqs,
-            event_rel_start=rel_start,
-            event_rel_end=rel_end,
-            spec_lo=spec_lo,
-            spec_hi=spec_hi,
-            freqres_mhz=self.freqres,
-            offpulse_regions=self._offpulse_regions_in_crop(),
+            masked=grid.masked,
+            time_axis_ms=grid.time_axis_ms,
+            freqs_mhz=grid.freqs_mhz,
+            event_rel_start=grid.event_rel_start,
+            event_rel_end=grid.event_rel_end,
+            spec_lo=grid.spec_lo,
+            spec_hi=grid.spec_hi,
+            freqres_mhz=grid.effective_freqres_mhz,
+            offpulse_regions=grid.offpulse_regions_rel,
             noise_settings=self.noise_settings,
         )
-        return masked, context
+        return grid, context
 
     def _measurement_context_for_data(
         self,
@@ -478,6 +648,51 @@ class BurstSession:
     ) -> MeasurementContext:
         _, context = self._build_measurement_context_for_data(data, event_bounds_abs=event_bounds_abs)
         return context
+
+    def _dm_metric_input_for_data(
+        self,
+        data: np.ndarray,
+        *,
+        event_bounds_abs: tuple[int, int] | None = None,
+    ) -> DMMetricInput:
+        grid, context = self._build_measurement_context_for_data(data, event_bounds_abs=event_bounds_abs)
+        selected_waterfall = np.asarray(grid.masked[context.spec_lo : context.spec_hi + 1, :], dtype=float)
+        event_waterfall = np.asarray(
+            selected_waterfall[:, context.event_rel_start : context.event_rel_end],
+            dtype=float,
+        )
+        return DMMetricInput(
+            context=context,
+            waterfall=np.asarray(grid.masked, dtype=float),
+            selected_waterfall=selected_waterfall,
+            event_waterfall=event_waterfall,
+            offpulse_bins=np.asarray(context.offpulse_bins, dtype=int),
+            freqs_mhz=np.asarray(context.spectral_axis_mhz, dtype=float),
+            tsamp_sec=float(grid.effective_tsamp_ms / 1000.0),
+        )
+
+    def _dm_metric_input_for_reduced_grid(
+        self,
+        reduced_data: np.ndarray,
+        *,
+        context: MeasurementContext,
+        tsamp_sec: float,
+    ) -> DMMetricInput:
+        reduced = np.asarray(reduced_data, dtype=float)
+        selected_waterfall = np.asarray(reduced[context.spec_lo : context.spec_hi + 1, :], dtype=float)
+        event_waterfall = np.asarray(
+            selected_waterfall[:, context.event_rel_start : context.event_rel_end],
+            dtype=float,
+        )
+        return DMMetricInput(
+            context=context,
+            waterfall=reduced,
+            selected_waterfall=selected_waterfall,
+            event_waterfall=event_waterfall,
+            offpulse_bins=np.asarray(context.offpulse_bins, dtype=int),
+            freqs_mhz=np.asarray(context.spectral_axis_mhz, dtype=float),
+            tsamp_sec=float(tsamp_sec),
+        )
 
     def _score_event_sn(
         self,
@@ -494,17 +709,17 @@ class BurstSession:
         *,
         event_bounds_abs: tuple[int, int] | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, str]:
-        masked, context = self._build_measurement_context_for_data(data, event_bounds_abs=event_bounds_abs)
+        grid, context = self._build_measurement_context_for_data(data, event_bounds_abs=event_bounds_abs)
         diagnostics = compute_subband_arrival_residuals(
-            masked=masked,
+            masked=grid.masked,
             time_axis_ms=context.time_axis_ms,
-            freqs_mhz=self.freqs,
+            freqs_mhz=grid.freqs_mhz,
             event_rel_start=context.event_rel_start,
             event_rel_end=context.event_rel_end,
             spec_lo=context.spec_lo,
             spec_hi=context.spec_hi,
-            freqres_mhz=self.freqres,
-            offpulse_regions=self._offpulse_regions_in_crop(),
+            freqres_mhz=grid.effective_freqres_mhz,
+            offpulse_regions=grid.offpulse_regions_rel,
             noise_settings=self.noise_settings,
         )
         return (
@@ -542,24 +757,17 @@ class BurstSession:
         return components
 
     def get_view(self) -> dict[str, Any]:
-        display = self.get_display_crop()
-        reduced = block_reduce_mean(display, tfac=self.time_factor, ffac=self.freq_factor)
+        grid = self._reduced_analysis_grid()
         freq_lo_mhz, freq_hi_mhz = self._frequency_range_mhz()
         spec_lo_mhz, spec_hi_mhz = self._selected_frequency_bounds_mhz()
-
-        time_axis = (
-            self._bins_to_ms_array(self.crop_start + np.arange(reduced.shape[1]) * self.time_factor)
-            if reduced.size
-            else np.array([], dtype=float)
-        )
-        freq_axis = self.freqs[: reduced.shape[0] * self.freq_factor]
-        if self.freq_factor > 1 and freq_axis.size:
-            freq_axis = np.nanmean(freq_axis.reshape(reduced.shape[0], self.freq_factor), axis=1)
-
-        time_profile = np.nansum(reduced, axis=0) if reduced.size else np.array([], dtype=float)
-        spectrum = np.nansum(reduced, axis=1) if reduced.size else np.array([], dtype=float)
-        peak_positions = self._current_peak_positions(display=display)
-        zmin, zmax = robust_color_limits(reduced)
+        time_profile = np.nansum(grid.display, axis=0) if grid.display.size else np.array([], dtype=float)
+        spectrum = np.nansum(grid.display, axis=1) if grid.display.size else np.array([], dtype=float)
+        peak_positions_ms = [
+            float(grid.time_axis_ms[peak])
+            for peak in grid.peak_bins
+            if 0 <= int(peak) < grid.time_axis_ms.size
+        ]
+        zmin, zmax = robust_color_limits(grid.display)
 
         return {
             "meta": {
@@ -583,7 +791,7 @@ class BurstSession:
                 "distance_mpc": self.config.distance_mpc,
                 "redshift": self.config.redshift,
                 "shape": [self.total_channels, self.total_time_bins],
-                "view_shape": [int(reduced.shape[0]), int(reduced.shape[1])],
+                "view_shape": [int(grid.display.shape[0]), int(grid.display.shape[1])],
                 "freq_range_mhz": [freq_lo_mhz, freq_hi_mhz],
                 "dm_metrics": available_dm_metrics(),
             },
@@ -596,7 +804,7 @@ class BurstSession:
                     [self.bin_to_ms(start), self.bin_to_ms(end)] for start, end in self.burst_regions
                 ],
                 "offpulse_ms": self._offpulse_regions_ms(),
-                "peak_ms": [self.bin_to_ms(peak) for peak in peak_positions],
+                "peak_ms": peak_positions_ms,
                 "manual_peaks": self.manual_peaks,
                 "spectral_extent_mhz": [spec_lo_mhz, spec_hi_mhz],
                 "masked_channels": np.flatnonzero(self.channel_mask).astype(int).tolist(),
@@ -605,19 +813,19 @@ class BurstSession:
             },
             "plot": {
                 "heatmap": {
-                    "x_ms": _jsonable_array(time_axis, digits=4),
-                    "y_mhz": _jsonable_array(freq_axis, digits=4),
-                    "z": _jsonable_array(reduced, digits=3),
+                    "x_ms": _jsonable_array(grid.time_axis_ms, digits=4),
+                    "y_mhz": _jsonable_array(grid.freqs_mhz, digits=4),
+                    "z": _jsonable_array(grid.display, digits=3),
                     "zmin": zmin,
                     "zmax": zmax,
                 },
                 "time_profile": {
-                    "x_ms": _jsonable_array(time_axis, digits=4),
+                    "x_ms": _jsonable_array(grid.time_axis_ms, digits=4),
                     "y": _jsonable_array(time_profile, digits=4),
                 },
                 "spectrum": {
                     "x": _jsonable_array(spectrum, digits=4),
-                    "y_mhz": _jsonable_array(freq_axis, digits=4),
+                    "y_mhz": _jsonable_array(grid.freqs_mhz, digits=4),
                 },
             },
             "results": self.results.to_dict() if self.results is not None else None,
@@ -671,10 +879,16 @@ class BurstSession:
         self.invalidate_analysis_state()
 
     def set_time_factor(self, factor: int) -> None:
-        self.time_factor = max(1, min(int(factor), self.crop_end - self.crop_start))
+        next_factor = max(1, min(int(factor), self.crop_end - self.crop_start))
+        if next_factor != self.time_factor:
+            self.time_factor = next_factor
+            self.invalidate_analysis_state()
 
     def set_freq_factor(self, factor: int) -> None:
-        self.freq_factor = max(1, min(int(factor), self.total_channels))
+        next_factor = max(1, min(int(factor), self.total_channels))
+        if next_factor != self.freq_factor:
+            self.freq_factor = next_factor
+            self.invalidate_analysis_state()
 
     def set_crop_ms(self, start_ms: float, end_ms: float) -> None:
         start, end = sorted((self.ms_to_bin(start_ms), self.ms_to_bin(end_ms)))
@@ -774,11 +988,17 @@ class BurstSession:
         text = None if notes is None else str(notes).strip()
         self.notes = text or None
 
-    def _current_event_window_ms(self, context: MeasurementContext | None = None) -> tuple[float, float]:
+    def _current_event_window_ms(
+        self,
+        context: MeasurementContext | None = None,
+        *,
+        tsamp_ms: float | None = None,
+    ) -> tuple[float, float]:
+        spacing_ms = float(self.tsamp_ms if tsamp_ms is None else tsamp_ms)
         if context is not None and context.time_axis_ms.size and context.event_rel_end > context.event_rel_start:
             return (
                 float(context.time_axis_ms[context.event_rel_start]),
-                float(context.time_axis_ms[context.event_rel_end - 1] + self.tsamp_ms),
+                float(context.time_axis_ms[context.event_rel_end - 1] + spacing_ms),
             )
         return (self.bin_to_ms(self.event_start), self.bin_to_ms(self.event_end))
 
@@ -914,11 +1134,17 @@ class BurstSession:
         self.config = replace(self.config, dm=new_dm)
         self.invalidate_analysis_state()
 
-    def _dm_provenance(self, context: MeasurementContext) -> DmOptimizationProvenance:
+    def _dm_provenance(
+        self,
+        context: MeasurementContext,
+        *,
+        tsamp_ms: float,
+        freqres_mhz: float,
+    ) -> DmOptimizationProvenance:
         return DmOptimizationProvenance(
             event_window_ms=[
                 float(context.time_axis_ms[context.event_rel_start]) if context.time_axis_ms.size else 0.0,
-                float(context.time_axis_ms[context.event_rel_end - 1] + self.tsamp_ms)
+                float(context.time_axis_ms[context.event_rel_end - 1] + tsamp_ms)
                 if context.time_axis_ms.size and context.event_rel_end > context.event_rel_start
                 else 0.0,
             ],
@@ -929,18 +1155,18 @@ class BurstSession:
             offpulse_windows_ms=_offpulse_windows_ms(
                 offpulse_bins=context.offpulse_bins,
                 time_axis_ms=context.time_axis_ms,
-                tsamp_ms=self.tsamp_ms,
+                tsamp_ms=tsamp_ms,
             ),
             masked_channels=np.flatnonzero(self.channel_mask).astype(int).tolist(),
             effective_bandwidth_mhz=float(context.effective_bandwidth_mhz),
-            tsamp_ms=float(self.tsamp_ms),
-            freqres_mhz=float(abs(self.freqres)),
+            tsamp_ms=float(tsamp_ms),
+            freqres_mhz=float(abs(freqres_mhz)),
             algorithm_name="dm_trial_sweep",
             warning_flags=list(context.noise_summary.warning_flags),
         )
 
     def compute_widths(self) -> WidthAnalysisSummary:
-        _, context = self._build_measurement_context_for_data()
+        grid, context = self._build_measurement_context_for_data()
         existing_method = None
         if self.width_analysis is not None and self.width_analysis.accepted_width is not None:
             existing_method = self.width_analysis.accepted_width.method
@@ -949,12 +1175,12 @@ class BurstSession:
             time_axis_ms=context.time_axis_ms,
             event_rel_start=context.event_rel_start,
             event_rel_end=context.event_rel_end,
-            tsamp_ms=self.tsamp_ms,
+            tsamp_ms=grid.effective_tsamp_ms,
             noise_summary=context.noise_summary,
             settings=self.width_settings,
             event_window_ms=[
                 float(context.time_axis_ms[context.event_rel_start]) if context.time_axis_ms.size else 0.0,
-                float(context.time_axis_ms[context.event_rel_end - 1] + self.tsamp_ms)
+                float(context.time_axis_ms[context.event_rel_end - 1] + grid.effective_tsamp_ms)
                 if context.time_axis_ms.size and context.event_rel_end > context.event_rel_start
                 else 0.0,
             ],
@@ -965,7 +1191,7 @@ class BurstSession:
             offpulse_windows_ms=_offpulse_windows_ms(
                 offpulse_bins=context.offpulse_bins,
                 time_axis_ms=context.time_axis_ms,
-                tsamp_ms=self.tsamp_ms,
+                tsamp_ms=grid.effective_tsamp_ms,
             ),
             masked_channels=np.flatnonzero(self.channel_mask).astype(int).tolist(),
             effective_bandwidth_mhz=context.effective_bandwidth_mhz,
@@ -995,53 +1221,93 @@ class BurstSession:
         step: float,
         metric: str = "integrated_event_snr",
     ) -> DmOptimizationResult:
-        _, context = self._build_measurement_context_for_data(self.data)
+        grid, context = self._build_measurement_context_for_data(self.data)
+        reduced_metric_data = np.asarray(grid.masked, dtype=float)
+        reduced_metric_freqs = np.asarray(grid.freqs_mhz, dtype=float)
+        reduced_metric_tsamp_sec = float(grid.effective_tsamp_ms / 1000.0)
         optimization = optimize_dm_trials(
             data=self.data,
             current_dm=float(self.dm),
             freqs_mhz=self.freqs,
             tsamp_sec=self.tsamp,
+            score_data=reduced_metric_data if metric == "dm_phase" else None,
+            score_current_dm=float(self.dm) if metric == "dm_phase" else None,
+            score_freqs_mhz=reduced_metric_freqs if metric == "dm_phase" else None,
+            score_tsamp_sec=reduced_metric_tsamp_sec if metric == "dm_phase" else None,
             center_dm=float(center_dm),
             half_range=float(half_range),
             step=float(step),
-            context_builder=lambda data: self._measurement_context_for_data(data),
+            metric_input_builder=(
+                (lambda data: self._dm_metric_input_for_reduced_grid(data, context=context, tsamp_sec=reduced_metric_tsamp_sec))
+                if metric == "dm_phase"
+                else (lambda data: self._dm_metric_input_for_data(data))
+            ),
             residuals=lambda data: self._subband_residuals_for_data(data),
-            provenance=self._dm_provenance(context),
+            provenance=self._dm_provenance(
+                context,
+                tsamp_ms=grid.effective_tsamp_ms,
+                freqres_mhz=grid.effective_freqres_mhz,
+            ),
             metric=metric,
         )
         component_results: list[DmComponentOptimizationResult] = []
         for index, (label, event_bounds_abs) in enumerate(self._dm_component_windows(), start=1):
-            component_context = self._measurement_context_for_data(
+            component_grid, component_context = self._build_measurement_context_for_data(
                 self.data,
                 event_bounds_abs=event_bounds_abs,
             )
+            component_reduced_metric_data = np.asarray(component_grid.masked, dtype=float)
+            component_reduced_metric_freqs = np.asarray(component_grid.freqs_mhz, dtype=float)
+            component_reduced_metric_tsamp_sec = float(component_grid.effective_tsamp_ms / 1000.0)
             component_optimization = optimize_dm_trials(
                 data=self.data,
                 current_dm=float(self.dm),
                 freqs_mhz=self.freqs,
                 tsamp_sec=self.tsamp,
+                score_data=component_reduced_metric_data if metric == "dm_phase" else None,
+                score_current_dm=float(self.dm) if metric == "dm_phase" else None,
+                score_freqs_mhz=component_reduced_metric_freqs if metric == "dm_phase" else None,
+                score_tsamp_sec=component_reduced_metric_tsamp_sec if metric == "dm_phase" else None,
                 center_dm=float(center_dm),
                 half_range=float(half_range),
                 step=float(step),
-                context_builder=lambda data, bounds=event_bounds_abs: self._measurement_context_for_data(
-                    data,
-                    event_bounds_abs=bounds,
+                metric_input_builder=(
+                    (
+                        lambda data, ctx=component_context, ts=component_reduced_metric_tsamp_sec: self._dm_metric_input_for_reduced_grid(
+                            data,
+                            context=ctx,
+                            tsamp_sec=ts,
+                        )
+                    )
+                    if metric == "dm_phase"
+                    else (
+                        lambda data, bounds=event_bounds_abs: self._dm_metric_input_for_data(
+                            data,
+                            event_bounds_abs=bounds,
+                        )
+                    )
                 ),
                 residuals=lambda data, bounds=event_bounds_abs: self._subband_residuals_for_data(
                     data,
                     event_bounds_abs=bounds,
                 ),
-                provenance=self._dm_provenance(component_context),
+                provenance=self._dm_provenance(
+                    component_context,
+                    tsamp_ms=component_grid.effective_tsamp_ms,
+                    freqres_mhz=component_grid.effective_freqres_mhz,
+                ),
                 metric=metric,
             )
             component_results.append(
                 DmComponentOptimizationResult(
                     component_id=f"component_{index}",
                     label=label,
-                    event_window_ms=[
-                        self.bin_to_ms(event_bounds_abs[0]),
-                        self.bin_to_ms(event_bounds_abs[1]),
-                    ],
+                    event_window_ms=list(
+                        self._current_event_window_ms(
+                            component_context,
+                            tsamp_ms=component_grid.effective_tsamp_ms,
+                        )
+                    ),
                     trial_dms=np.asarray(component_optimization.trial_dms, dtype=float),
                     metric_values=np.asarray(component_optimization.snr, dtype=float),
                     metric=metric,
@@ -1073,25 +1339,23 @@ class BurstSession:
 
     def compute_properties(self) -> BurstMeasurements:
         previous_results = self.results
-        masked = self.get_masked_crop()
-        event_rel_start, event_rel_end = self._event_bounds_in_crop(masked.shape[1])
-        spec_lo, spec_hi = self._selected_channel_bounds()
+        grid = self._reduced_analysis_grid()
         measurements = compute_burst_measurements(
             burst_name=Path(self.burst_file).stem,
             dm=self.dm,
             start_mjd=self.start_mjd,
-            read_start_sec=self.plus_mjd_sec,
-            crop_start_bin=self.crop_start,
-            tsamp_ms=self.tsamp_ms,
-            freqres_mhz=self.freqres,
-            freqs_mhz=self.freqs,
-            masked=masked,
-            event_rel_start=event_rel_start,
-            event_rel_end=event_rel_end,
-            spec_lo=spec_lo,
-            spec_hi=spec_hi,
-            peak_bins_abs=self._current_peak_positions(),
-            burst_regions_abs=tuple(self.burst_regions),
+            read_start_sec=0.0,
+            crop_start_bin=0,
+            tsamp_ms=grid.effective_tsamp_ms,
+            freqres_mhz=grid.effective_freqres_mhz,
+            freqs_mhz=grid.freqs_mhz,
+            masked=grid.masked,
+            event_rel_start=grid.event_rel_start,
+            event_rel_end=grid.event_rel_end,
+            spec_lo=grid.spec_lo,
+            spec_hi=grid.spec_hi,
+            peak_bins_abs=grid.peak_bins,
+            burst_regions_abs=tuple(grid.burst_regions_rel),
             manual_selection=bool(self.manual_peaks or self.burst_regions),
             manual_peak_selection=bool(self.manual_peaks),
             sefd_jy=self.sefd,
@@ -1099,10 +1363,11 @@ class BurstSession:
             distance_mpc=self.config.distance_mpc,
             redshift=self.config.redshift,
             masked_channels=np.flatnonzero(self.channel_mask).astype(int).tolist(),
-            offpulse_regions_rel=self._offpulse_regions_in_crop(),
+            offpulse_regions_rel=grid.offpulse_regions_rel,
             noise_settings=self.noise_settings,
             width_results=[] if self.width_analysis is None else list(self.width_analysis.results),
             accepted_width=None if self.width_analysis is None else self.width_analysis.accepted_width,
+            time_axis_ms=grid.time_axis_ms,
         )
         if previous_results is not None and previous_results.diagnostics.scattering_fit is not None:
             measurements = replace(
@@ -1129,52 +1394,27 @@ class BurstSession:
         assert self.results is not None
         config = FitburstRequestConfig.from_dict(config_data) if config_data else None
 
-        masked, context = self._build_measurement_context_for_data()
-        selected_band = np.asarray(masked[context.spec_lo : context.spec_hi + 1, :], dtype=float)
-        selected_freqs = np.asarray(self.freqs[context.spec_lo : context.spec_hi + 1], dtype=float)
+        grid, context = self._build_measurement_context_for_data()
+        selected_band = np.asarray(grid.masked[context.spec_lo : context.spec_hi + 1, :], dtype=float)
+        selected_freqs = np.asarray(grid.freqs_mhz[context.spec_lo : context.spec_hi + 1], dtype=float)
 
-        peak_abs_bin = _primary_peak_bin(
-            peak_bins_abs=self._current_peak_positions(),
+        peak_rel_bin = _primary_peak_bin(
+            peak_bins_abs=grid.peak_bins,
             profile_sn=context.selected_profile_sn,
-            crop_start_bin=self.crop_start,
+            crop_start_bin=0,
             event_rel_start=context.event_rel_start,
             event_rel_end=context.event_rel_end,
         )
 
-        # Apply decimation if time_factor > 1
-        tfac = max(1, int(self.time_factor))
-        if tfac > 1:
-            selected_band = block_reduce_mean(selected_band, tfac=tfac)
-            num_bins = selected_band.shape[1]
-            time_axis_ms = context.time_axis_ms[::tfac][:num_bins]
-            event_rel_start = min(context.event_rel_start // tfac, num_bins)
-            event_rel_end = min(context.event_rel_end // tfac, num_bins)
-            
-            offpulse_bins = np.unique(context.offpulse_bins // tfac)
-            offpulse_bins = offpulse_bins[offpulse_bins < num_bins]
-            
-            tsamp_ms = self.tsamp_ms * tfac
-            if peak_abs_bin is not None:
-                peak_rel_bin = min(int((peak_abs_bin - self.crop_start) // tfac), num_bins - 1)
-            else:
-                peak_rel_bin = None
-        else:
-            time_axis_ms = context.time_axis_ms
-            event_rel_start = context.event_rel_start
-            event_rel_end = context.event_rel_end
-            offpulse_bins = context.offpulse_bins
-            tsamp_ms = self.tsamp_ms
-            peak_rel_bin = None if peak_abs_bin is None else int(peak_abs_bin - self.crop_start)
-
         fit_result = fit_scattering_selected_band(
             selected_band=selected_band,
             freqs_mhz=selected_freqs,
-            time_axis_ms=time_axis_ms,
-            event_rel_start=event_rel_start,
-            event_rel_end=event_rel_end,
-            offpulse_bins=offpulse_bins,
-            tsamp_ms=tsamp_ms,
-            peak_rel_bin=peak_rel_bin,
+            time_axis_ms=context.time_axis_ms,
+            event_rel_start=context.event_rel_start,
+            event_rel_end=context.event_rel_end,
+            offpulse_bins=context.offpulse_bins,
+            tsamp_ms=grid.effective_tsamp_ms,
+            peak_rel_bin=None if peak_rel_bin is None else int(peak_rel_bin),
             width_guess_ms=self.results.width_ms_acf,
             config=config,
         )
@@ -1202,17 +1442,20 @@ class BurstSession:
         return self.results
 
     def run_spectral_analysis(self, segment_length_ms: float) -> SpectralAnalysisResult:
-        _, context = self._build_measurement_context_for_data()
+        grid, context = self._build_measurement_context_for_data()
         event_series = np.asarray(
             context.selected_profile_baselined[context.event_rel_start:context.event_rel_end],
             dtype=float,
         )
         self.spectral_analysis = run_averaged_spectral_analysis(
             event_series=event_series,
-            tsamp_ms=self.tsamp_ms,
+            tsamp_ms=grid.effective_tsamp_ms,
             segment_length_ms=float(segment_length_ms),
-            event_window_ms=self._current_event_window_ms(context),
-            spectral_extent_mhz=self._selected_frequency_bounds_mhz(),
+            event_window_ms=self._current_event_window_ms(context, tsamp_ms=grid.effective_tsamp_ms),
+            spectral_extent_mhz=[
+                float(np.min(context.spectral_axis_mhz)) if context.spectral_axis_mhz.size else 0.0,
+                float(np.max(context.spectral_axis_mhz)) if context.spectral_axis_mhz.size else 0.0,
+            ],
         )
         return self.spectral_analysis
 

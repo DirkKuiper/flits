@@ -28,10 +28,12 @@ def _synthetic_export_session(*, num_channels: int = 24, true_dm: float = 50.0) 
     reffreq = float(np.max(freqs))
     time_shift = DM_CONST * true_dm * (reffreq ** -2.0 - freqs ** -2.0)
     bin_shift = np.round(time_shift / tsamp).astype(int)
+    rng = np.random.default_rng(67890)
 
     data = np.zeros((freqs.size, num_time_bins), dtype=float)
     for chan, shift in enumerate(bin_shift):
         data[chan, :] = np.roll(pulse, -int(shift))
+    data += rng.normal(0.0, 0.03, size=data.shape)
 
     metadata = FilterbankMetadata(
         source_path=Path("synthetic_export.fil"),
@@ -92,7 +94,7 @@ class ExportResultsTest(unittest.TestCase):
 
         manifest = payload["export_manifest"]
         self.assertIsNotNone(manifest)
-        self.assertEqual(manifest["schema_version"], "1.0")
+        self.assertEqual(manifest["schema_version"], "1.1")
         artifact_names = {artifact["name"] for artifact in manifest["artifacts"]}
         self.assertTrue(any(name.endswith("_science.json") for name in artifact_names))
         self.assertTrue(any(name.endswith("_catalog.csv") for name in artifact_names))
@@ -128,8 +130,7 @@ class ExportResultsTest(unittest.TestCase):
         with np.load(io.BytesIO(npz_response.body)) as arrays:
             self.assertIn("dynamic_spectrum", arrays.files)
             self.assertIn("trial_dms", arrays.files)
-            self.assertEqual(arrays["dynamic_spectrum"].shape, (session.total_channels, session.total_time_bins))
-            self.assertNotEqual(
+            self.assertEqual(
                 arrays["dynamic_spectrum"].shape,
                 np.asarray(payload["view"]["plot"]["heatmap"]["z"]).shape,
             )
@@ -158,6 +159,23 @@ class ExportResultsTest(unittest.TestCase):
         self.assertEqual(svg_response.media_type, "image/svg+xml")
         self.assertGreater(len(png_response.body), 0)
         self.assertGreater(len(svg_response.body), 0)
+
+    def test_export_dm_curve_uses_selected_metric_label(self) -> None:
+        session_id = "synthetic-export-dmphase"
+        session = _synthetic_export_session()
+        session.optimize_dm(center_dm=50.0, half_range=4.0, step=0.5, metric="dm_phase")
+        SESSIONS[session_id] = session
+
+        manifest = session_action(
+            session_id,
+            ActionRequest(type="export_results", payload={"include": ["plots"], "plot_formats": ["svg"]}),
+        )["export_manifest"]
+
+        dm_curve_name = next(
+            artifact["name"] for artifact in manifest["artifacts"] if artifact["name"].endswith("_dm_curve.svg")
+        )
+        svg_text = session_export_artifact(session_id, manifest["export_id"], dm_curve_name).body.decode("utf-8")
+        self.assertIn("DMphase", svg_text)
 
     def test_export_results_handles_missing_measurements_and_dm_with_explicit_omissions(self) -> None:
         session_id = "synthetic-export-empty"

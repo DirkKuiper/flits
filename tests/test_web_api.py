@@ -27,7 +27,9 @@ from flits.web.app import (
     data_dir,
     delete_session,
     detect_filterbank,
+    files,
     import_session,
+    list_filterbank_directories,
     list_filterbank_files,
     main,
     resolve_burst_path,
@@ -49,10 +51,12 @@ def _synthetic_session(*, auto_mask_profile: str = "auto") -> BurstSession:
     pulse = np.exp(-0.5 * ((np.arange(num_time_bins, dtype=float) - aligned_bin) / 2.5) ** 2)
     time_shift = DM_CONST * 50.0 * (float(np.max(freqs)) ** -2.0 - freqs ** -2.0)
     bin_shift = np.round(time_shift / tsamp).astype(int)
+    rng = np.random.default_rng(54321)
 
     data = np.zeros((freqs.size, num_time_bins), dtype=float)
     for chan, shift in enumerate(bin_shift):
         data[chan, :] = np.roll(pulse, -int(shift))
+    data += rng.normal(0.0, 0.03, size=data.shape)
 
     metadata = FilterbankMetadata(
         source_path=Path("synthetic_dm.fil"),
@@ -135,14 +139,72 @@ class WebApiTest(unittest.TestCase):
     def test_data_dir_env_controls_relative_lookup_and_listing(self) -> None:
         with TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
+            (tmp_path / "root_example.fil").write_bytes(b"")
             nested = tmp_path / "nested"
             nested.mkdir()
             filterbank = nested / "example.fil"
             filterbank.write_bytes(b"")
+            deeper = nested / "deeper"
+            deeper.mkdir()
+            deeper_filterbank = deeper / "deep_example.fil"
+            deeper_filterbank.write_bytes(b"")
 
             with patch.dict("os.environ", {"FLITS_DATA_DIR": str(tmp_path)}):
-                self.assertEqual(list_filterbank_files(), ["nested/example.fil"])
+                self.assertEqual(
+                    list_filterbank_files(),
+                    ["nested/deeper/deep_example.fil", "nested/example.fil", "root_example.fil"],
+                )
+                self.assertEqual(
+                    list_filterbank_directories(),
+                    [
+                        {
+                            "path": "",
+                            "label": "Data root",
+                            "file_count": 1,
+                            "files": [{"path": "root_example.fil", "name": "root_example.fil"}],
+                        },
+                        {
+                            "path": "nested",
+                            "label": "nested",
+                            "file_count": 1,
+                            "files": [{"path": "nested/example.fil", "name": "example.fil"}],
+                        },
+                        {
+                            "path": "nested/deeper",
+                            "label": "nested/deeper",
+                            "file_count": 1,
+                            "files": [{"path": "nested/deeper/deep_example.fil", "name": "deep_example.fil"}],
+                        },
+                    ],
+                )
+                self.assertEqual(
+                    files(),
+                    {
+                        "files": ["nested/deeper/deep_example.fil", "nested/example.fil", "root_example.fil"],
+                        "directories": [
+                            {
+                                "path": "",
+                                "label": "Data root",
+                                "file_count": 1,
+                                "files": [{"path": "root_example.fil", "name": "root_example.fil"}],
+                            },
+                            {
+                                "path": "nested",
+                                "label": "nested",
+                                "file_count": 1,
+                                "files": [{"path": "nested/example.fil", "name": "example.fil"}],
+                            },
+                            {
+                                "path": "nested/deeper",
+                                "label": "nested/deeper",
+                                "file_count": 1,
+                                "files": [{"path": "nested/deeper/deep_example.fil", "name": "deep_example.fil"}],
+                            },
+                        ],
+                    },
+                )
                 self.assertEqual(resolve_burst_path("nested/example.fil"), filterbank.resolve())
+                self.assertEqual(resolve_burst_path("nested/deeper/deep_example.fil"), deeper_filterbank.resolve())
 
     def test_data_dir_defaults_to_current_working_directory(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -177,6 +239,7 @@ class WebApiTest(unittest.TestCase):
         index_html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
         app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
 
+        self.assertIn('id="directorySelect"', index_html)
         self.assertIn('data-analysis-tab="prepare"', index_html)
         self.assertIn('data-analysis-tab="dm"', index_html)
         self.assertIn('data-analysis-tab="fitting"', index_html)
@@ -201,6 +264,8 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("Component Region", index_html)
         self.assertIn("Clear Components", index_html)
         self.assertIn("activeAnalysisTab", app_js)
+        self.assertIn("renderDirectoryOptions", app_js)
+        self.assertIn("syncKnownFileSelection", app_js)
         self.assertIn("syncDmPlots", app_js)
         self.assertIn("syncFittingPlot", app_js)
         self.assertIn("renderSpectral", app_js)
@@ -210,12 +275,14 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("compute_widths", app_js)
         self.assertIn("downloadSessionSnapshot", app_js)
         self.assertIn("importSessionSnapshot", app_js)
-        self.assertIn("minimal_residual_drift", app_js)
+        self.assertIn("dm_phase", app_js)
         self.assertIn("renderDmComponentSummary", app_js)
-        self.assertIn("Metric Definition", app_js)
+        self.assertIn("Selected Metric", app_js)
+        self.assertIn("DMphase Reference", app_js)
         self.assertIn("renderDmMetricDefinition", app_js)
         self.assertIn("replaceState", app_js)
         self.assertIn("run_spectral_analysis", app_js)
+        self.assertNotIn("time_downsample_factor", app_js)
 
     @patch("flits.web.app.BurstSession.from_file")
     @patch("flits.web.app.resolve_burst_path")
@@ -276,7 +343,7 @@ class WebApiTest(unittest.TestCase):
                 session_id,
                 ActionRequest(
                     type="optimize_dm",
-                    payload={"center_dm": 50.0, "half_range": 4.0, "step": 0.5, "metric": "peak_snr"},
+                    payload={"center_dm": 50.0, "half_range": 4.0, "step": 0.5, "metric": "dm_phase"},
                 ),
             )
         finally:
@@ -289,7 +356,7 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("trial_dms", optimization)
         self.assertIn("best_dm", optimization)
         self.assertEqual(len(optimization["trial_dms"]), len(optimization["snr"]))
-        self.assertEqual(optimization["snr_metric"], "peak_snr")
+        self.assertEqual(optimization["snr_metric"], "dm_phase")
         self.assertIn("applied_dm", optimization)
         self.assertIn("subband_freqs_mhz", optimization)
         self.assertIn("arrival_times_applied_ms", optimization)
@@ -305,6 +372,25 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("formula", metric_defs[0])
         self.assertIn("origin", metric_defs[0])
         self.assertIn("references", metric_defs[0])
+        self.assertEqual([item["key"] for item in metric_defs], ["integrated_event_snr", "dm_phase"])
+
+    def test_session_action_optimize_dm_rejects_removed_metric(self) -> None:
+        session_id = "synthetic-dm-invalid-metric"
+        SESSIONS[session_id] = _synthetic_session()
+        try:
+            with self.assertRaises(HTTPException) as context:
+                session_action(
+                    session_id,
+                    ActionRequest(
+                        type="optimize_dm",
+                        payload={"center_dm": 50.0, "half_range": 4.0, "step": 0.5, "metric": "peak_snr"},
+                    ),
+                )
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        self.assertEqual(context.exception.status_code, 400)
+        self.assertIn("Unsupported DM metric", context.exception.detail)
 
     def test_session_action_fit_scattering_dispatches_to_session_method(self) -> None:
         session_id = "synthetic-fit-dispatch"
@@ -354,7 +440,7 @@ class WebApiTest(unittest.TestCase):
         finally:
             SESSIONS.pop(session_id, None)
 
-        session.run_spectral_analysis.assert_called_once_with(16.0)
+        session.run_spectral_analysis.assert_called_once_with(segment_length_ms=16.0)
         analysis = payload["view"]["spectral_analysis"]
         self.assertIsNotNone(analysis)
         self.assertEqual(analysis["status"], "ok")

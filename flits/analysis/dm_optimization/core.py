@@ -1,9 +1,19 @@
+"""DM optimization metrics used by FLITS.
+
+This module includes a clean-room FLITS implementation of DMphase. FLITS keeps
+the runtime implementation native so it can operate on the current reduced
+analysis grid, masking, crop, and selection state without depending on the
+external package.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from scipy import signal
 
 from flits.measurements import MeasurementContext, event_snr
 from flits.models import (
@@ -17,7 +27,53 @@ from flits.signal import dedisperse
 
 
 ResidualRunner = Callable[[], tuple[np.ndarray, np.ndarray, np.ndarray, str]]
-DMMetricRunner = Callable[[MeasurementContext, ResidualRunner | None], float]
+
+
+@dataclass(frozen=True)
+class DMMetricInput:
+    context: MeasurementContext
+    waterfall: np.ndarray
+    selected_waterfall: np.ndarray
+    event_waterfall: np.ndarray
+    offpulse_bins: np.ndarray
+    freqs_mhz: np.ndarray
+    tsamp_sec: float
+
+
+@dataclass(frozen=True)
+class DMMetricPreparedTrial:
+    scalar_score: float | None = None
+    dmphase_power_spectrum: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    dmphase_channel_count: int = 0
+
+
+@dataclass(frozen=True)
+class DMMetricAlgorithm:
+    prepare_trial: Callable[[DMMetricInput], DMMetricPreparedTrial]
+    finalize_scores: Callable[[list[DMMetricPreparedTrial]], "DMMetricFinalizeResult"]
+
+
+@dataclass(frozen=True)
+class DMMetricFitResult:
+    best_dm: float
+    best_score: float
+    best_dm_uncertainty: float | None
+    fit_status: str
+
+
+@dataclass(frozen=True)
+class DMMetricFinalizeResult:
+    scores: np.ndarray
+    fit_result: DMMetricFitResult | None = None
+    fit_payload: DMPhaseFitInput | None = None
+
+
+@dataclass(frozen=True)
+class DMPhaseFitInput:
+    power_spectra: np.ndarray
+    low_idx: int
+    dstd: float
+    weights: np.ndarray
 
 
 def _dm_ref(label: str, citation: str, url: str, note: str | None = None) -> DmMetricReference:
@@ -46,96 +102,28 @@ DM_METRIC_METADATA: dict[str, DmMetricDefinition] = {
             ),
         ],
     ),
-    "peak_snr": DmMetricDefinition(
-        key="peak_snr",
-        label="Peak S/N",
-        summary="Take the maximum off-pulse-normalized sample inside the selected event window.",
-        formula="score = max_i s_i over the selected event bins.",
-        origin="FLITS simplification of peak-S/N pulse-search logic; inspired by software that searches for the strongest dedispersed pulse after baseline/noise normalization.",
+    "dm_phase": DmMetricDefinition(
+        key="dm_phase",
+        label="DMphase",
+        summary="Use the automatic DMphase coherent-power curve on the selected reduced waterfall.",
+        formula="score = DMphase automatic coherent-power curve derived from phase-only Fourier sums across frequency channels.",
+        origin=(
+            "Clean-room FLITS implementation aligned to the automatic non-interactive "
+            "DM_phase algorithm. FLITS reproduces the coherent-power and automatic DM-curve "
+            "construction while keeping the runtime implementation native."
+        ),
         references=[
             _dm_ref(
-                label="PSRCHIVE psrstat",
-                citation="PSRCHIVE psrstat documentation: phase/pdmp S/N algorithms",
-                url="https://psrchive.sourceforge.net/manuals/psrstat/algorithms/snr/",
-                note="Background on profile S/N definitions used in pulsar software.",
+                label="DM_phase",
+                citation="Seymour, Michilli, and Pleunis, DM_phase repository",
+                url="https://github.com/danielemichilli/DM_phase",
+                note="FLITS follows the automatic `get_dm(...)` path rather than the manual GUI workflow.",
             ),
             _dm_ref(
-                label="PDMP",
-                citation="Teoh 2005, PDMP User Manual",
-                url="https://psrchive.sourceforge.net/manuals/pdmp/pdmp_manual.html",
-                note="DM-search software precedent; FLITS uses a simpler peak-in-window statistic rather than pdmp's matched-boxcar sweep.",
-            ),
-        ],
-    ),
-    "profile_sharpness": DmMetricDefinition(
-        key="profile_sharpness",
-        label="Profile Sharpness",
-        summary="After light smoothing, favor DMs that concentrate burst power into sharper time structure.",
-        formula="p_i = max(0, baselined event profile); p_tilde = [0.25, 0.5, 0.25] * p; score = sum_i p_tilde_i^2.",
-        origin="FLITS heuristic inspired by structure-based DM optimization, especially DM-power, but not a reproduction of the DM-power Fourier-domain statistic.",
-        references=[
-            _dm_ref(
-                label="DM-power",
-                citation="Majid et al. 2022, DM-power: an algorithm for high precision dispersion measure with application to fast radio bursts",
-                url="https://arxiv.org/abs/2208.13677",
-                note="Primary inspiration for structure-aware DM optimization in FRBs.",
-            ),
-        ],
-    ),
-    "burst_compactness": DmMetricDefinition(
-        key="burst_compactness",
-        label="Burst Compactness",
-        summary="Favor high fluence concentration within a narrow event profile.",
-        formula="p_i = max(0, baselined event profile); score = (sum_i p_i^2) / (sum_i p_i).",
-        origin="FLITS heuristic related to equivalent-width and matched-filter intuition; not a direct literature formula.",
-        references=[
-            _dm_ref(
-                label="PSRCHIVE psrstat",
-                citation="PSRCHIVE psrstat documentation: pdmp S/N algorithm",
-                url="https://psrchive.sourceforge.net/manuals/psrstat/algorithms/snr/",
-                note="Matched-boxcar S/N motivates rewarding fluence concentration.",
-            ),
-            _dm_ref(
-                label="DM-power",
-                citation="Majid et al. 2022, DM-power",
-                url="https://arxiv.org/abs/2208.13677",
-                note="Structure-preserving DM optimization is the broader motivation; FLITS uses a simpler time-domain compactness score.",
-            ),
-        ],
-    ),
-    "minimal_residual_drift": DmMetricDefinition(
-        key="minimal_residual_drift",
-        label="Minimal Residual Drift",
-        summary="Use sub-band arrival times and reward DMs that flatten the residual delay pattern across frequency.",
-        formula="r_j = t_j - mean(t); score = 1 / sqrt(mean_j r_j^2), where t_j is the sub-band arrival time.",
-        origin="FLITS residual-alignment heuristic inspired by wideband TOA+DM fitting and per-channel/sub-band arrival-time analyses.",
-        references=[
-            _dm_ref(
-                label="Wideband timing",
-                citation="Pennucci, Demorest, and Ransom 2014, Elementary Wideband Timing of Radio Pulsars",
-                url="https://arxiv.org/abs/1402.1672",
-                note="Primary reference for simultaneously constraining TOA and DM from frequency-resolved pulse data.",
-            ),
-            _dm_ref(
-                label="Per-channel arrivals",
-                citation="High precision spectro-temporal analysis of ultra-fast radio bursts using per-channel arrival times",
-                url="https://arxiv.org/abs/2412.12404",
-                note="FRB-specific example of frequency-resolved arrival-time analysis.",
-            ),
-        ],
-    ),
-    "maximal_structure": DmMetricDefinition(
-        key="maximal_structure",
-        label="Maximal Structure",
-        summary="After light smoothing, reward larger absolute second differences in the event profile.",
-        formula="p_tilde = [0.25, 0.5, 0.25] * p; score = sum_i |Delta^2 p_tilde_i|.",
-        origin="FLITS heuristic inspired by multi-scale structure metrics such as DM-power; this implementation is a simple time-domain curvature score, not the published DM-power algorithm.",
-        references=[
-            _dm_ref(
-                label="DM-power",
-                citation="Majid et al. 2022, DM-power",
-                url="https://arxiv.org/abs/2208.13677",
-                note="Primary published reference for maximizing burst structure during DM optimization.",
+                label="ASCL",
+                citation="ascl:1910.004, DM_phase",
+                url="https://ascl.net/1910.004",
+                note="Software reference for the DMphase method.",
             ),
         ],
     ),
@@ -146,95 +134,364 @@ def available_dm_metrics() -> list[dict[str, Any]]:
     return [definition.to_dict() for definition in DM_METRIC_METADATA.values()]
 
 
+def dm_metric_definition(metric: str) -> DmMetricDefinition | None:
+    return DM_METRIC_METADATA.get(str(metric))
+
+
 def _finite_or_neg_inf(value: float) -> float:
     return float(value) if np.isfinite(value) else float("-inf")
 
 
-def _positive_event_profile(context: MeasurementContext) -> np.ndarray:
-    profile = np.asarray(context.event_profile_baselined, dtype=float)
-    if profile.size == 0:
-        return np.array([], dtype=float)
-    profile = np.where(np.isfinite(profile), profile, 0.0)
-    return np.clip(profile, a_min=0.0, a_max=None)
+def _run_integrated_event_snr_prepare(metric_input: DMMetricInput) -> DMMetricPreparedTrial:
+    context = metric_input.context
+    score = float(event_snr(context.selected_profile_sn, context.event_rel_start, context.event_rel_end))
+    return DMMetricPreparedTrial(scalar_score=score)
 
 
-def _smoothed_profile(values: np.ndarray) -> np.ndarray:
-    profile = np.asarray(values, dtype=float)
-    if profile.size < 3:
-        return profile
-    kernel = np.array([0.25, 0.5, 0.25], dtype=float)
-    return np.convolve(profile, kernel, mode="same")
+def _finalize_scalar_scores(prepared_trials: list[DMMetricPreparedTrial]) -> DMMetricFinalizeResult:
+    scores = np.asarray(
+        [
+            float("-inf")
+            if trial.scalar_score is None or not np.isfinite(trial.scalar_score)
+            else float(trial.scalar_score)
+            for trial in prepared_trials
+        ],
+        dtype=float,
+    )
+    return DMMetricFinalizeResult(scores=scores)
 
 
-def _run_integrated_event_snr(context: MeasurementContext, residuals: ResidualRunner | None) -> float:
-    del residuals
-    return float(event_snr(context.selected_profile_sn, context.event_rel_start, context.event_rel_end))
+def _dmphase_window(profile: np.ndarray) -> int:
+    values = np.asarray(profile, dtype=float)
+    if values.size < 3 or not np.isfinite(values).any():
+        return 1
+    smooth_profile = signal.detrend(values)
+    autocorrelation = np.correlate(smooth_profile, smooth_profile, "same")
+    negative = np.flatnonzero(autocorrelation < 0)
+    if negative.size < 2:
+        return max(1, values.size // 8)
+    return max(1, int(np.max(np.diff(negative))))
 
 
-def _run_peak_snr(context: MeasurementContext, residuals: ResidualRunner | None) -> float:
-    del residuals
-    event_profile = np.asarray(context.event_profile_sn, dtype=float)
-    finite = event_profile[np.isfinite(event_profile)]
-    if finite.size == 0:
-        return float("-inf")
-    return float(np.nanmax(finite))
+def _dmphase_frequency_cutoff(power_spectra: np.ndarray, nchan: int) -> tuple[int, int]:
+    spectra = np.asarray(power_spectra, dtype=float)
+    if spectra.ndim != 2 or spectra.size == 0 or nchan <= 0:
+        return 0, 0
+    peak_power = np.max(spectra, axis=1)
+    std = float(nchan) / np.sqrt(2.0)
+    if not np.isfinite(std) or std <= 0:
+        return 0, 0
+    snr = (peak_power - float(nchan)) / std
+    kern = int(np.round(_dmphase_window(snr) / 2.0))
+    return 0, max(5, kern)
 
 
-def _run_profile_sharpness(context: MeasurementContext, residuals: ResidualRunner | None) -> float:
-    del residuals
-    profile = _smoothed_profile(_positive_event_profile(context))
-    if profile.size == 0 or not np.any(profile > 0):
-        return float("-inf")
-    return _finite_or_neg_inf(float(np.nansum(profile ** 2)))
+def _prepare_dmphase_waterfall(waterfall: np.ndarray) -> tuple[np.ndarray, int]:
+    values = np.asarray(waterfall, dtype=float)
+    if values.ndim != 2 or values.size == 0:
+        return np.array([], dtype=float), 0
+
+    filtered_rows: list[np.ndarray] = []
+    for row in values:
+        finite = np.isfinite(row)
+        if not finite.all():
+            continue
+        if row.size < 4:
+            continue
+        filtered_rows.append(np.asarray(row, dtype=float))
+
+    if len(filtered_rows) < 2:
+        return np.array([], dtype=float), 0
+    return np.asarray(filtered_rows, dtype=float), len(filtered_rows)
 
 
-def _run_burst_compactness(context: MeasurementContext, residuals: ResidualRunner | None) -> float:
-    del residuals
-    profile = _positive_event_profile(context)
-    if profile.size == 0 or not np.any(profile > 0):
-        return float("-inf")
-    fluence = float(np.nansum(profile))
-    power = float(np.nansum(profile ** 2))
-    if not np.isfinite(fluence) or not np.isfinite(power) or fluence <= 0 or power <= 0:
-        return float("-inf")
-    return float(power / fluence)
+def _dmphase_coherent_power_spectrum(waterfall: np.ndarray) -> np.ndarray:
+    fourier_transform = np.fft.fft(np.asarray(waterfall, dtype=float), axis=-1)
+    amplitude = np.abs(fourier_transform)
+    amplitude[amplitude == 0] = 1.0
+    coherence_spectrum = np.sum(fourier_transform / amplitude, axis=0)
+    return np.abs(coherence_spectrum) ** 2
 
 
-def _run_minimal_residual_drift(context: MeasurementContext, residuals: ResidualRunner | None) -> float:
-    del context
-    if residuals is None:
-        return float("-inf")
-    _, _, residual_values, status = residuals()
-    if status != "ok":
-        return float("-inf")
-    residual_values = np.asarray(residual_values, dtype=float)
-    finite = residual_values[np.isfinite(residual_values)]
-    if finite.size < 3:
-        return float("-inf")
-    rms = float(np.sqrt(np.mean(finite ** 2)))
-    if not np.isfinite(rms):
-        return float("-inf")
-    return float(1.0 / max(rms, 1e-6))
+def _run_dmphase_prepare(metric_input: DMMetricInput) -> DMMetricPreparedTrial:
+    dmphase_waterfall, nchan = _prepare_dmphase_waterfall(metric_input.selected_waterfall)
+    if nchan < 2 or dmphase_waterfall.shape[1] < 4:
+        return DMMetricPreparedTrial()
+
+    power_spectrum = _dmphase_coherent_power_spectrum(dmphase_waterfall)
+    half_spectrum_bins = dmphase_waterfall.shape[1] // 2
+    if half_spectrum_bins < 2 or power_spectrum.size < half_spectrum_bins:
+        return DMMetricPreparedTrial()
+
+    return DMMetricPreparedTrial(
+        dmphase_power_spectrum=np.asarray(power_spectrum[:half_spectrum_bins], dtype=float),
+        dmphase_channel_count=int(nchan),
+    )
 
 
-def _run_maximal_structure(context: MeasurementContext, residuals: ResidualRunner | None) -> float:
-    del residuals
-    profile = _smoothed_profile(_positive_event_profile(context))
-    if profile.size < 3 or not np.any(profile > 0):
-        return float("-inf")
-    curvature = np.diff(profile, n=2)
-    if curvature.size == 0:
-        return float("-inf")
-    return _finite_or_neg_inf(float(np.nansum(np.abs(curvature))))
+def _dmphase_curve(
+    power_spectra: np.ndarray,
+    dpower_spectra: np.ndarray,
+    nchan: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    n = int(power_spectra.shape[0])
+    m = int(power_spectra.shape[1])
+    if n <= 0 or m <= 0 or nchan <= 0:
+        return (
+            np.zeros(m, dtype=float),
+            np.zeros(m, dtype=float),
+            np.zeros(m, dtype=float),
+        )
+
+    _, y_grid = np.meshgrid(np.arange(m), np.arange(n))
+    num_el = (n - y_grid).astype(float)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cumulative = np.cumsum(power_spectra, axis=0)
+        cumulative_sq = np.cumsum(power_spectra ** 2, axis=0)
+        s = np.divide(np.sum(power_spectra, axis=0).T - cumulative, num_el)
+        s2 = np.divide(np.sum(power_spectra ** 2, axis=0).T - cumulative_sq, num_el)
+        variance = np.divide(s2 - s ** 2, num_el)
+
+    variance = np.where(np.isfinite(variance), variance, 0.0)
+    variance_smoothed = signal.convolve2d(
+        variance,
+        np.ones((9, 3), dtype=float) / 27.0,
+        mode="same",
+        boundary="wrap",
+    )
+    usable_variance = variance_smoothed[:-10, :] if variance_smoothed.shape[0] > 10 else variance_smoothed
+    idx_f = np.argmin(usable_variance, axis=0)
+    idx_c = np.convolve(idx_f, np.ones(3, dtype=float) / 3.0, mode="same").astype(int)
+    idx_c[idx_c == 0] = 1
+    idx_c = np.ones(np.shape(idx_c), dtype=float) * idx_c
+    i2_sum = np.multiply(np.multiply(idx_c, idx_c + 1.0), 2.0 * idx_c + 1.0) / 6.0
+    i4_sum = (
+        np.multiply(np.multiply(np.multiply(idx_c, idx_c + 1.0), 2.0 * idx_c + 1.0), 6.0 * idx_c - 1.0)
+        / 30.0
+    )
+
+    lo = np.multiply(y_grid <= (np.ones((n, 1), dtype=float) * idx_c), dpower_spectra)
+    lo1 = np.multiply(y_grid <= (np.ones((n, 1), dtype=float) * idx_c), np.multiply(power_spectra, dpower_spectra))
+    average_noise_power = 2.0 * float(nchan) * np.ones(np.shape(idx_c), dtype=float)
+    dm_curve = lo.sum(axis=0)
+    dn_term = lo1.sum(axis=0)
+    noise_curve = np.multiply(average_noise_power, i2_sum)
+    variance_dp = (2.0 * float(nchan) ** 2 * i4_sum) + dn_term
+    dm_curve_error = np.sqrt(np.clip(variance_dp, a_min=0.0, a_max=None))
+    denominator = np.sqrt(np.clip(2.0 * float(nchan) ** 2 * (i4_sum + 2.0 * i2_sum), a_min=0.0, a_max=None))
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        snr = np.divide(dm_curve - noise_curve, denominator)
+    snr = np.where(np.isfinite(snr), snr, 0.0)
+    return (
+        np.asarray(dm_curve, dtype=float),
+        np.asarray(dm_curve_error, dtype=float),
+        np.asarray(snr, dtype=float),
+    )
 
 
-DM_METRIC_REGISTRY: dict[str, DMMetricRunner] = {
-    "integrated_event_snr": _run_integrated_event_snr,
-    "peak_snr": _run_peak_snr,
-    "profile_sharpness": _run_profile_sharpness,
-    "burst_compactness": _run_burst_compactness,
-    "minimal_residual_drift": _run_minimal_residual_drift,
-    "maximal_structure": _run_maximal_structure,
+def _dmphase_poly_max(
+    x: np.ndarray,
+    y: np.ndarray,
+    err: float,
+    w: np.ndarray | None,
+) -> tuple[float, float, np.ndarray, float]:
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if x.size == 0 or y.size == 0 or x.size != y.size:
+        raise ValueError("DMphase polynomial fit requires matching non-empty x/y arrays.")
+
+    if x.shape[0] < 7:
+        order = int(np.linalg.matrix_rank(np.vander(y)))
+    else:
+        order = 6
+    order = max(1, min(order, x.shape[0] - 1))
+    dx = x - float(np.mean(x))
+
+    if w is None:
+        poly = np.polyfit(dx, y, order)
+        err = max(float(np.std(y - np.polyval(poly, dx))), float(err))
+    else:
+        weights = np.asarray(w, dtype=float)
+        finite = np.isfinite(weights) & (weights > 0)
+        if not finite.any():
+            weights = None
+            poly = np.polyfit(dx, y, order)
+            err = max(float(np.std(y - np.polyval(poly, dx))), float(err))
+        else:
+            weights = weights[finite]
+            dx = dx[finite]
+            y = y[finite]
+            x = x[finite]
+            poly = np.polyfit(dx, y, order, w=weights)
+            weighted_residual = float(
+                np.sqrt(np.sum(weights * (y - np.polyval(poly, dx)) ** 2.0) / np.sum(weights))
+            )
+            err = max(weighted_residual, float(err))
+
+    dpoly = np.polyder(poly)
+    ddpoly = np.polyder(dpoly)
+    candidates = np.roots(dpoly)
+    curvatures = np.polyval(ddpoly, candidates)
+    valid = (
+        np.isclose(candidates.imag, 0.0)
+        & (candidates.real >= float(np.min(dx)))
+        & (candidates.real <= float(np.max(dx)))
+        & (curvatures < 0)
+    )
+    first_cut = candidates[valid]
+    if first_cut.size > 0:
+        values = np.polyval(poly, first_cut)
+        best = float(np.real(first_cut[int(np.argmax(values))]))
+        curvature = float(np.polyval(ddpoly, best))
+        delta_x = float(np.sqrt(abs(2.0 * float(err) / curvature))) if curvature != 0 else 0.0
+    else:
+        best = 0.0
+        delta_x = 0.0
+
+    x_mean = float(np.mean(x))
+    return float(best + x_mean), delta_x, np.asarray(poly, dtype=float), x_mean
+
+
+def _fit_dmphase_peak(
+    trial_dms: np.ndarray,
+    scores: np.ndarray,
+    power_spectra: np.ndarray,
+    low_idx: int,
+    dstd: float,
+    weights: np.ndarray,
+) -> DMMetricFitResult:
+    sampled_peak_index = int(np.nanargmax(scores))
+    sampled_best_dm = float(trial_dms[sampled_peak_index])
+    sampled_best_score = float(scores[sampled_peak_index])
+
+    heavy_weights = np.argwhere(scores > 0.5 * sampled_best_score)
+    if len(heavy_weights) < 5:
+        heavy_weights = np.argwhere(scores > 0.25 * sampled_best_score)
+    if len(heavy_weights) < 5:
+        heavy_weights = np.argwhere(scores > 0.1 * sampled_best_score)
+    if len(heavy_weights) == 0:
+        return DMMetricFitResult(
+            best_dm=sampled_best_dm,
+            best_score=sampled_best_score,
+            best_dm_uncertainty=None,
+            fit_status="dmphase_weighted_polyfit_fallback",
+        )
+
+    heavy_weights = np.asarray(heavy_weights, dtype=int).reshape(-1)
+    peak_center = float(np.mean(heavy_weights))
+    width = int(np.max(heavy_weights) - np.min(heavy_weights))
+    start = int(heavy_weights[int(np.argmin(np.abs((peak_center - width) - heavy_weights)))])
+    stop = int(heavy_weights[int(np.argmin(np.abs((peak_center + width) - heavy_weights)))])
+    start = max(0, start)
+    stop = min(int(scores.size), max(start + 2, stop))
+    plot_range = np.arange(start, stop, dtype=int)
+    if plot_range.size < 3:
+        return DMMetricFitResult(
+            best_dm=sampled_best_dm,
+            best_score=sampled_best_score,
+            best_dm_uncertainty=None,
+            fit_status="dmphase_weighted_polyfit_fallback",
+        )
+
+    x = np.asarray(trial_dms[plot_range], dtype=float)
+    y = np.asarray(scores[plot_range], dtype=float)
+    new_weights = np.asarray(weights[plot_range], dtype=float)
+    if not np.isfinite(new_weights).all() or float(np.sum(new_weights)) <= 0:
+        normalized_weights = None
+    else:
+        normalized_weights = new_weights / float(np.sum(new_weights))
+
+    try:
+        best_dm, uncertainty, poly, mean_x = _dmphase_poly_max(x, y, float(dstd), normalized_weights)
+        best_score = float(np.polyval(poly, best_dm - mean_x))
+    except Exception:
+        return DMMetricFitResult(
+            best_dm=sampled_best_dm,
+            best_score=sampled_best_score,
+            best_dm_uncertainty=None,
+            fit_status="dmphase_weighted_polyfit_failed",
+        )
+
+    if not np.isfinite(best_dm):
+        return DMMetricFitResult(
+            best_dm=sampled_best_dm,
+            best_score=sampled_best_score,
+            best_dm_uncertainty=None,
+            fit_status="dmphase_weighted_polyfit_failed",
+        )
+
+    if not np.isfinite(best_score):
+        best_score = sampled_best_score
+
+    fit_status = "dmphase_weighted_polyfit"
+    if not np.isfinite(uncertainty) or uncertainty <= 0:
+        uncertainty_value: float | None = None
+        fit_status = "dmphase_weighted_polyfit_uncertainty_unavailable"
+    else:
+        uncertainty_value = float(uncertainty)
+
+    return DMMetricFitResult(
+        best_dm=float(best_dm),
+        best_score=float(best_score),
+        best_dm_uncertainty=uncertainty_value,
+        fit_status=fit_status,
+    )
+
+
+def _finalize_dmphase_scores(prepared_trials: list[DMMetricPreparedTrial]) -> DMMetricFinalizeResult:
+    if not prepared_trials:
+        return DMMetricFinalizeResult(scores=np.array([], dtype=float))
+
+    if any(trial.dmphase_power_spectrum.size == 0 or trial.dmphase_channel_count < 2 for trial in prepared_trials):
+        return DMMetricFinalizeResult(scores=np.full(len(prepared_trials), float("-inf"), dtype=float))
+
+    nbin = min(int(trial.dmphase_power_spectrum.size) for trial in prepared_trials)
+    if nbin < 2:
+        return DMMetricFinalizeResult(scores=np.full(len(prepared_trials), float("-inf"), dtype=float))
+
+    power_spectra = np.column_stack(
+        [np.asarray(trial.dmphase_power_spectrum[:nbin], dtype=float) for trial in prepared_trials]
+    )
+    nchan = int(np.median([trial.dmphase_channel_count for trial in prepared_trials]))
+    low_idx, up_idx = _dmphase_frequency_cutoff(power_spectra, nchan)
+    if up_idx <= low_idx:
+        return DMMetricFinalizeResult(scores=np.full(len(prepared_trials), float("-inf"), dtype=float))
+
+    fluctuation_index = np.arange(nbin, dtype=float)
+    dpower_spectra = power_spectra * fluctuation_index[:, np.newaxis] ** 2
+    dm_curve, dm_curve_error, snr = _dmphase_curve(power_spectra, dpower_spectra, nchan)
+    dm_curve = np.asarray(dm_curve, dtype=float)
+    dm_curve[snr < 5.0] = dm_curve[snr < 5.0] / 1e6
+    scores = np.where(np.isfinite(dm_curve), dm_curve, float("-inf"))
+
+    weights = np.asarray(snr, dtype=float)
+    weights[~np.isfinite(weights)] = 0.0
+    weights[snr < 5.0] = 1e-6
+    weight_sum = float(np.sum(weights))
+    if weight_sum > 0 and np.isfinite(weight_sum):
+        weights = weights / weight_sum
+
+    return DMMetricFinalizeResult(
+        scores=scores,
+        fit_payload=DMPhaseFitInput(
+            power_spectra=np.asarray(power_spectra, dtype=float),
+            low_idx=int(low_idx),
+            dstd=float(np.nanmax(dm_curve_error)) if dm_curve_error.size else 0.0,
+            weights=np.asarray(weights, dtype=float),
+        ),
+    )
+
+
+DM_METRIC_REGISTRY: dict[str, DMMetricAlgorithm] = {
+    "integrated_event_snr": DMMetricAlgorithm(
+        prepare_trial=_run_integrated_event_snr_prepare,
+        finalize_scores=_finalize_scalar_scores,
+    ),
+    "dm_phase": DMMetricAlgorithm(
+        prepare_trial=_run_dmphase_prepare,
+        finalize_scores=_finalize_dmphase_scores,
+    ),
 }
 
 
@@ -263,7 +520,7 @@ def dm_trial_grid(center_dm: float, half_range: float, step: float) -> tuple[np.
 
 
 def _uncertainty_drop(metric: str, best_value: float, local_values: np.ndarray) -> float:
-    if metric in {"integrated_event_snr", "peak_snr"}:
+    if metric == "integrated_event_snr":
         return 1.0
     finite = np.asarray(local_values, dtype=float)
     finite = finite[np.isfinite(finite)]
@@ -365,56 +622,71 @@ def optimize_dm_trials(
     current_dm: float,
     freqs_mhz: np.ndarray,
     tsamp_sec: float,
+    score_data: np.ndarray | None = None,
+    score_current_dm: float | None = None,
+    score_freqs_mhz: np.ndarray | None = None,
+    score_tsamp_sec: float | None = None,
     center_dm: float,
     half_range: float,
     step: float,
-    context_builder: Callable[[np.ndarray], MeasurementContext],
+    metric_input_builder: Callable[[np.ndarray], DMMetricInput],
     residuals: Callable[[np.ndarray], tuple[np.ndarray, np.ndarray, np.ndarray, str]],
     provenance: DmOptimizationProvenance,
     metric: str = "integrated_event_snr",
 ) -> DmOptimizationResult:
-    metric_runner = DM_METRIC_REGISTRY.get(metric)
-    if metric_runner is None:
+    metric_algorithm = DM_METRIC_REGISTRY.get(metric)
+    if metric_algorithm is None:
         valid = ", ".join(sorted(DM_METRIC_REGISTRY))
         raise ValueError(f"Unsupported DM metric '{metric}'. Valid metrics: {valid}.")
 
     trial_dms, actual_half_range = dm_trial_grid(center_dm, half_range, step)
     data = np.asarray(data, dtype=float)
     freqs_mhz = np.asarray(freqs_mhz, dtype=float)
+    score_source = data if score_data is None else np.asarray(score_data, dtype=float)
+    score_dm = float(current_dm if score_current_dm is None else score_current_dm)
+    score_freqs = freqs_mhz if score_freqs_mhz is None else np.asarray(score_freqs_mhz, dtype=float)
+    score_tsamp = float(tsamp_sec if score_tsamp_sec is None else score_tsamp_sec)
 
-    scores = np.empty(trial_dms.size, dtype=float)
-    for idx, trial_dm in enumerate(trial_dms):
-        if np.isclose(trial_dm, current_dm):
-            trial_data = data
+    prepared_trials: list[DMMetricPreparedTrial] = []
+    for trial_dm in trial_dms:
+        if np.isclose(trial_dm, score_dm):
+            trial_data = score_source
         else:
-            trial_data = dedisperse(data, float(trial_dm - current_dm), freqs_mhz, float(tsamp_sec))
+            trial_data = dedisperse(score_source, float(trial_dm - score_dm), score_freqs, score_tsamp)
 
-        context = context_builder(trial_data)
-        residual_cache: tuple[np.ndarray, np.ndarray, np.ndarray, str] | None = None
+        metric_input = metric_input_builder(trial_data)
+        prepared_trials.append(metric_algorithm.prepare_trial(metric_input))
 
-        def residual_provider() -> tuple[np.ndarray, np.ndarray, np.ndarray, str]:
-            nonlocal residual_cache
-            if residual_cache is None:
-                residual_cache = residuals(trial_data)
-            return residual_cache
-
-        scores[idx] = metric_runner(
-            context,
-            residual_provider if metric == "minimal_residual_drift" else None,
-        )
-
+    finalized = metric_algorithm.finalize_scores(prepared_trials)
+    scores = np.asarray(finalized.scores, dtype=float)
+    if scores.shape != trial_dms.shape:
+        raise ValueError(f"DM metric '{metric}' returned an invalid score vector shape.")
     if not np.isfinite(scores).any():
         raise ValueError("Unable to compute DM sweep for the current selection.")
 
     peak_index = int(np.nanargmax(scores))
     sampled_best_dm = float(trial_dms[peak_index])
     sampled_best_score = float(scores[peak_index])
-    best_dm, best_score, best_dm_uncertainty, fit_status = fit_dm_peak(
-        trial_dms,
-        scores,
-        peak_index,
-        metric=metric,
-    )
+    if metric == "dm_phase" and finalized.fit_payload is not None:
+        dmphase_fit = _fit_dmphase_peak(
+            trial_dms,
+            scores,
+            finalized.fit_payload.power_spectra,
+            finalized.fit_payload.low_idx,
+            finalized.fit_payload.dstd,
+            finalized.fit_payload.weights,
+        )
+        best_dm = dmphase_fit.best_dm
+        best_score = dmphase_fit.best_score
+        best_dm_uncertainty = dmphase_fit.best_dm_uncertainty
+        fit_status = dmphase_fit.fit_status
+    else:
+        best_dm, best_score, best_dm_uncertainty, fit_status = fit_dm_peak(
+            trial_dms,
+            scores,
+            peak_index,
+            metric=metric,
+        )
 
     applied_freqs, applied_arrivals, applied_residuals, applied_status = residuals(data)
     best_freqs = np.array([], dtype=float)

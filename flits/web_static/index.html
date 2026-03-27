@@ -29,9 +29,14 @@
             <span class="panel-badge" id="statusChip">Idle</span>
           </div>
           <label class="field">
+            <span>Mounted folder</span>
+            <select id="directorySelect"></select>
+          </label>
+          <label class="field">
             <span>Known filterbanks</span>
             <select id="fileSelect" required></select>
           </label>
+          <p class="field-note">Browse by folder first, or type a relative or absolute path directly below.</p>
           <label class="field">
             <span>File path</span>
             <input id="fileInput" type="text" placeholder="relative or absolute path">
@@ -257,11 +262,11 @@
             <section class="analysis-panel" id="analysisDmPanel" data-tab-panel="dm" role="tabpanel" hidden>
               <div class="analysis-panel-head">
                 <h4>DM Optimization</h4>
-                <p>Run trial DMs with several optimization metrics, inspect the curve, compare residual drift before and after, and review per-component DM estimates for complex bursts.</p>
+                <p>Run a DM sweep with either integrated-event S/N or DMphase, inspect the selected metric curve, compare residual drift before and after, and review per-component DM estimates for complex bursts.</p>
               </div>
               <div class="field-row">
                 <label class="field">
-                  <span>Metric <span class="tooltip-icon" data-tooltip="The mathematical heuristic used to determine the 'best' DM.">?</span></span>
+                  <span>Metric <span class="tooltip-icon" data-tooltip="Choose how the DM sweep is scored. Integrated-event S/N uses the off-pulse-normalized event profile. DMphase follows the upstream automatic coherent-power method on the reduced waterfall.">?</span></span>
                   <select id="dmMetricInput"></select>
                 </label>
                 <label class="field">
@@ -347,7 +352,7 @@
             <section class="analysis-panel" id="analysisSpectralPanel" data-tab-panel="spectral" role="tabpanel" hidden>
               <div class="analysis-panel-head">
                 <h4>Spectral Structure</h4>
-                <p>Run a Stingray-backed averaged power spectrum on the current shared session state.</p>
+                <p>Compute an averaged power spectrum using Stingray to analyze red noise and spectral indices. The power-law fit uses Maximum Likelihood Estimation (MLE) with a white-noise constant (C) to accurately model the &#967;&sup2; noise of the periodogram.</p>
               </div>
               <div class="field-row">
                 <label class="field">
