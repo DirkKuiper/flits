@@ -92,7 +92,28 @@ def drop_session(session_id: str) -> BurstSession:
 
 def list_filterbank_files() -> list[str]:
     base = data_dir()
-    return sorted(str(path.relative_to(base)) for path in base.rglob("*.fil"))
+    return sorted(path.relative_to(base).as_posix() for path in base.rglob("*.fil"))
+
+
+def list_filterbank_directories() -> list[dict[str, Any]]:
+    grouped_files: dict[str, list[str]] = {}
+    for relative_path in list_filterbank_files():
+        parent = str(Path(relative_path).parent)
+        directory = "" if parent == "." else parent.replace("\\", "/")
+        grouped_files.setdefault(directory, []).append(relative_path)
+
+    directories: list[dict[str, Any]] = []
+    for directory in sorted(grouped_files, key=lambda value: (value != "", value)):
+        files = grouped_files[directory]
+        directories.append(
+            {
+                "path": directory,
+                "label": "Data root" if directory == "" else directory,
+                "file_count": len(files),
+                "files": [{"path": file_path, "name": Path(file_path).name} for file_path in files],
+            }
+        )
+    return directories
 
 
 @app.get("/")
@@ -106,8 +127,11 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/files")
-def files() -> dict[str, list[str]]:
-    return {"files": list_filterbank_files()}
+def files() -> dict[str, Any]:
+    return {
+        "files": list_filterbank_files(),
+        "directories": list_filterbank_directories(),
+    }
 
 
 @app.get("/api/presets")
@@ -283,7 +307,9 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
         elif action == "fit_scattering":
             session.fit_scattering(payload)
         elif action == "run_spectral_analysis":
-            session.run_spectral_analysis(float(payload["segment_length_ms"]))
+            session.run_spectral_analysis(
+                segment_length_ms=float(payload["segment_length_ms"]),
+            )
         elif action == "set_notes":
             session.set_notes(payload.get("notes"))
         elif action == "export_results":

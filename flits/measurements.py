@@ -575,8 +575,15 @@ def compute_burst_measurements(
     noise_settings: NoiseEstimateSettings | None = None,
     width_results: Sequence[WidthResult] | None = None,
     accepted_width: AcceptedWidthSelection | None = None,
+    time_axis_ms: np.ndarray | None = None,
 ) -> BurstMeasurements:
-    time_axis_ms = (int(crop_start_bin) + np.arange(masked.shape[1], dtype=float)) * float(tsamp_ms) + float(read_start_sec) * 1000.0
+    if time_axis_ms is None:
+        time_axis_ms = (
+            (int(crop_start_bin) + np.arange(masked.shape[1], dtype=float)) * float(tsamp_ms)
+            + float(read_start_sec) * 1000.0
+        )
+    else:
+        time_axis_ms = np.asarray(time_axis_ms, dtype=float)
     context = build_measurement_context(
         masked=np.asarray(masked, dtype=float),
         time_axis_ms=time_axis_ms,
@@ -597,13 +604,18 @@ def compute_burst_measurements(
         event_rel_start,
         event_rel_end,
     )
-    peak_positions_ms = [float(int(peak_bin) * float(tsamp_ms) + float(read_start_sec) * 1000.0) for peak_bin in peak_bins_abs]
-    if not peak_positions_ms and peak_bin_abs is not None:
-        peak_positions_ms = [float(peak_bin_abs * float(tsamp_ms) + float(read_start_sec) * 1000.0)]
+    peak_positions_ms = [
+        float(time_axis_ms[int(peak_bin) - int(crop_start_bin)])
+        for peak_bin in peak_bins_abs
+        if 0 <= int(peak_bin) - int(crop_start_bin) < time_axis_ms.size
+    ]
+    if not peak_positions_ms and peak_bin_abs is not None and 0 <= int(peak_bin_abs) - int(crop_start_bin) < time_axis_ms.size:
+        peak_positions_ms = [float(time_axis_ms[int(peak_bin_abs) - int(crop_start_bin)])]
 
     toa_topo_mjd = None
-    if peak_bin_abs is not None:
-        toa_topo_mjd = float(start_mjd + ((float(read_start_sec) + (peak_bin_abs * tsamp_ms / 1e3)) / 86400.0))
+    if peak_bin_abs is not None and 0 <= int(peak_bin_abs) - int(crop_start_bin) < time_axis_ms.size:
+        peak_time_ms = float(time_axis_ms[int(peak_bin_abs) - int(crop_start_bin)])
+        toa_topo_mjd = float(start_mjd + ((peak_time_ms / 1e3) / 86400.0))
 
     snr_peak = None
     if context.event_profile_sn.size and np.isfinite(context.event_profile_sn).any():

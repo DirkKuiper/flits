@@ -759,8 +759,10 @@ class SpectralAnalysisResult:
     power: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     power_law_a: float | None = None
     power_law_alpha: float | None = None
+    power_law_c: float | None = None
     power_law_a_err: float | None = None
     power_law_alpha_err: float | None = None
+    power_law_c_err: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -779,8 +781,10 @@ class SpectralAnalysisResult:
             "power": _jsonable_1d(self.power, digits=6),
             "power_law_a": _float_or_none(self.power_law_a),
             "power_law_alpha": _float_or_none(self.power_law_alpha),
+            "power_law_c": _float_or_none(self.power_law_c),
             "power_law_a_err": _float_or_none(self.power_law_a_err),
             "power_law_alpha_err": _float_or_none(self.power_law_alpha_err),
+            "power_law_c_err": _float_or_none(self.power_law_c_err),
         }
 
     @classmethod
@@ -803,8 +807,10 @@ class SpectralAnalysisResult:
             power=_array_1d(payload.get("power"), dtype=float),
             power_law_a=_float_or_none(payload.get("power_law_a")),
             power_law_alpha=_float_or_none(payload.get("power_law_alpha")),
+            power_law_c=_float_or_none(payload.get("power_law_c")),
             power_law_a_err=_float_or_none(payload.get("power_law_a_err")),
             power_law_alpha_err=_float_or_none(payload.get("power_law_alpha_err")),
+            power_law_c_err=_float_or_none(payload.get("power_law_c_err")),
         )
 
 

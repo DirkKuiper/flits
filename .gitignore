@@ -10,6 +10,7 @@ __pycache__/
 *.fil
 *.npz
 burst_properties.csv
+tools/
 
 # Agent Rules
 .agentrules

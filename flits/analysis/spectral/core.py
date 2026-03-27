@@ -124,10 +124,10 @@ def run_averaged_spectral_analysis(
         )
 
     segment_count = int(series.size // segment_bins)
-    if segment_count < 2:
+    if segment_count < 1:
         return _failure(
             "invalid_segment_length",
-            "Segment length must fit at least 2 full segments inside the selected event window.",
+            "Segment length must fit at least 1 full segment inside the selected event window.",
             segment_length_ms=effective_segment_length_ms,
             segment_bins=segment_bins,
             segment_count=segment_count,
@@ -194,8 +194,10 @@ def run_averaged_spectral_analysis(
 
     power_law_a = None
     power_law_alpha = None
+    power_law_c = None
     power_law_a_err = None
     power_law_alpha_err = None
+    power_law_c_err = None
 
     valid_mask = (freq_hz > 0) & (power > 0)
     if np.count_nonzero(valid_mask) >= 3:
@@ -203,18 +205,63 @@ def run_averaged_spectral_analysis(
         fit_p = np.log10(power[valid_mask])
         try:
             popt, pcov = np.polyfit(fit_f, fit_p, 1, cov=True)
-            alpha = -popt[0]
-            log10_A = popt[1]
-            A = 10 ** log10_A
+            alpha_guess = float(-popt[0])
+            A_guess = 10 ** float(popt[1])
 
-            alpha_err = np.sqrt(pcov[0, 0])
-            c_err = np.sqrt(pcov[1, 1])
-            A_err = np.log(10) * A * c_err
+            alpha_err_guess = float(np.sqrt(pcov[0, 0]))
+            A_err_guess = float(np.log(10) * A_guess * np.sqrt(pcov[1, 1]))
 
-            power_law_a = float(A)
-            power_law_alpha = float(alpha)
-            power_law_a_err = float(A_err)
-            power_law_alpha_err = float(alpha_err)
+            power_law_a = A_guess
+            power_law_alpha = alpha_guess
+            power_law_a_err = A_err_guess
+            power_law_alpha_err = alpha_err_guess
+
+            from scipy.optimize import minimize
+
+            fit_freq = freq_hz[valid_mask]
+            fit_power = power[valid_mask]
+            f_ref = np.exp(np.mean(np.log(fit_freq)))
+
+            def nll(params: list[float]) -> float:
+                log_A, alpha_param, log_C = params[0], params[1], params[2]
+                log_M = log_A - alpha_param * np.log(fit_freq / f_ref)
+                log_M = np.clip(log_M, -100, 100)
+                log_C = np.clip(log_C, -100, 100)
+                M = np.exp(log_M) + np.exp(log_C)
+                return float(np.sum(fit_power / M + np.log(M)))
+
+            A_ref_guess = A_guess * (f_ref ** -alpha_guess)
+            C_guess = float(np.median(fit_power[-20:])) if fit_power.size > 20 else float(np.median(fit_power))
+            if C_guess <= 0:
+                C_guess = 1e-10
+            x0 = [float(np.log(A_ref_guess)), alpha_guess, float(np.log(C_guess))]
+            res = minimize(nll, x0, method="BFGS")
+
+            if getattr(res, "x", None) is not None and np.all(np.isfinite(res.x)):
+                log_A_ref_opt, alpha_opt, log_C_opt = res.x
+                A_ref_opt = np.exp(log_A_ref_opt)
+                A_opt = A_ref_opt * (f_ref ** alpha_opt)
+                C_opt = np.exp(log_C_opt)
+
+                power_law_a = float(A_opt)
+                power_law_alpha = float(alpha_opt)
+                power_law_c = float(C_opt)
+
+                cov = getattr(res, "hess_inv", None)
+                if cov is not None and np.all(np.diag(cov) >= 0):
+                    alpha_err_mle = float(np.sqrt(np.diag(cov)[1]))
+                    grad = np.array([A_opt, A_opt * np.log(f_ref)])
+                    # Fallback to standard dot product for numpy array shapes
+                    A_err_mle = float(np.sqrt(np.dot(grad, np.dot(cov[:2, :2], grad))))
+                    C_err_mle = float(C_opt * np.sqrt(np.diag(cov)[2]))
+
+                    if np.isfinite(A_err_mle):
+                        power_law_a_err = A_err_mle
+                    if np.isfinite(alpha_err_mle):
+                        power_law_alpha_err = alpha_err_mle
+                    if np.isfinite(C_err_mle):
+                        power_law_c_err = C_err_mle
+
         except Exception:
             pass
 
@@ -234,6 +281,8 @@ def run_averaged_spectral_analysis(
         power=np.asarray(power, dtype=float),
         power_law_a=power_law_a,
         power_law_alpha=power_law_alpha,
+        power_law_c=power_law_c,
         power_law_a_err=power_law_a_err,
         power_law_alpha_err=power_law_alpha_err,
+        power_law_c_err=power_law_c_err,
     )

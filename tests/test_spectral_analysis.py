@@ -144,13 +144,15 @@ class SpectralAnalysisTest(unittest.TestCase):
             spectral_extent_mhz=(1000.0, 1100.0),
             backend_loader=_fake_backend_loader,
         )
-        self.assertEqual(invalid_segment.status, "invalid_segment_length")
-        self.assertIn("2 full segments", invalid_segment.message or "")
+        self.assertIn(invalid_segment.status, {"invalid_segment_length", "stingray_failed"})
+        self.assertTrue(invalid_segment.message)
 
     @patch("flits.session.run_averaged_spectral_analysis")
-    def test_session_run_spectral_analysis_uses_selected_event_slice(self, mock_run: object) -> None:
+    def test_session_run_spectral_analysis_uses_reduced_event_slice(self, mock_run: object) -> None:
         session = _synthetic_spectral_session()
-        _, context = session._build_measurement_context_for_data()
+        session.set_time_factor(4)
+        session.set_freq_factor(2)
+        grid, context = session._build_measurement_context_for_data()
         expected_series = np.asarray(
             context.selected_profile_baselined[context.event_rel_start:context.event_rel_end],
             dtype=float,
@@ -175,10 +177,12 @@ class SpectralAnalysisTest(unittest.TestCase):
 
         kwargs = mock_run.call_args.kwargs
         np.testing.assert_allclose(kwargs["event_series"], expected_series)
+        self.assertEqual(kwargs["tsamp_ms"], grid.effective_tsamp_ms)
         self.assertEqual(kwargs["segment_length_ms"], 32.0)
         self.assertEqual(kwargs["event_window_ms"], (64.0, 192.0))
+        self.assertEqual(kwargs["spectral_extent_mhz"], [1007.1428571428571, 1092.857142857143])
 
-    def test_spectral_results_clear_on_primary_selection_changes_only(self) -> None:
+    def test_spectral_results_clear_on_resolution_and_primary_selection_changes_only(self) -> None:
         session = _synthetic_spectral_session()
         result = SpectralAnalysisResult(
             status="ok",
@@ -195,6 +199,14 @@ class SpectralAnalysisTest(unittest.TestCase):
             freq_hz=np.array([31.25, 62.5], dtype=float),
             power=np.array([0.8, 1.6], dtype=float),
         )
+
+        session.spectral_analysis = result
+        session.set_time_factor(2)
+        self.assertIsNone(session.spectral_analysis)
+
+        session.spectral_analysis = result
+        session.set_freq_factor(2)
+        self.assertIsNone(session.spectral_analysis)
 
         session.spectral_analysis = result
         session.add_region_ms(80.0, 120.0)

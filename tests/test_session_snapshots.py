@@ -77,6 +77,21 @@ def _snapshot_loader(path: str, *, dm: float, **_: object) -> BurstSession:
 
 
 class SessionSnapshotTest(unittest.TestCase):
+    def test_compute_properties_uses_reduced_resolution(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            session = _synthetic_width_session(path=Path(tmpdir) / "reduced_properties.fil")
+            session.set_time_factor(4)
+            session.set_freq_factor(2)
+
+            results = session.compute_properties()
+
+            self.assertEqual(results.provenance.tsamp_ms, session.tsamp_ms * 4)
+            self.assertEqual(results.provenance.freqres_mhz, abs(session.freqres) * 2)
+            self.assertEqual(
+                results.diagnostics.time_axis_ms.size,
+                (session.crop_end - session.crop_start) // 4,
+            )
+
     def test_snapshot_round_trip_restores_analysis_state(self) -> None:
         with TemporaryDirectory() as tmpdir:
             snapshot_path = Path(tmpdir) / "snapshot_source.fil"
@@ -174,6 +189,43 @@ class SessionSnapshotTest(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 BurstSession.from_snapshot(snapshot, loader=_mismatched_loader)
+
+    def test_snapshot_import_discards_cached_analyses_from_schema_v1_0(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            snapshot_path = Path(tmpdir) / "legacy_snapshot_source.fil"
+            snapshot_path.write_bytes(b"snapshot-source")
+            session = _synthetic_width_session(path=snapshot_path)
+            session.set_time_factor(2)
+            session.set_freq_factor(2)
+            session.compute_properties()
+            session.compute_widths()
+            session.optimize_dm(center_dm=0.0, half_range=2.0, step=0.5)
+            session.spectral_analysis = SpectralAnalysisResult(
+                status="ok",
+                message=None,
+                segment_length_ms=8.0,
+                segment_bins=8,
+                segment_count=5,
+                normalization="none",
+                event_window_ms=[102.0, 142.0],
+                spectral_extent_mhz=[float(session.freqs[-2]), float(session.freqs[1])],
+                tsamp_ms=session.tsamp_ms,
+                frequency_resolution_hz=125.0,
+                nyquist_hz=500.0,
+                freq_hz=np.array([125.0, 250.0, 375.0], dtype=float),
+                power=np.array([1.2, 0.8, 0.3], dtype=float),
+            )
+
+            legacy_payload = session.snapshot_dict()
+            legacy_payload["schema_version"] = "1.0"
+            restored = BurstSession.from_snapshot(legacy_payload, loader=_snapshot_loader)
+
+            self.assertEqual(restored.time_factor, session.time_factor)
+            self.assertEqual(restored.freq_factor, session.freq_factor)
+            self.assertIsNone(restored.results)
+            self.assertIsNone(restored.width_analysis)
+            self.assertIsNone(restored.dm_optimization)
+            self.assertIsNone(restored.spectral_analysis)
 
 
 if __name__ == "__main__":
