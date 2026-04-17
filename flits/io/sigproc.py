@@ -3,7 +3,6 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 from io import BytesIO
-from pathlib import Path
 
 import numpy as np
 
@@ -92,16 +91,4 @@ def build_sigproc_filterbank_bytes(data: np.ndarray, header: SigprocFilterbankHe
     return buffer.getvalue()
 
 
-def write_sigproc_filterbank(
-    path: str | Path,
-    data: np.ndarray,
-    header: SigprocFilterbankHeader,
-) -> bytes:
-    content = build_sigproc_filterbank_bytes(data, header)
-    output_path = Path(path)
-    with output_path.open("wb") as handle:
-        handle.write(content)
-    return content
-
-
-__all__ = ["SigprocFilterbankHeader", "build_sigproc_filterbank_bytes", "write_sigproc_filterbank"]
+__all__ = ["SigprocFilterbankHeader", "build_sigproc_filterbank_bytes"]

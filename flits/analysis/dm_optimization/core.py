@@ -205,10 +205,6 @@ def dm_metric_definition(metric: str) -> DmMetricDefinition | None:
     return DM_METRIC_METADATA.get(str(metric))
 
 
-def _finite_or_neg_inf(value: float) -> float:
-    return float(value) if np.isfinite(value) else float("-inf")
-
-
 def _run_integrated_event_snr_prepare(metric_input: DMMetricInput) -> DMMetricPreparedTrial:
     context = metric_input.context
     score = float(event_snr(context.selected_profile_sn, context.event_rel_start, context.event_rel_end))

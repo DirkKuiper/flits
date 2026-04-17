@@ -395,23 +395,6 @@ def _normalize_dynamic_spectrum(
         good_freq[index] = True
     return normalized, good_freq
 
-
-def _contiguous_weight_range(
-    *,
-    num_time: int,
-    event_rel_start: int,
-    event_rel_end: int,
-) -> list[int] | None:
-    candidates = [
-        [0, max(0, int(event_rel_start))],
-        [min(num_time, int(event_rel_end)), int(num_time)],
-    ]
-    candidates = [item for item in candidates if item[1] - item[0] >= MIN_WEIGHT_BINS]
-    if not candidates:
-        return None
-    return max(candidates, key=lambda item: item[1] - item[0])
-
-
 def _initial_parameters(
     *,
     normalized_data: np.ndarray,

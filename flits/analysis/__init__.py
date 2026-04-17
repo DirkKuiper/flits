@@ -8,6 +8,7 @@ analysis, and temporal-structure analysis.
 from __future__ import annotations
 
 from flits.analysis.dm_optimization import optimize_dm_trials
+# Preserve the historical package-level default_segment_bins export for now.
 from flits.analysis.spectral.core import default_segment_bins, run_averaged_spectral_analysis
 from flits.analysis.morphology import compute_width_analysis
 from flits.analysis.temporal.core import run_temporal_structure_analysis

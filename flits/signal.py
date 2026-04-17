@@ -25,20 +25,6 @@ def normalize(ds: np.ndarray, offpulse: np.ndarray) -> np.ndarray:
     return normalized
 
 
-def normalise(ds: np.ndarray, t_cent: int, t_sig: int) -> np.ndarray:
-    ds = ds.copy()
-    ds_off = np.concatenate((ds[:, 0 : int(t_cent - 3 * t_sig)], ds[:, int(t_cent + 3 * t_sig) :]), axis=1)
-    for chan in range(ds_off.shape[0]):
-        ds[chan, :] = ds[chan, :] - np.mean(ds_off[chan, :])
-        ds_off[chan, :] = ds_off[chan, :] - np.mean(ds_off[chan, :])
-        std = np.std(ds_off[chan, :])
-        if std != 0:
-            ds[chan, :] = ds[chan, :] / std
-        else:
-            ds[chan, :] = 0
-    return ds
-
-
 def dedisperse(data: np.ndarray, dm: float, freqs_mhz: np.ndarray, tsamp_sec: float) -> np.ndarray:
     freqs = freqs_mhz.astype(np.float64)
     reffreq = np.max(freqs)
@@ -77,17 +63,8 @@ def radiometer(tsamp_ms: float, bw_mhz: float, npol: int, sefd_jy: float) -> flo
     return sefd_jy * (1 / np.sqrt((bw_mhz * 1e6) * npol * tsamp_ms * 1e-3))
 
 
-def acf_2d(array: np.ndarray) -> np.ndarray:
-    return fftconvolve(array, array[::-1, ::-1], mode="same")
-
-
 def acf_1d(array: np.ndarray) -> np.ndarray:
     return fftconvolve(array, array[::-1], mode="same")
-
-
-def gaussian_2d(xy: tuple[np.ndarray, np.ndarray], amp: float, x0: float, y0: float, sigma_x: float, sigma_y: float, offset: float) -> np.ndarray:
-    x, y = xy
-    return amp * np.exp(-(((x - x0) ** 2) / (2 * sigma_x ** 2) + ((y - y0) ** 2) / (2 * sigma_y ** 2))) + offset
 
 
 def gaussian_1d(x: np.ndarray, amp: float, mu: float, sigma: float, offset: float) -> np.ndarray:
