@@ -137,6 +137,13 @@ class SessionSnapshotTest(unittest.TestCase):
                 nyquist_hz=500.0,
                 freq_hz=np.array([125.0, 250.0, 375.0], dtype=float),
                 power=np.array([1.2, 0.8, 0.3], dtype=float),
+                crossover_frequency_hz=250.0,
+                crossover_frequency_status="ok",
+                crossover_frequency_hz_3sigma_low=200.0,
+                crossover_frequency_hz_3sigma_high=300.0,
+                noise_psd_freq_hz=np.array([125.0, 250.0], dtype=float),
+                noise_psd_power=np.array([0.2, 0.1], dtype=float),
+                noise_psd_segment_count=4,
             )
             session.temporal_structure = TemporalStructureResult(
                 status="ok",
@@ -156,6 +163,13 @@ class SessionSnapshotTest(unittest.TestCase):
                 raw_periodogram_power=np.array([1.8, 1.1], dtype=float),
                 averaged_psd_freq_hz=np.array([125.0, 250.0, 375.0], dtype=float),
                 averaged_psd_power=np.array([1.2, 0.8, 0.3], dtype=float),
+                crossover_frequency_hz=250.0,
+                crossover_frequency_status="ok",
+                crossover_frequency_hz_3sigma_low=200.0,
+                crossover_frequency_hz_3sigma_high=300.0,
+                noise_psd_freq_hz=np.array([125.0, 250.0], dtype=float),
+                noise_psd_power=np.array([0.2, 0.1], dtype=float),
+                noise_psd_segment_count=4,
             )
 
             snapshot = session.to_snapshot()
@@ -182,8 +196,11 @@ class SessionSnapshotTest(unittest.TestCase):
             self.assertEqual(restored.spectral_analysis.status, "ok")
             self.assertEqual(restored.spectral_analysis.segment_bins, 8)
             self.assertTrue(np.allclose(restored.spectral_analysis.freq_hz, np.array([125.0, 250.0, 375.0])))
+            self.assertEqual(restored.spectral_analysis.crossover_frequency_status, "ok")
+            self.assertTrue(np.allclose(restored.spectral_analysis.noise_psd_power, np.array([0.2, 0.1])))
             self.assertIsNotNone(restored.temporal_structure)
             self.assertEqual(restored.temporal_structure.min_structure_ms_primary, 2.0)
+            self.assertEqual(restored.temporal_structure.crossover_frequency_hz, 250.0)
 
     def test_snapshot_import_fails_when_source_file_is_missing(self) -> None:
         with TemporaryDirectory() as tmpdir:

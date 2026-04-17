@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from importlib import import_module
 from typing import Any
 
 import numpy as np
 
 from flits.models import SpectralAnalysisResult
-from flits.analysis.temporal.core import _fit_power_law_model, quantize_segment_bins
+from flits.analysis.temporal.core import (
+    _compute_noise_psd,
+    _fit_crossover_frequency,
+    _fit_power_law_model,
+    quantize_segment_bins,
+)
 
 
 MIN_EVENT_BINS = 4
@@ -67,6 +72,7 @@ def run_averaged_spectral_analysis(
     segment_length_ms: float,
     event_window_ms: tuple[float, float],
     spectral_extent_mhz: tuple[float, float],
+    offpulse_series_runs: Sequence[np.ndarray] | None = None,
     backend_loader: Callable[[], tuple[type[Any] | None, type[Any] | None, str | None]] = _load_stingray_backend,
 ) -> SpectralAnalysisResult:
     series = np.asarray(event_series, dtype=float)
@@ -193,7 +199,15 @@ def run_averaged_spectral_analysis(
 
     nyquist_hz = float(0.5 / dt_sec)
 
+    noise_psd = _compute_noise_psd(
+        offpulse_series_runs,
+        tsamp_ms=tsamp_ms,
+        segment_bins=segment_bins,
+        Lightcurve=Lightcurve,
+        AveragedPowerspectrum=AveragedPowerspectrum,
+    )
     power_law = _fit_power_law_model(freq_hz, power, resolved_segment_count)
+    crossover = _fit_crossover_frequency(power_law, freq_hz)
 
     return SpectralAnalysisResult(
         status="ok",
@@ -215,4 +229,11 @@ def run_averaged_spectral_analysis(
         power_law_a_err=power_law["power_law_a_err"],
         power_law_alpha_err=power_law["power_law_alpha_err"],
         power_law_c_err=power_law["power_law_c_err"],
+        crossover_frequency_hz=crossover["crossover_frequency_hz"],
+        crossover_frequency_status=str(crossover["crossover_frequency_status"]),
+        crossover_frequency_hz_3sigma_low=crossover["crossover_frequency_hz_3sigma_low"],
+        crossover_frequency_hz_3sigma_high=crossover["crossover_frequency_hz_3sigma_high"],
+        noise_psd_freq_hz=np.asarray(noise_psd["noise_psd_freq_hz"], dtype=float),
+        noise_psd_power=np.asarray(noise_psd["noise_psd_power"], dtype=float),
+        noise_psd_segment_count=noise_psd["noise_psd_segment_count"],
     )

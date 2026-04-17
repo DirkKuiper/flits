@@ -642,6 +642,10 @@ class BurstSession:
         event_bounds_abs: tuple[int, int] | None = None,
     ) -> tuple[ReducedAnalysisGrid, MeasurementContext]:
         grid = self._reduced_analysis_grid(data, event_bounds_abs=event_bounds_abs)
+        context = self._measurement_context_from_grid(grid)
+        return grid, context
+
+    def _measurement_context_from_grid(self, grid: ReducedAnalysisGrid) -> MeasurementContext:
         context = build_measurement_context(
             masked=grid.masked,
             time_axis_ms=grid.time_axis_ms,
@@ -654,7 +658,7 @@ class BurstSession:
             offpulse_regions=grid.offpulse_regions_rel,
             noise_settings=self.noise_settings,
         )
-        return grid, context
+        return context
 
     def _measurement_context_for_data(
         self,
@@ -745,6 +749,295 @@ class BurstSession:
             diagnostics.status,
         )
 
+    def _fitburst_guess_payload(
+        self,
+        grid: ReducedAnalysisGrid,
+        context: MeasurementContext,
+    ) -> dict[str, Any]:
+        time_axis_ms = np.asarray(context.time_axis_ms, dtype=float)
+        selected_freqs = np.asarray(grid.freqs_mhz[context.spec_lo : context.spec_hi + 1], dtype=float)
+        selected_band = np.asarray(grid.masked[context.spec_lo : context.spec_hi + 1, :], dtype=float)
+        if (
+            time_axis_ms.size == 0
+            or selected_freqs.size == 0
+            or context.event_rel_end <= context.event_rel_start
+        ):
+            return {
+                "status": "unavailable",
+                "message": "No selected event data are available for fitburst initial guesses.",
+                "source": "unavailable",
+                "component_count": 0,
+                "component_guesses": [],
+                "initial_parameters": {},
+            }
+
+        event_rel_start = int(context.event_rel_start)
+        event_rel_end = int(context.event_rel_end)
+        event_window_ms = self._current_event_window_ms(context, tsamp_ms=grid.effective_tsamp_ms)
+        width_guess_ms = (
+            float(self.results.width_ms_acf)
+            if self.results is not None
+            and self.results.width_ms_acf is not None
+            and np.isfinite(self.results.width_ms_acf)
+            and self.results.width_ms_acf > 0
+            else None
+        )
+
+        def clipped_window(start_bin: int, end_bin: int) -> tuple[int, int] | None:
+            start = max(event_rel_start, int(start_bin))
+            end = min(event_rel_end, int(end_bin))
+            if end - start < 2:
+                return None
+            return start, end
+
+        def local_peak_bin(start_bin: int, end_bin: int) -> int:
+            profile = np.asarray(context.selected_profile_sn[start_bin:end_bin], dtype=float)
+            if profile.size and np.isfinite(profile).any():
+                return int(start_bin + int(np.nanargmax(profile)))
+            return int(start_bin + max(0, (end_bin - start_bin) // 2))
+
+        def manual_peak_bin(start_bin: int, end_bin: int) -> int | None:
+            if not self.manual_peaks:
+                return None
+            candidates = [int(peak) for peak in grid.peak_bins if start_bin <= int(peak) < end_bin]
+            if not candidates:
+                return None
+            profile = np.asarray(context.selected_profile_sn, dtype=float)
+            return max(
+                candidates,
+                key=lambda peak: float(profile[peak])
+                if 0 <= int(peak) < profile.size and np.isfinite(profile[peak])
+                else float("-inf"),
+            )
+
+        def component_guess(
+            *,
+            label: str,
+            source: str,
+            source_label: str,
+            start_bin: int,
+            end_bin: int,
+            arrival_bin: int | None = None,
+            prefer_global_width: bool = False,
+        ) -> dict[str, Any] | None:
+            window = clipped_window(start_bin, end_bin)
+            if window is None:
+                return None
+            start, end = window
+            peak = arrival_bin if arrival_bin is not None else manual_peak_bin(start, end)
+            if peak is None or not (start <= int(peak) < end):
+                peak = local_peak_bin(start, end)
+            peak = max(start, min(int(peak), end - 1))
+
+            start_ms = float(time_axis_ms[start])
+            end_ms = float(time_axis_ms[end - 1] + grid.effective_tsamp_ms)
+            duration_ms = max(float(grid.effective_tsamp_ms), end_ms - start_ms)
+            if prefer_global_width and width_guess_ms is not None:
+                width_ms = max(float(grid.effective_tsamp_ms), float(width_guess_ms))
+            else:
+                width_ms = max(float(grid.effective_tsamp_ms), duration_ms / 6.0)
+            tau_ms = max(float(grid.effective_tsamp_ms), width_ms / 4.0)
+            log_amplitude = self._fitburst_log_amplitude(
+                selected_band=selected_band,
+                offpulse_bins=context.offpulse_bins,
+                start_bin=start,
+                end_bin=end,
+                fallback_profile=context.selected_profile_sn,
+            )
+            return {
+                "label": label,
+                "source": source,
+                "source_label": source_label,
+                "arrival_time_ms": float(time_axis_ms[peak]),
+                "width_ms": float(width_ms),
+                "tau_ms": float(tau_ms),
+                "log_amplitude": float(log_amplitude),
+                "component_window_ms": [start_ms, end_ms],
+            }
+
+        guesses: list[dict[str, Any]] = []
+        source = "automatic"
+        region_windows = sorted(grid.burst_regions_rel, key=lambda item: (item[0], item[1]))
+        for index, (start, end) in enumerate(region_windows, start=1):
+            guess = component_guess(
+                label=f"Component {index}",
+                source="component_regions",
+                source_label=f"Region {index}",
+                start_bin=start,
+                end_bin=end,
+            )
+            if guess is not None:
+                guesses.append(guess)
+        if guesses:
+            source = "component_regions"
+        elif self.manual_peaks and grid.peak_bins:
+            peaks = sorted(
+                int(peak)
+                for peak in grid.peak_bins
+                if event_rel_start <= int(peak) < event_rel_end
+            )
+            if peaks:
+                boundaries = [event_rel_start]
+                boundaries.extend(int(round((left + right) / 2.0)) for left, right in zip(peaks[:-1], peaks[1:]))
+                boundaries.append(event_rel_end)
+                for index, peak in enumerate(peaks, start=1):
+                    guess = component_guess(
+                        label=f"Component {index}",
+                        source="manual_peaks",
+                        source_label=f"Peak {index}",
+                        start_bin=boundaries[index - 1],
+                        end_bin=boundaries[index],
+                        arrival_bin=peak,
+                    )
+                    if guess is not None:
+                        guesses.append(guess)
+                if guesses:
+                    source = "manual_peaks"
+
+        if not guesses:
+            peak = _primary_peak_bin(
+                peak_bins_abs=grid.peak_bins,
+                profile_sn=context.selected_profile_sn,
+                crop_start_bin=0,
+                event_rel_start=event_rel_start,
+                event_rel_end=event_rel_end,
+            )
+            guesses = [
+                component_guess(
+                    label="Component 1",
+                    source="automatic",
+                    source_label="Auto",
+                    start_bin=event_rel_start,
+                    end_bin=event_rel_end,
+                    arrival_bin=peak,
+                    prefer_global_width=True,
+                )
+            ]
+            guesses = [guess for guess in guesses if guess is not None]
+
+        return {
+            "status": "ok" if guesses else "unavailable",
+            "message": self._fitburst_guess_message(source, len(guesses)),
+            "source": source,
+            "component_count": len(guesses),
+            "component_guesses": guesses,
+            "initial_parameters": self._fitburst_initial_parameters_from_component_guesses(
+                guesses,
+                time_axis_ms=time_axis_ms,
+                freqs_mhz=selected_freqs,
+            )
+            if guesses
+            else {},
+            "event_window_ms": [float(event_window_ms[0]), float(event_window_ms[1])],
+        }
+
+    @staticmethod
+    def _fitburst_guess_message(source: str, component_count: int) -> str:
+        if source == "component_regions":
+            return f"{component_count} component guess{'es' if component_count != 1 else ''} from component regions."
+        if source == "manual_peaks":
+            return f"{component_count} component guess{'es' if component_count != 1 else ''} from manual peaks."
+        return "Automatic single-component guess from the strongest event peak."
+
+    @staticmethod
+    def _fitburst_log_amplitude(
+        *,
+        selected_band: np.ndarray,
+        offpulse_bins: np.ndarray,
+        start_bin: int,
+        end_bin: int,
+        fallback_profile: np.ndarray,
+    ) -> float:
+        peak_value = float("-inf")
+        offpulse_bins = np.asarray(offpulse_bins, dtype=int)
+        for row in np.asarray(selected_band, dtype=float):
+            finite_row = row[np.isfinite(row)]
+            if finite_row.size == 0:
+                continue
+            reference = row[offpulse_bins] if offpulse_bins.size else row
+            finite_reference = reference[np.isfinite(reference)]
+            if finite_reference.size == 0:
+                finite_reference = finite_row
+            baseline = float(np.nanmean(finite_reference))
+            sigma = float(np.nanstd(finite_reference))
+            if not np.isfinite(sigma) or sigma <= 0:
+                continue
+            window = row[start_bin:end_bin]
+            finite_window = window[np.isfinite(window)]
+            if finite_window.size == 0:
+                continue
+            peak_value = max(peak_value, float((np.nanmax(finite_window) - baseline) / sigma))
+
+        if not np.isfinite(peak_value):
+            profile_window = np.asarray(fallback_profile[start_bin:end_bin], dtype=float)
+            peak_value = float(np.nanmax(profile_window)) if profile_window.size and np.isfinite(profile_window).any() else 1.0
+        return float(np.log10(max(peak_value, 1e-2)))
+
+    def _fitburst_initial_parameters_from_component_guesses(
+        self,
+        component_guesses: list[dict[str, Any]],
+        *,
+        time_axis_ms: np.ndarray,
+        freqs_mhz: np.ndarray,
+        validate: bool = False,
+        event_window_ms: tuple[float, float] | None = None,
+    ) -> dict[str, list[float]]:
+        time_axis_ms = np.asarray(time_axis_ms, dtype=float)
+        freqs_mhz = np.asarray(freqs_mhz, dtype=float)
+        if time_axis_ms.size == 0:
+            if validate:
+                raise ValueError("Cannot build fitburst guesses without a time axis.")
+            return {}
+        if freqs_mhz.size == 0:
+            if validate:
+                raise ValueError("Cannot build fitburst guesses without selected frequencies.")
+            return {}
+        ref_freq = float(np.min(freqs_mhz))
+        base_time_ms = float(time_axis_ms[0])
+
+        rows: list[tuple[float, float, float, float]] = []
+        for index, guess in enumerate(component_guesses, start=1):
+            try:
+                arrival_ms = float(guess.get("arrival_time_ms"))
+                width_ms = float(guess.get("width_ms"))
+                tau_ms = float(guess.get("tau_ms"))
+                log_amplitude = float(guess.get("log_amplitude"))
+            except (TypeError, ValueError, AttributeError) as exc:
+                if validate:
+                    raise ValueError(f"Component {index} has a non-numeric initial guess.") from exc
+                continue
+
+            values = (arrival_ms, width_ms, tau_ms, log_amplitude)
+            if not all(np.isfinite(value) for value in values):
+                if validate:
+                    raise ValueError(f"Component {index} has a non-finite initial guess.")
+                continue
+            if width_ms <= 0 or tau_ms <= 0:
+                if validate:
+                    raise ValueError(f"Component {index} width and tau guesses must be positive.")
+                continue
+            if event_window_ms is not None and not (event_window_ms[0] <= arrival_ms <= event_window_ms[1]):
+                if validate:
+                    raise ValueError(f"Component {index} arrival guess is outside the selected event window.")
+                continue
+            rows.append((arrival_ms, width_ms, tau_ms, log_amplitude))
+
+        if validate and not rows:
+            raise ValueError("At least one component initial guess is required.")
+
+        return {
+            "amplitude": [float(row[3]) for row in rows],
+            "arrival_time": [float((row[0] - base_time_ms) / 1e3) for row in rows],
+            "burst_width": [float(row[1] / 1e3) for row in rows],
+            "dm": [0.0] * len(rows),
+            "dm_index": [-2.0] * len(rows),
+            "ref_freq": [ref_freq] * len(rows),
+            "scattering_timescale": [float(row[2] / 1e3) for row in rows],
+            "scattering_index": [-4.0] * len(rows),
+            "spectral_index": [0.0] * len(rows),
+            "spectral_running": [0.0] * len(rows),
+        }
+
     def _dm_component_windows(self) -> list[tuple[str, tuple[int, int]]]:
         components: list[tuple[str, tuple[int, int]]] = []
         if len(self.burst_regions) >= 2:
@@ -774,6 +1067,7 @@ class BurstSession:
 
     def get_view(self) -> dict[str, Any]:
         grid = self._reduced_analysis_grid()
+        context = self._measurement_context_from_grid(grid)
         freq_lo_mhz, freq_hi_mhz = self._frequency_range_mhz()
         spec_lo_mhz, spec_hi_mhz = self._selected_frequency_bounds_mhz()
         time_profile = np.nansum(grid.display, axis=0) if grid.display.size else np.array([], dtype=float)
@@ -846,6 +1140,7 @@ class BurstSession:
                     "y_mhz": _jsonable_array(grid.freqs_mhz, digits=4),
                 },
             },
+            "fitburst_guess": self._fitburst_guess_payload(grid, context),
             "results": self.results.to_dict() if self.results is not None else None,
             "width_analysis": self.width_analysis.to_dict() if self.width_analysis is not None else None,
             "dm_optimization": self.dm_optimization.to_dict() if self.dm_optimization is not None else None,
@@ -1413,11 +1708,28 @@ class BurstSession:
         if self.results is None:
             self.compute_properties()
         assert self.results is not None
-        config = FitburstRequestConfig.from_dict(config_data) if config_data else None
 
         grid, context = self._build_measurement_context_for_data()
         selected_band = np.asarray(grid.masked[context.spec_lo : context.spec_hi + 1, :], dtype=float)
         selected_freqs = np.asarray(grid.freqs_mhz[context.spec_lo : context.spec_hi + 1], dtype=float)
+        config_payload = dict(config_data or {})
+        component_guesses = config_payload.get("component_guesses")
+        if component_guesses is not None:
+            if not isinstance(component_guesses, list):
+                raise ValueError("component_guesses must be a list of per-component guess objects.")
+            expected_components = int(config_payload.get("num_components", len(component_guesses)) or len(component_guesses))
+            if expected_components != len(component_guesses):
+                raise ValueError("Fit component count does not match the submitted initial guesses.")
+            event_window_ms = self._current_event_window_ms(context, tsamp_ms=grid.effective_tsamp_ms)
+            config_payload["initial_parameters"] = self._fitburst_initial_parameters_from_component_guesses(
+                component_guesses,
+                time_axis_ms=context.time_axis_ms,
+                freqs_mhz=selected_freqs,
+                validate=True,
+                event_window_ms=event_window_ms,
+            )
+            config_payload["num_components"] = len(component_guesses)
+        config = FitburstRequestConfig.from_dict(config_payload) if config_payload else None
 
         peak_rel_bin = _primary_peak_bin(
             peak_bins_abs=grid.peak_bins,
@@ -1479,6 +1791,18 @@ class BurstSession:
         widths_sec = widths_sec[np.isfinite(widths_sec) & (widths_sec > 0)]
         return widths_sec * 1e3
 
+    @staticmethod
+    def _contiguous_profile_runs(profile: np.ndarray, bins: np.ndarray) -> list[np.ndarray]:
+        values = np.asarray(profile, dtype=float)
+        indices = np.asarray(bins, dtype=int)
+        if values.size == 0 or indices.size == 0:
+            return []
+        indices = np.unique(indices[(indices >= 0) & (indices < values.size)])
+        if indices.size == 0:
+            return []
+        split_after = np.flatnonzero(np.diff(indices) > 1) + 1
+        return [np.asarray(values[run], dtype=float) for run in np.split(indices, split_after) if run.size]
+
     def run_temporal_structure_analysis(self, segment_length_ms: float) -> TemporalStructureResult:
         grid, context = self._build_measurement_context_for_data()
         event_series = np.asarray(
@@ -1496,6 +1820,10 @@ class BurstSession:
                 float(np.max(context.spectral_axis_mhz)) if context.spectral_axis_mhz.size else 0.0,
             ],
             fitburst_widths_ms=self._fitburst_component_widths_ms(),
+            offpulse_series_runs=self._contiguous_profile_runs(
+                context.selected_profile_baselined,
+                context.offpulse_bins,
+            ),
         )
         self.spectral_analysis = temporal_to_spectral_result(self.temporal_structure)
         return self.temporal_structure

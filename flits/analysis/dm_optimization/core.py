@@ -1,4 +1,15 @@
-"""DM optimization metrics used by FLITS.
+"""DM optimization metrics and trial-sweep orchestration used by FLITS.
+
+The session layer calls this module with the current dynamic spectrum, selected
+event window, spectral selection, masking, and reduced-resolution state. This
+module builds a symmetric trial-DM grid, dedisperses each trial relative to the
+currently applied DM, scores each trial with a registered metric, refines the
+peak DM when possible, and computes residual arrival-time diagnostics at the
+applied and best-fit DMs.
+
+DM values are expressed in the usual pulsar/FRB units of ``pc cm^-3``.
+Frequency arrays are in MHz. Sampling intervals passed to the optimizer are in
+seconds, while serialized provenance and residual diagnostics use milliseconds.
 
 This module includes a clean-room FLITS implementation of DMphase. FLITS keeps
 the runtime implementation native so it can operate on the current reduced
@@ -31,6 +42,31 @@ ResidualRunner = Callable[[], tuple[np.ndarray, np.ndarray, np.ndarray, str]]
 
 @dataclass(frozen=True)
 class DMMetricInput:
+    """Data bundle passed to a DM scoring metric for one trial DM.
+
+    Parameters
+    ----------
+    context
+        Measurement context derived from the trial-dedispersed waterfall. It
+        carries event bounds, selected-channel bounds, normalized profiles, and
+        noise/off-pulse metadata.
+    waterfall
+        Full waterfall used by the metric, with shape ``(n_channels, n_time)``.
+        For DMphase this is usually the current reduced analysis grid.
+    selected_waterfall
+        Frequency-selected waterfall, with shape
+        ``(n_selected_channels, n_time)``.
+    event_waterfall
+        Event-window slice of ``selected_waterfall``, with shape
+        ``(n_selected_channels, n_event_time)``.
+    offpulse_bins
+        Time-bin indices used as the off-pulse reference for this trial.
+    freqs_mhz
+        Frequency axis in MHz matching ``selected_waterfall`` rows.
+    tsamp_sec
+        Effective time resolution of ``waterfall`` in seconds.
+    """
+
     context: MeasurementContext
     waterfall: np.ndarray
     selected_waterfall: np.ndarray
@@ -42,6 +78,14 @@ class DMMetricInput:
 
 @dataclass(frozen=True)
 class DMMetricPreparedTrial:
+    """Intermediate per-trial metric state.
+
+    ``scalar_score`` is used by metrics that can be scored independently per
+    DM trial. DMphase stores a phase-coherent Fourier power spectrum per trial
+    and converts the stack of spectra into final scores after all trials have
+    been prepared.
+    """
+
     scalar_score: float | None = None
     dmphase_power_spectrum: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     dmphase_channel_count: int = 0
@@ -49,12 +93,16 @@ class DMMetricPreparedTrial:
 
 @dataclass(frozen=True)
 class DMMetricAlgorithm:
+    """Callable pair that defines one registered DM scoring metric."""
+
     prepare_trial: Callable[[DMMetricInput], DMMetricPreparedTrial]
     finalize_scores: Callable[[list[DMMetricPreparedTrial]], "DMMetricFinalizeResult"]
 
 
 @dataclass(frozen=True)
 class DMMetricFitResult:
+    """Peak-refinement result for a metric-specific DM score curve."""
+
     best_dm: float
     best_score: float
     best_dm_uncertainty: float | None
@@ -63,6 +111,8 @@ class DMMetricFitResult:
 
 @dataclass(frozen=True)
 class DMMetricFinalizeResult:
+    """Final score vector and optional payload for metric-specific peak fits."""
+
     scores: np.ndarray
     fit_result: DMMetricFitResult | None = None
     fit_payload: DMPhaseFitInput | None = None
@@ -70,6 +120,21 @@ class DMMetricFinalizeResult:
 
 @dataclass(frozen=True)
 class DMPhaseFitInput:
+    """DMphase-only payload needed to refine the peak score curve.
+
+    Parameters
+    ----------
+    power_spectra
+        Stacked coherent-power spectra with one column per trial DM.
+    low_idx
+        Lower fluctuation-frequency index selected by the automatic DMphase
+        cutoff logic.
+    dstd
+        Score-curve error scale used by the weighted polynomial peak fit.
+    weights
+        Per-trial weights derived from the automatic DMphase S/N curve.
+    """
+
     power_spectra: np.ndarray
     low_idx: int
     dstd: float
@@ -131,10 +196,12 @@ DM_METRIC_METADATA: dict[str, DmMetricDefinition] = {
 
 
 def available_dm_metrics() -> list[dict[str, Any]]:
+    """Return JSON-compatible metadata for all selectable DM metrics."""
     return [definition.to_dict() for definition in DM_METRIC_METADATA.values()]
 
 
 def dm_metric_definition(metric: str) -> DmMetricDefinition | None:
+    """Return the metadata definition for ``metric``, if it is registered."""
     return DM_METRIC_METADATA.get(str(metric))
 
 
@@ -149,6 +216,7 @@ def _run_integrated_event_snr_prepare(metric_input: DMMetricInput) -> DMMetricPr
 
 
 def _finalize_scalar_scores(prepared_trials: list[DMMetricPreparedTrial]) -> DMMetricFinalizeResult:
+    """Convert independently prepared scalar trials into the final score vector."""
     scores = np.asarray(
         [
             float("-inf")
@@ -162,6 +230,7 @@ def _finalize_scalar_scores(prepared_trials: list[DMMetricPreparedTrial]) -> DMM
 
 
 def _dmphase_window(profile: np.ndarray) -> int:
+    """Estimate the automatic DMphase smoothing window from profile autocorrelation."""
     values = np.asarray(profile, dtype=float)
     if values.size < 3 or not np.isfinite(values).any():
         return 1
@@ -174,6 +243,7 @@ def _dmphase_window(profile: np.ndarray) -> int:
 
 
 def _dmphase_frequency_cutoff(power_spectra: np.ndarray, nchan: int) -> tuple[int, int]:
+    """Return the fluctuation-frequency range used by the DMphase score curve."""
     spectra = np.asarray(power_spectra, dtype=float)
     if spectra.ndim != 2 or spectra.size == 0 or nchan <= 0:
         return 0, 0
@@ -187,6 +257,7 @@ def _dmphase_frequency_cutoff(power_spectra: np.ndarray, nchan: int) -> tuple[in
 
 
 def _prepare_dmphase_waterfall(waterfall: np.ndarray) -> tuple[np.ndarray, int]:
+    """Drop rows that cannot contribute stable phase-only Fourier information."""
     values = np.asarray(waterfall, dtype=float)
     if values.ndim != 2 or values.size == 0:
         return np.array([], dtype=float), 0
@@ -206,6 +277,7 @@ def _prepare_dmphase_waterfall(waterfall: np.ndarray) -> tuple[np.ndarray, int]:
 
 
 def _dmphase_coherent_power_spectrum(waterfall: np.ndarray) -> np.ndarray:
+    """Compute the DMphase phase-coherent power spectrum for one trial waterfall."""
     fourier_transform = np.fft.fft(np.asarray(waterfall, dtype=float), axis=-1)
     amplitude = np.abs(fourier_transform)
     amplitude[amplitude == 0] = 1.0
@@ -214,6 +286,7 @@ def _dmphase_coherent_power_spectrum(waterfall: np.ndarray) -> np.ndarray:
 
 
 def _run_dmphase_prepare(metric_input: DMMetricInput) -> DMMetricPreparedTrial:
+    """Prepare one trial for DMphase finalization."""
     dmphase_waterfall, nchan = _prepare_dmphase_waterfall(metric_input.selected_waterfall)
     if nchan < 2 or dmphase_waterfall.shape[1] < 4:
         return DMMetricPreparedTrial()
@@ -234,6 +307,23 @@ def _dmphase_curve(
     dpower_spectra: np.ndarray,
     nchan: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Construct the automatic DMphase coherent-power curve.
+
+    Parameters
+    ----------
+    power_spectra
+        Phase-coherent spectra with shape ``(n_fluctuation_bins, n_trials)``.
+    dpower_spectra
+        ``power_spectra`` weighted by squared fluctuation-frequency index.
+    nchan
+        Median number of usable frequency channels across the trial sweep.
+
+    Returns
+    -------
+    dm_curve, dm_curve_error, snr
+        Automatic DMphase score curve, uncertainty scale, and S/N-like weights
+        for each trial DM.
+    """
     n = int(power_spectra.shape[0])
     m = int(power_spectra.shape[1])
     if n <= 0 or m <= 0 or nchan <= 0:
@@ -296,6 +386,7 @@ def _dmphase_poly_max(
     err: float,
     w: np.ndarray | None,
 ) -> tuple[float, float, np.ndarray, float]:
+    """Fit a local polynomial and return its maximum and uncertainty scale."""
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     if x.size == 0 or y.size == 0 or x.size != y.size:
@@ -361,6 +452,7 @@ def _fit_dmphase_peak(
     dstd: float,
     weights: np.ndarray,
 ) -> DMMetricFitResult:
+    """Refine the DMphase peak using the method's weighted polynomial fit."""
     sampled_peak_index = int(np.nanargmax(scores))
     sampled_best_dm = float(trial_dms[sampled_peak_index])
     sampled_best_score = float(scores[sampled_peak_index])
@@ -440,6 +532,7 @@ def _fit_dmphase_peak(
 
 
 def _finalize_dmphase_scores(prepared_trials: list[DMMetricPreparedTrial]) -> DMMetricFinalizeResult:
+    """Stack per-trial DMphase spectra and convert them into a score curve."""
     if not prepared_trials:
         return DMMetricFinalizeResult(scores=np.array([], dtype=float))
 
@@ -496,6 +589,30 @@ DM_METRIC_REGISTRY: dict[str, DMMetricAlgorithm] = {
 
 
 def dm_trial_grid(center_dm: float, half_range: float, step: float) -> tuple[np.ndarray, float]:
+    """Build the symmetric trial-DM grid for a sweep.
+
+    Parameters
+    ----------
+    center_dm
+        Center of the requested sweep, in ``pc cm^-3``.
+    half_range
+        Requested half-width around ``center_dm``, in ``pc cm^-3``.
+    step
+        Trial-DM spacing, in ``pc cm^-3``.
+
+    Returns
+    -------
+    trial_dms, actual_half_range
+        Rounded trial DM values and the realized half-range. The realized
+        half-range can be smaller than requested when ``half_range`` is not an
+        exact multiple of ``step``.
+
+    Raises
+    ------
+    ValueError
+        If inputs are non-finite, non-positive where required, produce fewer
+        than 5 trials, or produce more than 121 trials.
+    """
     center_dm = float(center_dm)
     half_range = float(half_range)
     step = float(step)
@@ -520,6 +637,7 @@ def dm_trial_grid(center_dm: float, half_range: float, step: float) -> tuple[np.
 
 
 def _uncertainty_drop(metric: str, best_value: float, local_values: np.ndarray) -> float:
+    """Return the score decrement used to quote a one-parameter DM uncertainty."""
     if metric == "integrated_event_snr":
         return 1.0
     finite = np.asarray(local_values, dtype=float)
@@ -536,6 +654,27 @@ def fit_dm_peak(
     *,
     metric: str = "integrated_event_snr",
 ) -> tuple[float, float, float | None, str]:
+    """Refine a sampled DM-score peak with a local quadratic fit.
+
+    Parameters
+    ----------
+    trial_dms
+        Trial DM grid in ``pc cm^-3``.
+    scores
+        Metric values for each trial DM. Larger values are better.
+    peak_index
+        Index of the best sampled trial in ``scores``.
+    metric
+        Metric key. Used to choose the score drop that defines the reported
+        uncertainty.
+
+    Returns
+    -------
+    best_dm, best_score, uncertainty, status
+        Refined DM, refined score, optional uncertainty in ``pc cm^-3``, and a
+        machine-readable fit status. If the local fit is invalid, the sampled
+        peak is returned with an explanatory status.
+    """
     sampled_best_dm = float(trial_dms[peak_index])
     sampled_best_score = float(scores[peak_index])
 
@@ -599,6 +738,7 @@ def _residual_summary(
     freqs_mhz: np.ndarray,
     residuals_ms: np.ndarray,
 ) -> tuple[float | None, float | None]:
+    """Summarize subband arrival residuals as RMS and slope versus frequency."""
     freqs = np.asarray(freqs_mhz, dtype=float)
     residuals = np.asarray(residuals_ms, dtype=float)
     finite = np.isfinite(freqs) & np.isfinite(residuals)
@@ -634,6 +774,60 @@ def optimize_dm_trials(
     provenance: DmOptimizationProvenance,
     metric: str = "integrated_event_snr",
 ) -> DmOptimizationResult:
+    """Run a DM trial sweep and return the optimized DM result.
+
+    Parameters
+    ----------
+    data
+        Native-resolution dynamic spectrum with shape ``(n_channels, n_time)``.
+        This array is used for residual diagnostics at the applied and best-fit
+        DMs.
+    current_dm
+        DM currently applied to ``data``, in ``pc cm^-3``.
+    freqs_mhz
+        Native frequency axis in MHz matching ``data`` rows.
+    tsamp_sec
+        Native sampling interval in seconds.
+    score_data
+        Optional waterfall used only for scoring. DMphase passes the current
+        reduced grid here so the score respects the user's analysis resolution.
+        Metrics that should score native ``data`` leave this as ``None``.
+    score_current_dm
+        Applied DM for ``score_data``. Defaults to ``current_dm``.
+    score_freqs_mhz
+        Frequency axis in MHz matching ``score_data`` rows. Defaults to
+        ``freqs_mhz``.
+    score_tsamp_sec
+        Sampling interval in seconds for ``score_data``. Defaults to
+        ``tsamp_sec``.
+    center_dm, half_range, step
+        Trial grid controls, all in ``pc cm^-3``.
+    metric_input_builder
+        Callback that converts each trial-dedispersed scoring waterfall into a
+        :class:`DMMetricInput` for the selected metric.
+    residuals
+        Callback that computes subband arrival residuals for a waterfall and
+        returns ``(freqs_mhz, arrivals_ms, residuals_ms, status)``.
+    provenance
+        Serialized context describing the selection and effective analysis
+        resolution used for the sweep.
+    metric
+        Registered metric key. Supported values are defined by
+        ``DM_METRIC_REGISTRY``.
+
+    Returns
+    -------
+    DmOptimizationResult
+        Score curve, sampled and refined DM estimates, residual diagnostics,
+        settings, and provenance.
+
+    Raises
+    ------
+    ValueError
+        If the metric key is unsupported, the trial grid is invalid, a metric
+        returns an invalid score shape, or no finite score can be computed for
+        the current selection.
+    """
     metric_algorithm = DM_METRIC_REGISTRY.get(metric)
     if metric_algorithm is None:
         valid = ", ".join(sorted(DM_METRIC_REGISTRY))

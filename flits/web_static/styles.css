@@ -728,6 +728,14 @@ button.is-busy::after {
   gap: 16px;
 }
 
+.analysis-panel[data-tab-panel="temporal"] {
+  gap: 18px;
+}
+
+.analysis-panel[data-tab-panel="temporal"] .plot {
+  margin-top: 0;
+}
+
 .analysis-panel[hidden] {
   display: none;
 }
@@ -765,10 +773,37 @@ button.is-busy::after {
   margin-top: 16px;
 }
 
+.acf-plot {
+  height: 360px;
+  min-height: 360px;
+  margin-top: 16px;
+}
+
+.temporal-acf-plot {
+  height: clamp(420px, 40vw, 500px);
+  min-height: clamp(420px, 40vw, 500px);
+}
+
+.temporal-scale-plot {
+  height: clamp(420px, 40vw, 500px);
+  min-height: clamp(420px, 40vw, 500px);
+}
+
+.temporal-psd-plot {
+  height: clamp(620px, 58vw, 760px);
+  min-height: clamp(620px, 58vw, 760px);
+}
+
 .fitting-plot {
   height: 340px;
   min-height: 340px;
   margin-top: 16px;
+}
+
+.fitting-guess-plot {
+  height: 280px;
+  min-height: 280px;
+  margin-top: 14px;
 }
 
 .fitting-spectrum-plot {
@@ -777,7 +812,8 @@ button.is-busy::after {
   margin-top: 16px;
 }
 
-.dm-optimization-plot.is-empty {
+.dm-optimization-plot.is-empty,
+.acf-plot.is-empty {
   display: none;
 }
 
@@ -826,6 +862,10 @@ button.is-busy::after {
   display: none;
 }
 
+.fitting-guess-plot.is-empty {
+  display: none;
+}
+
 .fitting-spectrum-plot.is-empty {
   display: none;
 }
@@ -859,6 +899,17 @@ button.is-busy::after {
   font-size: 1.35rem;
 }
 
+.measurement-label {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.measurement-label .tooltip-icon {
+  margin-left: 0;
+}
+
 .measurement-meta-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -883,10 +934,6 @@ button.is-busy::after {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.measurement-details .kv-list {
-  padding-top: 0;
 }
 
 .export-actions {
@@ -1268,6 +1315,80 @@ button.is-busy::after {
   color: var(--muted);
 }
 
+.fit-guess-content {
+  margin-top: 12px;
+}
+
+.fit-guess-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.fit-guess-table-wrap {
+  overflow-x: auto;
+  border-radius: 14px;
+  border: 1px solid rgba(24, 33, 38, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.fit-guess-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+.fit-guess-table th,
+.fit-guess-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(24, 33, 38, 0.08);
+  text-align: right;
+  vertical-align: middle;
+}
+
+.fit-guess-table th {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: rgba(245, 245, 245, 0.88);
+}
+
+.fit-guess-table td:first-child,
+.fit-guess-table th:first-child {
+  text-align: left;
+}
+
+.fit-guess-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.fit-guess-table td:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.fit-guess-table td:first-child span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.fit-guess-input {
+  width: 8.5rem;
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(24, 33, 38, 0.12);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 8px 9px;
+  font: inherit;
+  text-align: right;
+}
+
+.fit-guess-input:focus {
+  outline: 2px solid rgba(114, 53, 162, 0.22);
+  border-color: rgba(114, 53, 162, 0.35);
+}
+
 .empty-state {
   padding: 18px;
   border-radius: 18px;
@@ -1349,11 +1470,15 @@ button.is-busy::after {
 
 /* --- Custom Tooltips --- */
 .tooltip-icon {
+  appearance: none;
+  -webkit-appearance: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 16px;
   height: 16px;
+  padding: 0;
+  border: 0;
   border-radius: 50%;
   background: rgba(92, 108, 115, 0.15);
   color: var(--muted);
@@ -1366,9 +1491,15 @@ button.is-busy::after {
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-[data-tooltip]:hover.tooltip-icon {
+[data-tooltip]:hover.tooltip-icon,
+[data-tooltip]:focus-visible.tooltip-icon {
   background: var(--accent);
   color: white;
+}
+
+.tooltip-icon:focus-visible {
+  outline: 2px solid rgba(91, 120, 255, 0.55);
+  outline-offset: 2px;
 }
 
 [data-tooltip] {
@@ -1387,7 +1518,9 @@ button.is-busy::after {
 }
 
 [data-tooltip]:hover::after,
-[data-tooltip]:hover::before {
+[data-tooltip]:hover::before,
+[data-tooltip]:focus-visible::after,
+[data-tooltip]:focus-visible::before {
   visibility: visible;
   opacity: 1;
 }
@@ -1472,6 +1605,26 @@ button.is-busy::after {
     height: 300px;
     min-height: 300px;
   }
+
+  .acf-plot {
+    height: 320px;
+    min-height: 320px;
+  }
+
+  .temporal-acf-plot {
+    height: 380px;
+    min-height: 380px;
+  }
+
+  .temporal-scale-plot {
+    height: 380px;
+    min-height: 380px;
+  }
+
+  .temporal-psd-plot {
+    height: 540px;
+    min-height: 540px;
+  }
 }
 
 @media (max-width: 720px) {
@@ -1536,5 +1689,16 @@ button.is-busy::after {
   .dm-optimization-plot {
     height: 260px;
     min-height: 260px;
+  }
+
+  .temporal-acf-plot,
+  .temporal-scale-plot {
+    height: 340px;
+    min-height: 340px;
+  }
+
+  .temporal-psd-plot {
+    height: 460px;
+    min-height: 460px;
   }
 }

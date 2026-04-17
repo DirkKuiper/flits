@@ -6,7 +6,12 @@ from unittest.mock import patch
 import numpy as np
 
 from flits.analysis.spectral.core import run_averaged_spectral_analysis
-from flits.analysis.temporal.core import _fit_power_law_model, quantize_segment_bins, run_temporal_structure_analysis
+from flits.analysis.temporal.core import (
+    _fit_crossover_frequency,
+    _fit_power_law_model,
+    quantize_segment_bins,
+    run_temporal_structure_analysis,
+)
 from flits.models import FilterbankMetadata, SpectralAnalysisResult, TemporalStructureResult
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
@@ -182,6 +187,25 @@ class SpectralAnalysisTest(unittest.TestCase):
         self.assertEqual(high_fit["fit_status"], "ok")
         self.assertLess(high_fit["power_law_alpha_err"], low_fit["power_law_alpha_err"])
 
+    def test_power_law_fit_reports_crossover_frequency(self) -> None:
+        freq_hz = np.geomspace(20.0, 20_000.0, 80)
+        model_power = 1.0e9 * freq_hz ** (-2.0) + 10.0
+
+        fit = _fit_power_law_model(freq_hz, model_power, 1000)
+        crossover = _fit_crossover_frequency(fit, freq_hz)
+
+        self.assertEqual(fit["fit_status"], "ok")
+        self.assertEqual(crossover["crossover_frequency_status"], "ok")
+        self.assertAlmostEqual(crossover["crossover_frequency_hz"] or 0.0, 10_000.0, delta=150.0)
+        self.assertLess(crossover["crossover_frequency_hz_3sigma_low"] or 0.0, crossover["crossover_frequency_hz"] or 0.0)
+        self.assertGreater(crossover["crossover_frequency_hz_3sigma_high"] or 0.0, crossover["crossover_frequency_hz"] or 0.0)
+
+        out_of_band = _fit_crossover_frequency(fit, np.geomspace(20.0, 2_000.0, 40))
+        self.assertEqual(out_of_band["crossover_frequency_status"], "out_of_band")
+
+        unavailable = _fit_crossover_frequency({"fit_status": "underconstrained"}, freq_hz)
+        self.assertEqual(unavailable["crossover_frequency_status"], "unavailable")
+
     def test_run_temporal_structure_analysis_reports_minimum_structure_and_psd(self) -> None:
         rng = np.random.default_rng(99)
         time_bins = np.arange(128, dtype=float)
@@ -196,6 +220,7 @@ class SpectralAnalysisTest(unittest.TestCase):
             noise_sigma=0.05,
             event_window_ms=(0.0, 128.0),
             spectral_extent_mhz=(1000.0, 1100.0),
+            offpulse_series_runs=[rng.normal(0.0, 0.05, size=64), rng.normal(0.0, 0.05, size=48)],
             backend_loader=_fake_backend_loader,
         )
 
@@ -205,6 +230,26 @@ class SpectralAnalysisTest(unittest.TestCase):
         self.assertIsNotNone(result.min_structure_ms_primary)
         self.assertLessEqual(result.min_structure_ms_primary or 0.0, 4.0)
         self.assertIsNotNone(result.min_structure_ms_wavelet)
+        self.assertTrue(np.isfinite(result.noise_psd_freq_hz).all())
+        self.assertGreater(result.noise_psd_freq_hz.size, 0)
+        self.assertGreater(result.noise_psd_segment_count or 0, 0)
+
+    def test_noise_psd_does_not_join_disjoint_short_offpulse_runs(self) -> None:
+        event_series = np.sin(2.0 * np.pi * np.arange(64, dtype=float) / 8.0)
+        result = run_temporal_structure_analysis(
+            event_series=event_series,
+            tsamp_ms=1.0,
+            segment_length_ms=16.0,
+            noise_sigma=0.05,
+            event_window_ms=(0.0, 64.0),
+            spectral_extent_mhz=(1000.0, 1100.0),
+            offpulse_series_runs=[np.ones(16, dtype=float), np.ones(16, dtype=float) * 2.0],
+            backend_loader=_fake_backend_loader,
+        )
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.noise_psd_freq_hz.size, 0)
+        self.assertIsNone(result.noise_psd_segment_count)
 
     def test_run_temporal_structure_analysis_avoids_false_low_sn_minimum_scale(self) -> None:
         rng = np.random.default_rng(101)
@@ -264,6 +309,10 @@ class SpectralAnalysisTest(unittest.TestCase):
         self.assertEqual(kwargs["noise_sigma"], context.noise_summary.sigma)
         self.assertEqual(kwargs["event_window_ms"], (64.0, 192.0))
         self.assertEqual(kwargs["spectral_extent_mhz"], [1007.1428571428571, 1092.857142857143])
+        expected_runs = session._contiguous_profile_runs(context.selected_profile_baselined, context.offpulse_bins)
+        self.assertEqual(len(kwargs["offpulse_series_runs"]), len(expected_runs))
+        for actual, expected in zip(kwargs["offpulse_series_runs"], expected_runs, strict=False):
+            np.testing.assert_allclose(actual, expected)
         self.assertEqual(session.spectral_analysis.freq_hz.tolist(), [31.25, 62.5])
         self.assertIsNotNone(session.temporal_structure)
 

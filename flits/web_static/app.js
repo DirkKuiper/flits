@@ -85,9 +85,12 @@ const dmComponentsContent = document.getElementById("dmComponentsContent")
 const fittingContent = document.getElementById("fittingContent")
 const fittingSpectrumPlot = document.getElementById("fittingSpectrumPlot")
 const fittingProfilePlot = document.getElementById("fittingProfilePlot")
+const fitGuessContent = document.getElementById("fitGuessContent")
+const fitGuessPlot = document.getElementById("fitGuessPlot")
 const fitComponentsInput = document.getElementById("fitComponentsInput")
 const fitFixedParamsContainer = document.getElementById("fitFixedParamsContainer")
 const spectralContent = document.getElementById("spectralContent")
+const acfPlot = document.getElementById("acfPlot")
 const temporalScalePlot = document.getElementById("temporalScalePlot")
 const spectralPlot = document.getElementById("spectralPlot")
 const spectralSegmentInput = document.getElementById("spectralSegmentInput")
@@ -327,11 +330,28 @@ function bindControls() {
   fitScatteringButton.addEventListener("click", () => {
     const checkboxes = document.querySelectorAll("#fitFixedParamsContainer input[type='checkbox']:checked");
     const fixedParams = Array.from(checkboxes).map((cb) => cb.value);
-    const numComponents = Number(fitComponentsInput.value) || 1;
+    const componentGuesses = collectFitComponentGuesses()
+    if (!componentGuesses) {
+      return
+    }
     postAction("fit_scattering", {
       fixed_parameters: fixedParams,
-      num_components: numComponents,
+      num_components: componentGuesses.length,
+      component_guesses: componentGuesses,
     });
+  })
+  fitComponentsInput.addEventListener("change", () => {
+    if (state.view) {
+      renderFitting(state.view)
+      if (state.activeAnalysisTab === "fitting") {
+        renderFitGuessPlot(state.view)
+      }
+    }
+  })
+  fitGuessContent.addEventListener("input", () => {
+    if (state.view && state.activeAnalysisTab === "fitting") {
+      renderFitGuessPlot(state.view)
+    }
   })
   runSpectralButton.addEventListener("click", () => {
     postAction("run_temporal_structure_analysis", {
@@ -1036,7 +1056,7 @@ function applyView(view) {
   renderSessionFacts(view)
   renderPrepare(view)
   renderDmOptimization(view)
-  renderFitting(view.results)
+  renderFitting(view)
   renderSpectral(view)
   renderExportPlanner()
   renderExportManifest()
@@ -1226,42 +1246,42 @@ function renderPrepare(view) {
       uncertainty: results?.uncertainties?.toa_topo_mjd ? formatToaUncertainty(results.uncertainties.toa_topo_mjd) : null,
       method: "peak bin",
       flags: results?.measurement_flags || [],
-      details: renderMeasurementDetails(results?.provenance),
+      tooltip: measurementTooltip("toa"),
     }),
     renderMeasurementCard("Peak Bin S/N", results?.snr_peak === null || results?.snr_peak === undefined ? "n/a" : fmt(results.snr_peak, 3), {
       method: "event peak",
       flags: results?.measurement_flags || [],
-      details: renderMeasurementDetails(results?.provenance),
+      tooltip: measurementTooltip("peakSn"),
     }),
     renderMeasurementCard("Integrated Event S/N", results?.snr_integrated === null || results?.snr_integrated === undefined ? "n/a" : fmt(results.snr_integrated, 3), {
       method: "selected event window",
       flags: results?.measurement_flags || [],
-      details: renderMeasurementDetails(results?.provenance),
+      tooltip: measurementTooltip("integratedSn"),
     }),
     renderMeasurementCard(acceptedWidthTitle, acceptedWidthValue, {
       uncertainty: acceptedWidthUncertainty === "n/a" ? null : acceptedWidthUncertainty,
       method: acceptedMethod,
       flags: acceptedWidthFlags(widthAnalysis, acceptedWidth),
-      details: renderAcceptedWidthDetails(widthAnalysis, acceptedWidth, results?.provenance, hasAcfFallback),
+      tooltip: acceptedWidthTooltip(acceptedWidth, hasAcfFallback),
     }),
     renderMeasurementCard("Fluence", results?.fluence_jyms === null || results?.fluence_jyms === undefined ? "n/a" : `${fmt(results.fluence_jyms, 3)} Jy ms`, {
       uncertainty: results?.uncertainties?.fluence_jyms ? `±${fmt(results.uncertainties.fluence_jyms, 3)} Jy ms` : null,
       method: results?.provenance?.calibration_method || "n/a",
       flags: results?.measurement_flags || [],
-      details: renderMeasurementDetails(results?.provenance),
+      tooltip: measurementTooltip("fluence"),
     }),
     renderMeasurementCard("Peak Flux Density", results?.peak_flux_jy === null || results?.peak_flux_jy === undefined ? "n/a" : `${fmt(results.peak_flux_jy, 3)} Jy`, {
       uncertainty: results?.uncertainties?.peak_flux_jy ? `±${fmt(results.uncertainties.peak_flux_jy, 3)} Jy` : null,
       method: results?.provenance?.calibration_method || "n/a",
       flags: results?.measurement_flags || [],
-      details: renderMeasurementDetails(results?.provenance),
+      tooltip: measurementTooltip("peakFlux"),
     }),
   ]
 
   const secondaryTiles = [
-    resultTile("Spectral Correlation Width (ACF)", results?.spectral_width_mhz_acf === null || results?.spectral_width_mhz_acf === undefined ? "n/a" : `${fmt(results.spectral_width_mhz_acf, 3)} MHz`, "secondary"),
+    resultTile("Spectral Correlation Width (ACF)", results?.spectral_width_mhz_acf === null || results?.spectral_width_mhz_acf === undefined ? "n/a" : `${fmt(results.spectral_width_mhz_acf, 3)} MHz`, "secondary", acfTooltip("spectralWidth")),
     resultTile("Spectral Window", results?.spectral_extent_mhz === null || results?.spectral_extent_mhz === undefined ? "n/a" : `${fmt(results.spectral_extent_mhz, 2)} MHz`, "secondary"),
-    resultTile("Event Duration", results?.event_duration_ms === null || results?.event_duration_ms === undefined ? "n/a" : `${fmt(results.event_duration_ms, 3)} ms`, "secondary"),
+    resultTile("Event Duration", results?.event_duration_ms === null || results?.event_duration_ms === undefined ? "n/a" : `${fmt(results.event_duration_ms, 3)} ms`, "secondary", "Length of the selected event window. This is useful selection metadata, but not a measured burst-duration estimate."),
     resultTile("Isotropic Energy", formatIsoEnergy(results?.iso_e, results?.provenance?.energy_unit), "secondary"),
     resultTile("Mask Count", results ? String(results.mask_count) : String(view.state.masked_channels.length), "secondary"),
     resultTile("Peak Positions", results?.peak_positions_ms?.length ? results.peak_positions_ms.map((value) => `${fmt(value, 2)} ms`).join(", ") : "n/a", "secondary"),
@@ -1570,7 +1590,9 @@ function renderDmComponentSummary(optimization) {
   `
 }
 
-function renderFitting(results) {
+function renderFitting(view) {
+  renderFitGuessBuilder(view)
+  const results = view?.results
   const diagnostics = results?.diagnostics || {}
   const scatteringFit = diagnostics?.scattering_fit
 
@@ -1601,6 +1623,7 @@ function renderFitting(results) {
 
   const fitTone = scatteringStatusTone(scatteringFit.status)
   const fitStatistics = scatteringFit.fit_statistics || {}
+  const initialParameters = scatteringFit.initial_parameters || {}
   const bestfit = scatteringFit.bestfit_parameters || {}
   const bestfitUncertainties = scatteringFit.bestfit_uncertainties || {}
   const fitSummaryTiles = [
@@ -1628,7 +1651,7 @@ function renderFitting(results) {
       <strong>${escapeHtml(scatteringStatusLabel(scatteringFit.status))}</strong>
       <span>${escapeHtml(scatteringFit.status === "ok" ? scatteringStatusCopy(scatteringFit.status) : (scatteringFit.message || scatteringStatusCopy(scatteringFit.status)))}</span>
     </div>
-    ${renderScatteringParameterTable(bestfit, bestfitUncertainties)}
+    ${renderScatteringParameterTable(initialParameters, bestfit, bestfitUncertainties)}
     ${results?.provenance ? `
       <details class="details-card results-details">
         <summary>Fit Selection Context</summary>
@@ -1638,6 +1661,192 @@ function renderFitting(results) {
       </details>
     ` : ""}
   `
+}
+
+function renderFitGuessBuilder(view) {
+  const guess = view?.fitburst_guess
+  if (!guess || guess.status !== "ok") {
+    fitComponentsInput.disabled = false
+    fitGuessContent.innerHTML =
+      '<div class="empty-state">No fitburst initial guesses are available for the current selection.</div>'
+    fitGuessPlot.classList.add("is-empty")
+    Plotly.purge(fitGuessPlot)
+    fitGuessPlot.replaceChildren()
+    return
+  }
+
+  const annotated = guess.source === "component_regions" || guess.source === "manual_peaks"
+  const baseCount = Math.max(1, Number(guess.component_count) || 1)
+  if (annotated) {
+    fitComponentsInput.value = String(baseCount)
+    fitComponentsInput.disabled = true
+  } else {
+    fitComponentsInput.disabled = false
+    fitComponentsInput.value = String(clampFitComponentCount(fitComponentsInput.value, baseCount))
+  }
+
+  const rows = fitGuessRowsForCurrentInput(view)
+  if (!rows.length) {
+    fitGuessContent.innerHTML =
+      '<div class="empty-state">No fitburst initial guesses are available for the current selection.</div>'
+    return
+  }
+
+  const rowMarkup = rows.map((row, index) => renderFitGuessRow(row, index, view)).join("")
+  fitGuessContent.innerHTML = `
+    <section class="fit-guess-panel">
+      <div class="analysis-panel-head compact">
+        <h5>Initial Guesses</h5>
+        <p>${escapeHtml(guess.message || fitGuessSourceLabel(guess.source))}</p>
+      </div>
+      <div class="fit-guess-table-wrap">
+        <table class="fit-guess-table">
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Arrival (ms)</th>
+              <th>Width (ms)</th>
+              <th>Tau (ms)</th>
+              <th>Log Amp</th>
+              <th>Window</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowMarkup}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `
+}
+
+function clampFitComponentCount(value, fallback = 1) {
+  const parsed = Number(value)
+  const count = Number.isFinite(parsed) ? Math.round(parsed) : fallback
+  return Math.max(1, Math.min(10, count))
+}
+
+function fitGuessRowsForCurrentInput(view) {
+  const guess = view?.fitburst_guess
+  const baseRows = Array.isArray(guess?.component_guesses) ? guess.component_guesses : []
+  if (!baseRows.length) {
+    return []
+  }
+  const rows = baseRows.map((row, index) => normalizeFitGuessRow(row, index))
+  if (guess.source !== "automatic") {
+    return rows
+  }
+  const targetCount = clampFitComponentCount(fitComponentsInput.value, rows.length)
+  while (rows.length < targetCount) {
+    rows.push(cloneFitGuessRow(rows[0], rows.length))
+  }
+  return rows.slice(0, targetCount)
+}
+
+function normalizeFitGuessRow(row, index) {
+  const windowMs = Array.isArray(row.component_window_ms) && row.component_window_ms.length >= 2
+    ? [Number(row.component_window_ms[0]), Number(row.component_window_ms[1])]
+    : null
+  return {
+    label: row.label || `Component ${index + 1}`,
+    source: row.source || "automatic",
+    source_label: row.source_label || `Component ${index + 1}`,
+    arrival_time_ms: Number(row.arrival_time_ms),
+    width_ms: Number(row.width_ms),
+    tau_ms: Number(row.tau_ms),
+    log_amplitude: Number(row.log_amplitude),
+    component_window_ms: windowMs && windowMs.every((value) => Number.isFinite(value)) ? windowMs : null,
+  }
+}
+
+function cloneFitGuessRow(row, index) {
+  return {
+    ...row,
+    label: `Component ${index + 1}`,
+    source_label: `Auto ${index + 1}`,
+  }
+}
+
+function renderFitGuessRow(row, index, view) {
+  const sampleMs = Number(view?.meta?.tsamp_us) > 0
+    ? Math.max(1e-9, Number(view.meta.tsamp_us) * Number(view.state.time_factor || 1) / 1000)
+    : 0.001
+  const windowLabel = row.component_window_ms
+    ? `${fmt(row.component_window_ms[0], 3)}-${fmt(row.component_window_ms[1], 3)}`
+    : "n/a"
+  const windowStart = row.component_window_ms ? row.component_window_ms[0] : ""
+  const windowEnd = row.component_window_ms ? row.component_window_ms[1] : ""
+  return `
+    <tr data-fit-guess-row data-window-start="${escapeHtml(String(windowStart))}" data-window-end="${escapeHtml(String(windowEnd))}" data-source-label="${escapeHtml(row.source_label)}">
+      <td>
+        <strong>${escapeHtml(row.label || `Component ${index + 1}`)}</strong>
+        <span>${escapeHtml(row.source_label || fitGuessSourceLabel(row.source))}</span>
+      </td>
+      <td><input class="fit-guess-input" data-fit-field="arrival_time_ms" type="number" step="${escapeHtml(String(sampleMs))}" value="${escapeHtml(fmt(row.arrival_time_ms, 6))}"></td>
+      <td><input class="fit-guess-input" data-fit-field="width_ms" type="number" min="${escapeHtml(String(sampleMs))}" step="${escapeHtml(String(sampleMs))}" value="${escapeHtml(fmt(row.width_ms, 6))}"></td>
+      <td><input class="fit-guess-input" data-fit-field="tau_ms" type="number" min="${escapeHtml(String(sampleMs))}" step="${escapeHtml(String(sampleMs))}" value="${escapeHtml(fmt(row.tau_ms, 6))}"></td>
+      <td><input class="fit-guess-input" data-fit-field="log_amplitude" type="number" step="0.001" value="${escapeHtml(fmt(row.log_amplitude, 6))}"></td>
+      <td>${escapeHtml(windowLabel)} ms</td>
+    </tr>
+  `
+}
+
+function fitGuessSourceLabel(source) {
+  if (source === "component_regions") return "Component regions"
+  if (source === "manual_peaks") return "Manual peaks"
+  if (source === "automatic") return "Automatic"
+  return "Unavailable"
+}
+
+function collectFitComponentGuesses() {
+  const rows = Array.from(fitGuessContent.querySelectorAll("[data-fit-guess-row]"))
+  if (!rows.length) {
+    showToast("No fitburst initial guesses are available for this selection.", "error")
+    return null
+  }
+  const eventWindow = Array.isArray(state.view?.fitburst_guess?.event_window_ms)
+    ? state.view.fitburst_guess.event_window_ms
+    : state.view?.state?.event_ms
+  const eventStart = Number(eventWindow?.[0])
+  const eventEnd = Number(eventWindow?.[1])
+
+  const guesses = []
+  for (const [index, row] of rows.entries()) {
+    const arrival = readFitGuessNumber(row, "arrival_time_ms")
+    const width = readFitGuessNumber(row, "width_ms")
+    const tau = readFitGuessNumber(row, "tau_ms")
+    const logAmplitude = readFitGuessNumber(row, "log_amplitude")
+    if ([arrival, width, tau, logAmplitude].some((value) => !Number.isFinite(value))) {
+      showToast(`Component ${index + 1} has a non-numeric initial guess.`, "error")
+      return null
+    }
+    if (width <= 0 || tau <= 0) {
+      showToast(`Component ${index + 1} width and tau must be positive.`, "error")
+      return null
+    }
+    if (Number.isFinite(eventStart) && Number.isFinite(eventEnd) && (arrival < eventStart || arrival > eventEnd)) {
+      showToast(`Component ${index + 1} arrival is outside the selected event window.`, "error")
+      return null
+    }
+    const windowStart = Number(row.dataset.windowStart)
+    const windowEnd = Number(row.dataset.windowEnd)
+    guesses.push({
+      arrival_time_ms: arrival,
+      width_ms: width,
+      tau_ms: tau,
+      log_amplitude: logAmplitude,
+      source_label: row.dataset.sourceLabel || `Component ${index + 1}`,
+      component_window_ms: Number.isFinite(windowStart) && Number.isFinite(windowEnd) ? [windowStart, windowEnd] : null,
+    })
+  }
+  return guesses
+}
+
+function readFitGuessNumber(row, field) {
+  const input = row.querySelector(`[data-fit-field="${field}"]`)
+  if (!input) return NaN
+  const value = parseOptionalNumber(input.value)
+  return value === null ? NaN : value
 }
 
 function renderSpectral(view) {
@@ -1656,28 +1865,30 @@ function renderSpectral(view) {
   let spectralBody = '<div class="empty-state">No temporal-structure diagnostics yet. Choose a segment length and run the analysis on the current event window.</div>'
   if (temporalStructure) {
     const summaryTiles = [
-      resultTile("Min Structure", temporalStructure.min_structure_ms_primary === null || temporalStructure.min_structure_ms_primary === undefined ? "n/a" : `${fmt(temporalStructure.min_structure_ms_primary, 3)} ms`, "primary"),
-      resultTile("Wavelet Scale", temporalStructure.min_structure_ms_wavelet === null || temporalStructure.min_structure_ms_wavelet === undefined ? "n/a" : `${fmt(temporalStructure.min_structure_ms_wavelet, 3)} ms`, "primary"),
-      resultTile("PSD Slope", temporalStructure.power_law_alpha === null || temporalStructure.power_law_alpha === undefined ? "n/a" : `${fmt(temporalStructure.power_law_alpha, 3)} ± ${fmt(temporalStructure.power_law_alpha_err, 3)}`, "primary"),
-      resultTile("fitburst Cross-Check", temporalStructure.fitburst_min_component_ms === null || temporalStructure.fitburst_min_component_ms === undefined ? "n/a" : `${fmt(temporalStructure.fitburst_min_component_ms, 3)} ms`, "primary"),
+      resultTile("Min Structure", temporalStructure.min_structure_ms_primary === null || temporalStructure.min_structure_ms_primary === undefined ? "n/a" : `${fmt(temporalStructure.min_structure_ms_primary, 3)} ms`, "primary", temporalTooltip("minStructure")),
+      resultTile("Wavelet Scale", temporalStructure.min_structure_ms_wavelet === null || temporalStructure.min_structure_ms_wavelet === undefined ? "n/a" : `${fmt(temporalStructure.min_structure_ms_wavelet, 3)} ms`, "primary", temporalTooltip("waveletScale")),
+      resultTile("PSD Slope", temporalStructure.power_law_alpha === null || temporalStructure.power_law_alpha === undefined ? "n/a" : `${fmt(temporalStructure.power_law_alpha, 3)} ± ${fmt(temporalStructure.power_law_alpha_err, 3)}`, "primary", temporalTooltip("psdSlope")),
+      resultTile("Crossover", formatCrossoverFrequency(temporalStructure), "primary", temporalTooltip("crossoverFrequency")),
+      resultTile("fitburst Cross-Check", temporalStructure.fitburst_min_component_ms === null || temporalStructure.fitburst_min_component_ms === undefined ? "n/a" : `${fmt(temporalStructure.fitburst_min_component_ms, 3)} ms`, "primary", temporalTooltip("fitburstCrossCheck")),
     ]
     const resultTiles = [
       resultTile("Status", spectralStatusLabel(temporalStructure.status), "secondary"),
-      resultTile("Segment Length", temporalStructure.segment_length_ms === null || temporalStructure.segment_length_ms === undefined ? "n/a" : `${fmt(temporalStructure.segment_length_ms, 3)} ms`, "secondary"),
-      resultTile("Segments", temporalStructure.segment_count === null || temporalStructure.segment_count === undefined ? "n/a" : String(temporalStructure.segment_count), "secondary"),
-      resultTile("Resolution", temporalStructure.frequency_resolution_hz === null || temporalStructure.frequency_resolution_hz === undefined ? "n/a" : `${fmt(temporalStructure.frequency_resolution_hz, 3)} Hz`, "secondary"),
-      resultTile("Nyquist", temporalStructure.nyquist_hz === null || temporalStructure.nyquist_hz === undefined ? "n/a" : `${fmt(temporalStructure.nyquist_hz, 3)} Hz`, "secondary"),
-      resultTile("Raw Bins", Array.isArray(temporalStructure.raw_periodogram_freq_hz) ? String(temporalStructure.raw_periodogram_freq_hz.length) : String(temporalStructure.raw_periodogram_freq_hz?.length || 0), "secondary"),
-      resultTile("Averaged Bins", Array.isArray(temporalStructure.averaged_psd_freq_hz) ? String(temporalStructure.averaged_psd_freq_hz.length) : String(temporalStructure.averaged_psd_freq_hz?.length || 0), "secondary"),
-      resultTile("PSD Fit", formatPowerLawFitStatus(temporalStructure.power_law_fit_status), "secondary"),
-      resultTile("Noise Floor (C)", temporalStructure.power_law_c === null || temporalStructure.power_law_c === undefined ? "n/a" : `${fmt(temporalStructure.power_law_c, 3)} ± ${fmt(temporalStructure.power_law_c_err, 3)}`, "secondary"),
-      resultTile("Scattering Tau", results?.tau_sc_ms === null || results?.tau_sc_ms === undefined ? "n/a" : `${fmt(results.tau_sc_ms, 3)} ms`, "secondary"),
+      resultTile("Segment Length", temporalStructure.segment_length_ms === null || temporalStructure.segment_length_ms === undefined ? "n/a" : `${fmt(temporalStructure.segment_length_ms, 3)} ms`, "secondary", temporalTooltip("segmentLength")),
+      resultTile("Segments", temporalStructure.segment_count === null || temporalStructure.segment_count === undefined ? "n/a" : String(temporalStructure.segment_count), "secondary", temporalTooltip("segments")),
+      resultTile("Resolution", temporalStructure.frequency_resolution_hz === null || temporalStructure.frequency_resolution_hz === undefined ? "n/a" : `${fmt(temporalStructure.frequency_resolution_hz, 3)} Hz`, "secondary", temporalTooltip("frequencyResolution")),
+      resultTile("Nyquist", temporalStructure.nyquist_hz === null || temporalStructure.nyquist_hz === undefined ? "n/a" : `${fmt(temporalStructure.nyquist_hz, 3)} Hz`, "secondary", temporalTooltip("nyquist")),
+      resultTile("Raw Bins", Array.isArray(temporalStructure.raw_periodogram_freq_hz) ? String(temporalStructure.raw_periodogram_freq_hz.length) : String(temporalStructure.raw_periodogram_freq_hz?.length || 0), "secondary", temporalTooltip("rawBins")),
+      resultTile("Averaged Bins", Array.isArray(temporalStructure.averaged_psd_freq_hz) ? String(temporalStructure.averaged_psd_freq_hz.length) : String(temporalStructure.averaged_psd_freq_hz?.length || 0), "secondary", temporalTooltip("averagedBins")),
+      resultTile("PSD Fit", formatPowerLawFitStatus(temporalStructure.power_law_fit_status), "secondary", temporalTooltip("psdFit")),
+      resultTile("Crossover 3sigma", formatCrossoverInterval(temporalStructure), "secondary", temporalTooltip("crossoverBand")),
+      resultTile("Noise Floor (C)", temporalStructure.power_law_c === null || temporalStructure.power_law_c === undefined ? "n/a" : `${fmt(temporalStructure.power_law_c, 3)} ± ${fmt(temporalStructure.power_law_c_err, 3)}`, "secondary", temporalTooltip("noiseFloor")),
+      resultTile("Scattering Tau", results?.tau_sc_ms === null || results?.tau_sc_ms === undefined ? "n/a" : `${fmt(results.tau_sc_ms, 3)} ms`, "secondary", temporalTooltip("scatteringTau")),
     ]
     spectralBody = `
       <div class="results-section">
         <div class="analysis-panel-head compact">
-          <h5>Temporal Structure Summary</h5>
-          <p>Use the current selected-band event profile to estimate the shortest significant structure and compare raw and averaged power-spectrum diagnostics.</p>
+          <h5>Temporal Structure Summary <span class="tooltip-icon" data-tooltip="${escapeHtml(temporalTooltip("summary"))}">?</span></h5>
+          <p>Use the current selected-band event profile to estimate the shortest significant structure and inspect the fitted PSD crossover.</p>
         </div>
         <div class="results-primary">
           ${summaryTiles.join("")}
@@ -1688,6 +1899,18 @@ function renderSpectral(view) {
         <div class="dm-fit-note" data-tone="neutral" style="margin-top: 1rem;">
           <strong>How To Read This Tab</strong>
           <span>The primary minimum-timescale metric is data-driven. The PSD slope is fit only on the averaged periodogram, while fitburst widths are shown as a model-based cross-check when available.</span>
+        </div>
+        <div class="dm-fit-note" data-tone="neutral" style="margin-top: 1rem;">
+          <strong>Minimum Structure Scale Scan</strong>
+          <span>The scale scan asks for the smallest statistically significant structure. If matched-filter significance rises at the largest scale, the burst has broad emission or no turnover in the tested range; it is not a duration measurement.</span>
+        </div>
+        <div class="dm-fit-note" data-tone="neutral" style="margin-top: 1rem;">
+          <strong>Power Spectrum</strong>
+          <span>The periodogram shows fluctuation power versus temporal frequency. The crossover marks where the fitted red-noise component equals the fitted white-noise floor.</span>
+        </div>
+        <div class="dm-fit-note" data-tone="neutral" style="margin-top: 1rem;">
+          <strong>Crossover Band</strong>
+          <span>The yellow band is the stored 3-sigma crossover interval, obtained by propagating the fitted covariance of A, alpha, and C into crossover frequency.</span>
         </div>
       </div>
       ${temporalStructure.message ? `<div class="empty-state">${escapeHtml(temporalStructure.message)}</div>` : ""}
@@ -1707,9 +1930,11 @@ function renderSpectral(view) {
         ${sharedStateTiles.join("")}
       </div>
     </div>
+    ${renderAcfDiagnosticsSection(results)}
     ${spectralBody}
   `
   bindWidthActionButtons()
+  syncAcfPlot()
   if (temporalStructure?.status === "ok") {
     temporalScalePlot.classList.remove("is-empty")
     spectralPlot.classList.remove("is-empty")
@@ -1727,6 +1952,231 @@ function renderSpectral(view) {
   }
 }
 
+function renderAcfDiagnosticsSection(results) {
+  const diagnostics = results?.diagnostics || {}
+  const hasAcf = hasAcfDiagnostics(diagnostics)
+  const widthTiles = hasAcf
+    ? [
+        resultTile("Temporal ACF Width", results?.width_ms_acf === null || results?.width_ms_acf === undefined ? "n/a" : `${fmt(results.width_ms_acf, 3)} ms`, "primary", acfTooltip("temporalWidth")),
+        resultTile("Spectral ACF Width", results?.spectral_width_mhz_acf === null || results?.spectral_width_mhz_acf === undefined ? "n/a" : `${fmt(results.spectral_width_mhz_acf, 3)} MHz`, "primary", acfTooltip("spectralWidth")),
+        resultTile("Temporal ACF Samples", String(diagnostics.temporal_acf.length), "secondary", acfTooltip("temporalSamples")),
+        resultTile("Spectral ACF Samples", String(diagnostics.spectral_acf.length), "secondary", acfTooltip("spectralSamples")),
+      ]
+    : []
+  const body = hasAcf
+    ? `
+      <div class="results-primary">
+        ${widthTiles.slice(0, 2).join("")}
+      </div>
+      <div class="results-secondary">
+        ${widthTiles.slice(2).join("")}
+      </div>
+      <div class="dm-fit-note" data-tone="neutral" style="margin-top: 1rem;">
+        <strong>Half-Max Reference</strong>
+        <span>The dashed line marks normalized ACF = 0.5. ACF width is a self-similarity scale, not the full burst duration; use Width Comparison for duration-style estimates.</span>
+      </div>
+      <div class="dm-fit-note" data-tone="neutral" style="margin-top: 1rem;">
+        <strong>Burst Duration Guidance</strong>
+        <span>For a model-independent duration, run Compute Widths and inspect Fluence Percentile or Boxcar Equivalent. Event Duration is only the manually selected event-window length.</span>
+      </div>
+    `
+    : '<div class="empty-state">Compute measurements to inspect ACF diagnostics for the current event and spectral window.</div>'
+
+  return `
+    <section class="results-section">
+      <div class="analysis-panel-head compact">
+        <h5>ACF Diagnostics <span class="tooltip-icon" data-tooltip="${escapeHtml(acfTooltip("section"))}">?</span></h5>
+        <p>Inspect the temporal and spectral autocorrelation functions used by the ACF width diagnostics and export panel.</p>
+      </div>
+      ${body}
+    </section>
+  `
+}
+
+function acfTooltip(topic) {
+  const tooltips = {
+    section: "Autocorrelation compares the selected profile or spectrum with shifted copies of itself. It highlights characteristic correlation scales and repeated structure.",
+    temporalWidth: "Time lag where the event-profile ACF falls to half maximum, multiplied by sqrt(2). Useful as a model-free coherence scale, but not the same as full burst duration.",
+    spectralWidth: "Frequency lag where the spectrum ACF falls to half maximum. Large values mean broad-band/smooth spectral structure; small values mean narrow decorrelation or patchy emission.",
+    temporalSamples: "Number of positive temporal lag bins available in the ACF. It is limited by the event-window length and time resolution.",
+    spectralSamples: "Number of positive frequency lag bins available in the ACF. It is limited by the selected spectral window and frequency resolution.",
+  }
+  return tooltips[topic] || ""
+}
+
+function temporalTooltip(topic) {
+  const tooltips = {
+    summary: "Temporal structure analysis uses the selected-band event profile. It estimates significant substructure and fluctuation power, not the full burst duration.",
+    minStructure: "Smallest scale where either the boxcar or Gaussian matched filter exceeds the trials-corrected threshold. This is a minimum significant structure scale, not total burst width.",
+    waveletScale: "Smallest wavelet scale with significant localized curvature. Useful for sharp peaks, dips, or substructure; it can be unavailable for smooth broad bursts.",
+    psdSlope: "Power-law slope of the averaged periodogram. Larger slopes indicate stronger low-frequency/red-noise structure relative to high-frequency fluctuations.",
+    crossoverFrequency: "Frequency where the fitted power-law component equals the fitted white-noise floor. Out-of-band values are stored but not drawn as an in-band marker.",
+    crossoverBand: "Yellow band showing the stored 3-sigma uncertainty interval on crossover frequency after propagating the fitted covariance of A, alpha, and C. The band is clipped to the plotted frequency range.",
+    fitburstCrossCheck: "Smallest fitted component width from the optional fitburst model. This is model-dependent and should be compared with non-parametric width estimates.",
+    segmentLength: "Time span used for each averaged periodogram segment. Longer segments improve frequency resolution but reduce the number of averages.",
+    segments: "Number of independent event-profile chunks used for the averaged PSD. More segments reduce noise but require shorter segment length.",
+    frequencyResolution: "Spacing between averaged PSD frequency bins, set by the segment length.",
+    nyquist: "Highest fluctuation frequency allowed by the current time resolution.",
+    rawBins: "Number of bins in the full-event raw periodogram before segment averaging.",
+    averagedBins: "Number of frequency bins in the averaged PSD used for the power-law fit.",
+    psdFit: "Status of the averaged PSD power-law fit. Underconstrained or failed fits should not be interpreted physically.",
+    noiseFloor: "Constant PSD floor in the power-law model. It captures approximately white-noise power left after the red-noise component.",
+    scatteringTau: "Model-fitted scattering timescale from the Fitting tab when available. It is not derived from the temporal-structure scale scan.",
+    scalePlot: "Matched filters smooth the event profile at each trial scale and report the strongest S/N. Rising curves at the right edge mean broad emission or no preferred scale within the tested range.",
+    boxcarTrace: "Boxcar filter response. Sensitive to broad, flat-topped, or integrated positive emission at each tested scale.",
+    gaussianTrace: "Gaussian filter response. Sensitive to compact Gaussian-like components at each tested scale.",
+    waveletTrace: "Zero-mean wavelet response. Sensitive to localized peaks/curvature and less sensitive to smooth broad envelopes.",
+    matchedThreshold: "Trials-corrected significance threshold for boxcar and Gaussian matched-filter detections.",
+    waveletThreshold: "Trials-corrected significance threshold for wavelet detections.",
+    psdPlot: "Periodogram of the event profile. High frequencies correspond to fine time structure; low frequencies correspond to broad envelopes or slow trends.",
+    rawPeriodogram: "Full-event periodogram. It has high detail but is noisier than the averaged PSD.",
+    averagedPsd: "Periodogram averaged over event segments. It is the burst PSD used for the power-law plus constant fit.",
+    noisePsd: "Noise power spectrum from contiguous off-pulse profile runs, averaged with the same segment length as the burst PSD. Separate off-pulse windows are not joined across gaps.",
+    powerLawComponent: "Fitted red-noise component A f^-alpha from the averaged burst PSD model.",
+    whiteNoiseComponent: "Fitted constant C from the averaged burst PSD model.",
+    residualRatio: "Ratio of the averaged burst PSD to the full fitted model A f^-alpha + C. Values near one follow the model.",
+    psdFitCurve: "Best-fit power-law plus constant noise floor for the averaged PSD, when the fit is stable.",
+  }
+  return tooltips[topic] || ""
+}
+
+function hasAcfDiagnostics(diagnostics) {
+  return (
+    Array.isArray(diagnostics?.temporal_acf)
+    && diagnostics.temporal_acf.length > 0
+    && Array.isArray(diagnostics?.temporal_acf_lags_ms)
+    && diagnostics.temporal_acf_lags_ms.length > 0
+    && Array.isArray(diagnostics?.spectral_acf)
+    && diagnostics.spectral_acf.length > 0
+    && Array.isArray(diagnostics?.spectral_acf_lags_mhz)
+    && diagnostics.spectral_acf_lags_mhz.length > 0
+  )
+}
+
+async function renderAcfPlot(results) {
+  const diagnostics = results?.diagnostics || {}
+  if (!hasAcfDiagnostics(diagnostics)) {
+    acfPlot.classList.add("is-empty")
+    Plotly.purge(acfPlot)
+    acfPlot.replaceChildren()
+    return
+  }
+
+  acfPlot.classList.remove("is-empty")
+  await Plotly.react(
+    "acfPlot",
+    [
+      {
+        x: diagnostics.temporal_acf_lags_ms,
+        y: diagnostics.temporal_acf,
+        mode: "lines",
+        type: "scattergl",
+        line: { color: plotTheme.accent, width: 2.2 },
+        name: "Temporal ACF",
+        hovertemplate: "Lag %{x:.4f} ms<br>ACF %{y:.4f}<extra></extra>",
+      },
+      {
+        x: diagnostics.spectral_acf_lags_mhz,
+        y: diagnostics.spectral_acf,
+        xaxis: "x2",
+        yaxis: "y2",
+        mode: "lines",
+        type: "scattergl",
+        line: { color: plotTheme.accentAlt, width: 2.2 },
+        name: "Spectral ACF",
+        hovertemplate: "Lag %{x:.4f} MHz<br>ACF %{y:.4f}<extra></extra>",
+      },
+    ],
+    {
+      margin: { l: 72, r: 24, t: 38, b: 54 },
+      paper_bgcolor: plotTheme.paperBg,
+      plot_bgcolor: plotTheme.plotBg,
+      showlegend: true,
+      legend: {
+        orientation: "h",
+        yanchor: "bottom",
+        y: 1.01,
+        xanchor: "left",
+        x: 0,
+        bgcolor: "rgba(255,255,255,0.7)",
+        bordercolor: "rgba(50,50,50,0.08)",
+        borderwidth: 1,
+        font: { size: 12 },
+      },
+      hovermode: "closest",
+      xaxis: {
+        domain: [0.0, 0.48],
+        title: "Temporal Lag (ms)",
+        automargin: true,
+        ticks: "outside",
+        ticklen: 6,
+        showline: true,
+        linecolor: "rgba(50, 50, 50, 0.22)",
+        mirror: true,
+        gridcolor: plotTheme.grid,
+        range: acfLagRange(diagnostics.temporal_acf_lags_ms),
+      },
+      yaxis: {
+        domain: [0.0, 1.0],
+        title: "Normalized ACF",
+        automargin: true,
+        range: [-0.05, 1.05],
+        ticks: "outside",
+        ticklen: 6,
+        showline: true,
+        linecolor: "rgba(50, 50, 50, 0.22)",
+        mirror: true,
+        gridcolor: plotTheme.grid,
+      },
+      xaxis2: {
+        domain: [0.52, 1.0],
+        title: "Spectral Lag (MHz)",
+        automargin: true,
+        ticks: "outside",
+        ticklen: 6,
+        showline: true,
+        linecolor: "rgba(50, 50, 50, 0.22)",
+        mirror: true,
+        gridcolor: plotTheme.grid,
+        range: acfLagRange(diagnostics.spectral_acf_lags_mhz),
+      },
+      yaxis2: {
+        domain: [0.0, 1.0],
+        title: "Normalized ACF",
+        automargin: true,
+        range: [-0.05, 1.05],
+        ticks: "outside",
+        ticklen: 6,
+        showline: true,
+        linecolor: "rgba(50, 50, 50, 0.22)",
+        mirror: true,
+        gridcolor: plotTheme.grid,
+      },
+      shapes: [
+        horizontalLine(0.5, ...acfLagRange(diagnostics.temporal_acf_lags_ms), plotTheme.warning, "dash", "x", "y"),
+        horizontalLine(0.5, ...acfLagRange(diagnostics.spectral_acf_lags_mhz), plotTheme.warning, "dash", "x2", "y2"),
+      ],
+    },
+    { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
+  )
+}
+
+function acfLagRange(values) {
+  const finite = Array.isArray(values)
+    ? values.map(Number).filter(Number.isFinite)
+    : []
+  if (!finite.length) {
+    return [0, 1]
+  }
+  const low = Math.min(...finite)
+  const high = Math.max(...finite)
+  if (high > low) {
+    return [low, high]
+  }
+  const pad = Math.max(Math.abs(low) * 0.1, 1)
+  return [low - pad, high + pad]
+}
+
 async function renderTemporalScalePlot(temporalStructure) {
   if (!temporalStructure || temporalStructure.status !== "ok") {
     temporalScalePlot.classList.add("is-empty")
@@ -1736,6 +2186,13 @@ async function renderTemporalScalePlot(temporalStructure) {
   }
 
   temporalScalePlot.classList.remove("is-empty")
+  const scaleValues = Array.isArray(temporalStructure.matched_filter_scales_ms)
+    ? temporalStructure.matched_filter_scales_ms.map(Number).filter((value) => Number.isFinite(value) && value > 0)
+    : []
+  const scaleTicks = powerOfTenTicks(
+    scaleValues.length ? Math.min(...scaleValues) : 1e-3,
+    scaleValues.length ? Math.max(...scaleValues) : 1,
+  )
   const traces = [
     {
       x: temporalStructure.matched_filter_scales_ms,
@@ -1744,7 +2201,7 @@ async function renderTemporalScalePlot(temporalStructure) {
       type: "scattergl",
       line: { color: plotTheme.accent, width: 2 },
       name: "Boxcar matched filter",
-      hovertemplate: "Scale %{x:.4f} ms<br>Significance %{y:.3f} sigma<extra></extra>",
+      hovertemplate: `Boxcar scale %{x:.4f} ms<br>Peak response %{y:.3f} sigma<br>${escapeHtml(temporalTooltip("boxcarTrace"))}<extra></extra>`,
     },
     {
       x: temporalStructure.matched_filter_scales_ms,
@@ -1753,7 +2210,7 @@ async function renderTemporalScalePlot(temporalStructure) {
       type: "scattergl",
       line: { color: plotTheme.accentAlt, width: 2 },
       name: "Gaussian matched filter",
-      hovertemplate: "Scale %{x:.4f} ms<br>Significance %{y:.3f} sigma<extra></extra>",
+      hovertemplate: `Gaussian scale %{x:.4f} ms<br>Peak response %{y:.3f} sigma<br>${escapeHtml(temporalTooltip("gaussianTrace"))}<extra></extra>`,
     },
     {
       x: temporalStructure.wavelet_scales_ms,
@@ -1762,7 +2219,7 @@ async function renderTemporalScalePlot(temporalStructure) {
       type: "scattergl",
       line: { color: plotTheme.muted, width: 2, dash: "dot" },
       name: "Wavelet scan",
-      hovertemplate: "Scale %{x:.4f} ms<br>Significance %{y:.3f} sigma<extra></extra>",
+      hovertemplate: `Wavelet scale %{x:.4f} ms<br>Response %{y:.3f} sigma<br>${escapeHtml(temporalTooltip("waveletTrace"))}<extra></extra>`,
     },
   ]
   if (typeof temporalStructure.matched_filter_threshold_sigma === "number" && Array.isArray(temporalStructure.matched_filter_scales_ms) && temporalStructure.matched_filter_scales_ms.length > 0) {
@@ -1773,7 +2230,7 @@ async function renderTemporalScalePlot(temporalStructure) {
       type: "scattergl",
       line: { color: plotTheme.warning, width: 1.5, dash: "dash" },
       name: "Matched threshold",
-      hoverinfo: "skip",
+      hovertemplate: `${escapeHtml(temporalTooltip("matchedThreshold"))}<br>Threshold %{y:.3f} sigma<extra></extra>`,
     })
   }
   if (typeof temporalStructure.wavelet_threshold_sigma === "number" && Array.isArray(temporalStructure.wavelet_scales_ms) && temporalStructure.wavelet_scales_ms.length > 0) {
@@ -1784,7 +2241,7 @@ async function renderTemporalScalePlot(temporalStructure) {
       type: "scattergl",
       line: { color: plotTheme.alert, width: 1.5, dash: "dash" },
       name: "Wavelet threshold",
-      hoverinfo: "skip",
+      hovertemplate: `${escapeHtml(temporalTooltip("waveletThreshold"))}<br>Threshold %{y:.3f} sigma<extra></extra>`,
     })
   }
 
@@ -1792,18 +2249,45 @@ async function renderTemporalScalePlot(temporalStructure) {
     "temporalScalePlot",
     traces,
     {
-      margin: { l: 70, r: 24, t: 18, b: 54 },
+      margin: { l: 82, r: 24, t: 30, b: 64 },
       paper_bgcolor: plotTheme.paperBg,
-      plot_bgcolor: plotTheme.plotBg,
+      plot_bgcolor: "rgba(255,255,255,0.88)",
       showlegend: true,
-      legend: { orientation: "h" },
+      legend: {
+        orientation: "h",
+        yanchor: "bottom",
+        y: 1.0,
+        xanchor: "left",
+        x: 0,
+        bgcolor: "rgba(255,255,255,0.7)",
+        bordercolor: "rgba(50,50,50,0.08)",
+        borderwidth: 1,
+        font: { size: 12 },
+      },
+      hovermode: "closest",
       xaxis: {
         title: "Scale (ms)",
         type: "log",
+        tickvals: scaleTicks,
+        ticktext: powerOfTenTickText(scaleTicks, formatScaleTickLabelMs),
+        ticks: "outside",
+        ticklen: 6,
+        showline: true,
+        linecolor: "rgba(50, 50, 50, 0.22)",
+        mirror: true,
+        exponentformat: "power",
+        showexponent: "none",
+        automargin: true,
         gridcolor: plotTheme.grid,
       },
       yaxis: {
         title: "Detection Significance (sigma)",
+        ticks: "outside",
+        ticklen: 6,
+        showline: true,
+        linecolor: "rgba(50, 50, 50, 0.22)",
+        mirror: true,
+        automargin: true,
         gridcolor: plotTheme.grid,
       },
     },
@@ -1820,58 +2304,219 @@ async function renderSpectralPlot(temporalStructure) {
   }
 
   spectralPlot.classList.remove("is-empty")
+  const averagedFreq = Array.isArray(temporalStructure.averaged_psd_freq_hz) ? temporalStructure.averaged_psd_freq_hz : []
+  const averagedPower = Array.isArray(temporalStructure.averaged_psd_power) ? temporalStructure.averaged_psd_power : []
+  const positiveFreq = averagedFreq.map(Number).filter((value) => Number.isFinite(value) && value > 0)
+  const xMin = positiveFreq.length ? Math.min(...positiveFreq) : 1
+  const xMax = positiveFreq.length ? Math.max(...positiveFreq) : 10
+  const xTicks = powerOfTenTicks(xMin, xMax)
+  const residualTickValues = [0.25, 0.5, 1, 2, 4]
   const traces = [
     {
-      x: temporalStructure.raw_periodogram_freq_hz,
-      y: temporalStructure.raw_periodogram_power,
+      x: averagedFreq,
+      y: averagedPower,
       mode: "lines",
       type: "scattergl",
-      line: { color: plotTheme.neutral, width: 1.25 },
-      name: "Raw periodogram",
-      opacity: 0.7,
-      hovertemplate: "Raw %{x:.3f} Hz<br>Power %{y:.4g}<extra></extra>",
-    },
-    {
-      x: temporalStructure.averaged_psd_freq_hz,
-      y: temporalStructure.averaged_psd_power,
-      mode: "lines",
-      type: "scattergl",
-      line: { color: plotTheme.accent, width: 2 },
-      name: "Averaged PSD",
-      hovertemplate: "Frequency %{x:.3f} Hz<br>Power %{y:.4g}<extra></extra>",
+      line: { color: plotTheme.neutral, width: 1.35 },
+      name: "Burst PSD",
+      hovertemplate: `Frequency %{x:.3f} Hz<br>Power %{y:.4g}<br>${escapeHtml(temporalTooltip("averagedPsd"))}<extra></extra>`,
     },
   ]
-  if (temporalStructure.power_law_a !== null && temporalStructure.power_law_a !== undefined && temporalStructure.power_law_alpha !== null && temporalStructure.power_law_alpha !== undefined && Array.isArray(temporalStructure.averaged_psd_freq_hz) && temporalStructure.averaged_psd_freq_hz.length > 0) {
-    const powerC = typeof temporalStructure.power_law_c === "number" ? temporalStructure.power_law_c : 0
-    const fitPower = temporalStructure.averaged_psd_freq_hz.map(f => f > 0 ? temporalStructure.power_law_a * Math.pow(f, -temporalStructure.power_law_alpha) + powerC : null)
+  if (Array.isArray(temporalStructure.noise_psd_freq_hz) && Array.isArray(temporalStructure.noise_psd_power) && temporalStructure.noise_psd_freq_hz.length > 0) {
     traces.push({
-      x: temporalStructure.averaged_psd_freq_hz,
-      y: fitPower,
+      x: temporalStructure.noise_psd_freq_hz,
+      y: temporalStructure.noise_psd_power,
       mode: "lines",
       type: "scattergl",
-      line: { color: plotTheme.accentAlt, width: 2, dash: "dash" },
-      name: "Averaged PSD fit",
-      hovertemplate: "Fit Power %{y:.4g}<extra></extra>",
+      line: { color: "#88d8dd", width: 1.1 },
+      opacity: 0.85,
+      name: "Noise PSD",
+      hovertemplate: `Noise frequency %{x:.3f} Hz<br>Power %{y:.4g}<br>${escapeHtml(temporalTooltip("noisePsd"))}<extra></extra>`,
     })
+  }
+
+  const shapes = []
+  const annotations = []
+
+  const hasModel = (
+    typeof temporalStructure.power_law_a === "number"
+    && typeof temporalStructure.power_law_alpha === "number"
+    && typeof temporalStructure.power_law_c === "number"
+    && temporalStructure.power_law_a > 0
+    && temporalStructure.power_law_alpha > 0
+    && temporalStructure.power_law_c > 0
+    && averagedFreq.length > 0
+  )
+  if (hasModel) {
+    const powerLaw = averagedFreq.map((f) => f > 0 ? temporalStructure.power_law_a * Math.pow(f, -temporalStructure.power_law_alpha) : null)
+    const whiteNoise = averagedFreq.map((f) => f > 0 ? temporalStructure.power_law_c : null)
+    const modelPower = powerLaw.map((value) => value === null ? null : value + temporalStructure.power_law_c)
+    const residualRatio = averagedPower.map((value, index) => {
+      const model = modelPower[index]
+      return Number(value) > 0 && Number(model) > 0 ? Number(value) / Number(model) : null
+    })
+    traces.push(
+      {
+        x: averagedFreq,
+        y: powerLaw,
+        mode: "lines",
+        type: "scattergl",
+        line: { color: plotTheme.accent, width: 2, dash: "dash" },
+        name: "Power law",
+        hovertemplate: `Power-law component %{y:.4g}<br>${escapeHtml(temporalTooltip("powerLawComponent"))}<extra></extra>`,
+      },
+      {
+        x: averagedFreq,
+        y: whiteNoise,
+        mode: "lines",
+        type: "scattergl",
+        line: { color: plotTheme.accent, width: 1.8, dash: "dot" },
+        name: "White noise",
+        hovertemplate: `White-noise power %{y:.4g}<br>${escapeHtml(temporalTooltip("whiteNoiseComponent"))}<extra></extra>`,
+      },
+      {
+        x: averagedFreq,
+        y: residualRatio,
+        xaxis: "x2",
+        yaxis: "y2",
+        mode: "lines",
+        type: "scattergl",
+        line: { color: plotTheme.neutral, width: 1.15 },
+        name: "Residual ratio",
+        showlegend: false,
+        hovertemplate: `Frequency %{x:.3f} Hz<br>Residual ratio %{y:.4g}<br>${escapeHtml(temporalTooltip("residualRatio"))}<extra></extra>`,
+      },
+    )
+    shapes.push(horizontalLine(1.0, xMin, xMax, plotTheme.accent, "solid", "x2", "y2"))
+  }
+
+  const crossover = Number(temporalStructure.crossover_frequency_hz)
+  if (Number.isFinite(crossover) && crossover > 0 && positiveFreq.length > 0) {
+    const low = Number(temporalStructure.crossover_frequency_hz_3sigma_low)
+    const high = Number(temporalStructure.crossover_frequency_hz_3sigma_high)
+    if (Number.isFinite(low) && Number.isFinite(high)) {
+      const spanLow = Math.max(Math.min(low, high), xMin)
+      const spanHigh = Math.min(Math.max(low, high), xMax)
+      if (spanHigh > spanLow) {
+        shapes.push({
+          type: "rect",
+          xref: "x",
+          yref: "paper",
+          x0: spanLow,
+          x1: spanHigh,
+          y0: 0,
+          y1: 1,
+          fillcolor: "rgba(226, 161, 68, 0.20)",
+          line: { width: 0 },
+          layer: "below",
+        })
+      }
+    }
+    if (crossover >= xMin && crossover <= xMax) {
+      shapes.push({
+        type: "line",
+        xref: "x",
+        yref: "paper",
+        x0: crossover,
+        x1: crossover,
+        y0: 0,
+        y1: 1,
+        line: { color: "#e2a144", width: 2 },
+      })
+      annotations.push({
+        xref: "x",
+        yref: "paper",
+        x: crossover,
+        y: 1.02,
+        text: "crossover",
+        showarrow: false,
+        font: { color: "#8a5b12", size: 11 },
+      })
+    }
   }
 
   await Plotly.react(
     "spectralPlot",
     traces,
     {
-      margin: { l: 70, r: 24, t: 18, b: 54 },
+      margin: { l: 84, r: 28, t: 34, b: 70 },
       paper_bgcolor: plotTheme.paperBg,
-      plot_bgcolor: plotTheme.plotBg,
+      plot_bgcolor: "rgba(255,255,255,0.9)",
       showlegend: true,
-      legend: { orientation: "h" },
+      legend: {
+        orientation: "h",
+        yanchor: "bottom",
+        y: 1.0,
+        xanchor: "left",
+        x: 0,
+        bgcolor: "rgba(255,255,255,0.7)",
+        bordercolor: "rgba(50,50,50,0.08)",
+        borderwidth: 1,
+        font: { size: 12 },
+      },
+      annotations,
+      shapes,
       xaxis: {
-        title: "Frequency (Hz)",
         type: "log",
+        domain: [0, 1],
+        anchor: "y",
+        showticklabels: false,
+        tickvals: xTicks,
+        ticktext: powerOfTenTickText(xTicks, formatFrequencyTickLabel),
+        ticks: "outside",
+        ticklen: 6,
+        showline: true,
+        linecolor: "rgba(50, 50, 50, 0.22)",
+        mirror: true,
+        exponentformat: "power",
+        showexponent: "none",
+        automargin: true,
         gridcolor: plotTheme.grid,
       },
       yaxis: {
         title: "Power",
         type: "log",
+        domain: [0.26, 1.0],
+        ticks: "outside",
+        ticklen: 6,
+        showline: true,
+        linecolor: "rgba(50, 50, 50, 0.22)",
+        mirror: true,
+        exponentformat: "power",
+        showexponent: "all",
+        automargin: true,
+        gridcolor: plotTheme.grid,
+      },
+      xaxis2: {
+        title: "Frequency (Hz)",
+        type: "log",
+        domain: [0, 1],
+        anchor: "y2",
+        matches: "x",
+        tickvals: xTicks,
+        ticktext: powerOfTenTickText(xTicks, formatFrequencyTickLabel),
+        ticks: "outside",
+        ticklen: 6,
+        showline: true,
+        linecolor: "rgba(50, 50, 50, 0.22)",
+        mirror: true,
+        exponentformat: "power",
+        showexponent: "none",
+        automargin: true,
+        gridcolor: plotTheme.grid,
+      },
+      yaxis2: {
+        title: "PSD / Model",
+        type: "log",
+        domain: [0.0, 0.16],
+        tickvals: residualTickValues,
+        ticktext: residualTickValues.map((value) => String(value)),
+        ticks: "outside",
+        ticklen: 6,
+        showline: true,
+        linecolor: "rgba(50, 50, 50, 0.22)",
+        mirror: true,
+        automargin: true,
         gridcolor: plotTheme.grid,
       },
     },
@@ -1992,7 +2637,7 @@ function resultTile(label, value, variant, tooltip = "") {
   return `<div class="result-tile ${variant}"><span class="results-label">${escapeHtml(label)}${tooltipMarkup}</span><strong>${escapeHtml(value)}</strong></div>`
 }
 
-function renderMeasurementCard(label, value, { uncertainty = null, method = null, flags = [], details = "" } = {}) {
+function renderMeasurementCard(label, value, { uncertainty = null, method = null, flags = [], tooltip = "" } = {}) {
   const chips = Array.isArray(flags) && flags.length
     ? `<div class="measurement-flags">${flags.map((flag) => infoChip("Flag", formatMeasurementFlag(flag), flagTone(flag))).join("")}</div>`
     : ""
@@ -2000,69 +2645,45 @@ function renderMeasurementCard(label, value, { uncertainty = null, method = null
     method ? `<div class="measurement-meta"><span>Method</span><strong>${escapeHtml(String(method))}</strong></div>` : "",
     uncertainty ? `<div class="measurement-meta"><span>Uncertainty</span><strong>${escapeHtml(String(uncertainty))}</strong></div>` : "",
   ].join("")
+  const tooltipMarkup = tooltip
+    ? ` <button type="button" class="tooltip-icon measurement-tooltip" data-tooltip="${escapeHtml(tooltip)}" aria-label="${escapeHtml(`How ${label} is calculated: ${tooltip}`)}">?</button>`
+    : ""
   return `
     <article class="measurement-card">
       <div class="measurement-head">
-        <span class="results-label">${escapeHtml(label)}</span>
+        <span class="results-label measurement-label">${escapeHtml(label)}${tooltipMarkup}</span>
         <strong>${escapeHtml(value)}</strong>
       </div>
       ${meta ? `<div class="measurement-meta-grid">${meta}</div>` : ""}
       ${chips}
-      ${details}
     </article>
   `
 }
 
-function renderMeasurementDetails(provenance) {
-  if (!provenance) {
-    return ""
+function measurementTooltip(metric) {
+  const tooltips = {
+    toa: "Computed as start MJD plus the selected peak-bin time. Manual peak selections are used first; otherwise the strongest event/profile bin is used.",
+    peakSn: "Maximum off-pulse-normalized S/N inside the selected event window.",
+    integratedSn: "Sum of the off-pulse-normalized event profile divided by sqrt(number of finite event bins).",
+    fluence: "Sum of finite event-window S/N values times sampling time and the radiometer flux scale.",
+    peakFlux: "Peak event-window S/N times the radiometer flux scale from SEFD, effective bandwidth, sample time, and npol.",
   }
-  return `
-    <details class="details-card measurement-details">
-      <summary>Why this value?</summary>
-      <div class="kv-list">
-        ${renderProvenanceItems(provenance)}
-      </div>
-    </details>
-  `
+  return tooltips[metric] || ""
 }
 
-function renderAcceptedWidthDetails(widthAnalysis, acceptedWidth, provenance, hasAcfFallback = false) {
-  const result = widthAnalysis?.results?.find((item) => item.method === acceptedWidth?.method)
-  const items = []
-  if (acceptedWidth?.method) {
-    items.push(["Accepted method", formatWidthMethod(acceptedWidth.method)])
-  }
+function acceptedWidthTooltip(acceptedWidth, hasAcfFallback = false) {
   if (hasAcfFallback) {
-    items.push(["Shown value", "ACF correlation-width fallback"])
-    items.push(["Interpretation", "Tracks coherence scale, not full burst extent"])
+    return "Fallback ACF width: sqrt(2) times the lag where the temporal autocorrelation falls to half maximum."
   }
-  if (result?.algorithm_name) {
-    items.push(["Algorithm", result.algorithm_name])
+
+  const tooltips = {
+    boxcar_equivalent: "Accepted Width from Width Comparison: summed positive event profile divided by peak amplitude, times time-bin spacing.",
+    gaussian_sigma: "Accepted Width from Width Comparison: sigma from a Gaussian fit to the selected event profile.",
+    gaussian_fwhm: "Accepted Width from Width Comparison: Gaussian-fit sigma times 2 * sqrt(2 * ln 2).",
+    fluence_percentile: "Accepted Width from Width Comparison: span between the configured low and high cumulative-fluence percentiles.",
+    acf_half_max: "Accepted Width from temporal ACF: sqrt(2) times the lag where the autocorrelation falls to half maximum.",
   }
-  if (Array.isArray(result?.event_window_ms) && result.event_window_ms.length === 2) {
-    items.push(["Event window", `${fmt(result.event_window_ms[0], 3)} to ${fmt(result.event_window_ms[1], 3)} ms`])
-  }
-  if (Array.isArray(result?.spectral_extent_mhz) && result.spectral_extent_mhz.length === 2) {
-    items.push(["Spectral window", `${fmt(result.spectral_extent_mhz[0], 3)} to ${fmt(result.spectral_extent_mhz[1], 3)} MHz`])
-  }
-  if (Array.isArray(result?.offpulse_windows_ms) && result.offpulse_windows_ms.length) {
-    items.push(["Off-pulse", result.offpulse_windows_ms.map((window) => `${fmt(window[0], 3)} to ${fmt(window[1], 3)} ms`).join(", ")])
-  } else if (provenance?.noise_basis) {
-    items.push(["Off-pulse", provenance.noise_basis])
-  }
-  const body = items
-    .map(([key, current]) => `<div class="kv-item"><span>${escapeHtml(key)}</span><strong>${escapeHtml(String(current))}</strong></div>`)
-    .join("")
-  if (!body) {
-    return ""
-  }
-  return `
-    <details class="details-card measurement-details">
-      <summary>Why this value?</summary>
-      <div class="kv-list">${body}</div>
-    </details>
-  `
+  return tooltips[acceptedWidth?.method] || "Accepted Width selected from Width Comparison and stored for export."
 }
 
 function renderWidthAnalysisSection(widthAnalysis) {
@@ -2348,14 +2969,38 @@ function syncDmPlots() {
 
 function syncFittingPlot() {
   const scatteringFit = state.view?.results?.diagnostics?.scattering_fit
-  if (!scatteringFit || state.activeAnalysisTab !== "fitting") {
+  if (state.activeAnalysisTab !== "fitting") {
+    fitGuessPlot.classList.add("is-empty")
+    Plotly.purge(fitGuessPlot)
+    fitGuessPlot.replaceChildren()
+    return
+  }
+  renderFitGuessPlot(state.view)
+  if (!scatteringFit) {
+    fittingSpectrumPlot.classList.add("is-empty")
+    Plotly.purge(fittingSpectrumPlot)
+    fittingSpectrumPlot.replaceChildren()
+    fittingProfilePlot.classList.add("is-empty")
+    Plotly.purge(fittingProfilePlot)
+    fittingProfilePlot.replaceChildren()
     return
   }
   renderFittingSpectrumPlot(scatteringFit)
   renderFittingProfilePlot(scatteringFit)
 }
 
+function syncAcfPlot() {
+  if (state.activeAnalysisTab !== "temporal") {
+    acfPlot.classList.add("is-empty")
+    Plotly.purge(acfPlot)
+    acfPlot.replaceChildren()
+    return
+  }
+  renderAcfPlot(state.view?.results)
+}
+
 function syncSpectralPlot() {
+  syncAcfPlot()
   const temporalStructure = state.view?.temporal_structure
   if (!temporalStructure || state.activeAnalysisTab !== "temporal" || temporalStructure.status !== "ok") {
     temporalScalePlot.classList.add("is-empty")
@@ -2431,6 +3076,129 @@ async function renderDmResidualPlot(optimization) {
     },
     { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
   )
+}
+
+async function renderFitGuessPlot(view) {
+  const x = view?.plot?.time_profile?.x_ms
+  const y = view?.plot?.time_profile?.y
+  if (!Array.isArray(x) || !Array.isArray(y) || !x.length || !y.length) {
+    fitGuessPlot.classList.add("is-empty")
+    Plotly.purge(fitGuessPlot)
+    fitGuessPlot.replaceChildren()
+    return
+  }
+
+  const rows = fitGuessRowsFromDom()
+  if (!rows.length) {
+    fitGuessPlot.classList.add("is-empty")
+    Plotly.purge(fitGuessPlot)
+    fitGuessPlot.replaceChildren()
+    return
+  }
+
+  const markerY = rows.map((row) => nearestPlotY(x, y, row.arrival_time_ms))
+  const widthShapes = rows.flatMap((row, index) => {
+    const color = index % 2 === 0 ? plotTheme.accentSoft : plotTheme.accentAltSoft
+    const lineColor = index % 2 === 0 ? plotTheme.accent : plotTheme.accentAlt
+    return [
+      {
+        type: "rect",
+        xref: "x",
+        yref: "paper",
+        x0: Number(row.arrival_time_ms) - Number(row.width_ms),
+        x1: Number(row.arrival_time_ms) + Number(row.width_ms),
+        y0: 0,
+        y1: 1,
+        fillcolor: color,
+        line: { width: 0 },
+        layer: "below",
+      },
+      {
+        type: "line",
+        xref: "x",
+        yref: "paper",
+        x0: Number(row.arrival_time_ms),
+        x1: Number(row.arrival_time_ms),
+        y0: 0,
+        y1: 1,
+        line: { color: lineColor, width: 1.6, dash: "dot" },
+      },
+    ]
+  })
+
+  fitGuessPlot.classList.remove("is-empty")
+  await Plotly.react(
+    "fitGuessPlot",
+    [
+      {
+        x,
+        y,
+        type: "scatter",
+        mode: "lines",
+        line: { color: plotTheme.charcoalSoft, width: 1.5 },
+        name: "Profile",
+        hovertemplate: "%{x:.3f} ms<br>%{y:.3f}<extra>Profile</extra>",
+      },
+      {
+        x: rows.map((row) => row.arrival_time_ms),
+        y: markerY,
+        text: rows.map((row) => row.source_label || row.label || "Component"),
+        type: "scatter",
+        mode: "markers+text",
+        textposition: "top center",
+        marker: { color: plotTheme.accent, size: 8, line: { color: plotTheme.plotBg, width: 1 } },
+        name: "Initial guesses",
+        hovertemplate: "%{text}<br>%{x:.3f} ms<extra>Initial</extra>",
+      },
+    ],
+    {
+      margin: { l: 64, r: 24, t: 18, b: 48 },
+      paper_bgcolor: plotTheme.paperBg,
+      plot_bgcolor: plotTheme.plotBg,
+      showlegend: false,
+      hovermode: "closest",
+      shapes: widthShapes,
+      xaxis: { title: "Time (ms)", automargin: true, gridcolor: plotTheme.grid },
+      yaxis: { title: "Profile S/N", automargin: true, gridcolor: plotTheme.grid, zeroline: true, zerolinecolor: plotTheme.gridStrong },
+    },
+    { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
+  )
+}
+
+function fitGuessRowsFromDom() {
+  return Array.from(fitGuessContent.querySelectorAll("[data-fit-guess-row]"))
+    .map((row, index) => {
+      const arrival = readFitGuessNumber(row, "arrival_time_ms")
+      const width = readFitGuessNumber(row, "width_ms")
+      const tau = readFitGuessNumber(row, "tau_ms")
+      const logAmplitude = readFitGuessNumber(row, "log_amplitude")
+      if (![arrival, width, tau, logAmplitude].every((value) => Number.isFinite(value))) {
+        return null
+      }
+      return {
+        label: `Component ${index + 1}`,
+        source_label: row.dataset.sourceLabel || `Component ${index + 1}`,
+        arrival_time_ms: arrival,
+        width_ms: width,
+        tau_ms: tau,
+        log_amplitude: logAmplitude,
+      }
+    })
+    .filter(Boolean)
+}
+
+function nearestPlotY(xValues, yValues, x) {
+  let bestIndex = 0
+  let bestDistance = Infinity
+  for (let index = 0; index < xValues.length; index += 1) {
+    const distance = Math.abs(Number(xValues[index]) - Number(x))
+    if (Number.isFinite(distance) && distance < bestDistance) {
+      bestDistance = distance
+      bestIndex = index
+    }
+  }
+  const value = Number(yValues[bestIndex])
+  return Number.isFinite(value) ? value : 0
 }
 
 async function renderFittingProfilePlot(scatteringFit) {
@@ -2657,18 +3425,42 @@ function renderResidualTable(optimization) {
   `
 }
 
-function renderScatteringParameterTable(parameters, uncertainties) {
-  const rows = [
-    parameterRow("Arrival Time", parameters.arrival_time?.[0], uncertainties.arrival_time?.[0], 1e3, "ms"),
-    parameterRow("Intrinsic Width", parameters.burst_width?.[0], uncertainties.burst_width?.[0], 1e3, "ms"),
-    parameterRow("Scattering Tau", parameters.scattering_timescale?.[0], uncertainties.scattering_timescale?.[0], 1e3, "ms"),
-    parameterRow("Log Amplitude", parameters.amplitude?.[0], uncertainties.amplitude?.[0], 1.0, ""),
-    parameterRow("DM", parameters.dm?.[0], uncertainties.dm?.[0], 1.0, "pc/cm³"),
-    parameterRow("DM Index", parameters.dm_index?.[0], uncertainties.dm_index?.[0], 1.0, ""),
-    parameterRow("Spectral Index", parameters.spectral_index?.[0], uncertainties.spectral_index?.[0], 1.0, ""),
-    parameterRow("Spectral Running", parameters.spectral_running?.[0], uncertainties.spectral_running?.[0], 1.0, ""),
-    parameterRow("Scattering Index", parameters.scattering_index?.[0], uncertainties.scattering_index?.[0], 1.0, ""),
-  ].filter(Boolean)
+function renderScatteringParameterTable(initialParameters, bestfitParameters, uncertainties) {
+  const definitions = [
+    ["Arrival Time", "arrival_time", 1e3, "ms"],
+    ["Intrinsic Width", "burst_width", 1e3, "ms"],
+    ["Scattering Tau", "scattering_timescale", 1e3, "ms"],
+    ["Log Amplitude", "amplitude", 1.0, ""],
+    ["DM", "dm", 1.0, "pc/cm³"],
+    ["DM Index", "dm_index", 1.0, ""],
+    ["Spectral Index", "spectral_index", 1.0, ""],
+    ["Spectral Running", "spectral_running", 1.0, ""],
+    ["Scattering Index", "scattering_index", 1.0, ""],
+  ]
+  const componentCount = Math.max(
+    0,
+    ...definitions.map(([, key]) => Math.max(
+      Array.isArray(initialParameters?.[key]) ? initialParameters[key].length : 0,
+      Array.isArray(bestfitParameters?.[key]) ? bestfitParameters[key].length : 0,
+    )),
+  )
+  const rows = []
+  for (let componentIndex = 0; componentIndex < componentCount; componentIndex += 1) {
+    for (const [label, key, scale, unit] of definitions) {
+      const row = parameterComparisonRow(
+        componentIndex,
+        label,
+        initialParameters?.[key]?.[componentIndex],
+        bestfitParameters?.[key]?.[componentIndex],
+        uncertainties?.[key]?.[componentIndex],
+        scale,
+        unit,
+      )
+      if (row) {
+        rows.push(row)
+      }
+    }
+  }
 
   if (!rows.length) {
     return ""
@@ -2676,12 +3468,14 @@ function renderScatteringParameterTable(parameters, uncertainties) {
 
   return `
     <details class="details-card results-details" open>
-      <summary>All Best-Fit Parameters</summary>
+      <summary>Initial vs Best-Fit Parameters</summary>
       <div class="residual-table-wrap">
         <table class="residual-table">
           <thead>
             <tr>
+              <th>Component</th>
               <th>Parameter</th>
+              <th>Initial</th>
               <th>Best Fit</th>
               <th>Uncertainty</th>
             </tr>
@@ -2695,18 +3489,23 @@ function renderScatteringParameterTable(parameters, uncertainties) {
   `
 }
 
-function parameterRow(label, value, uncertainty, scale, unit) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+function parameterComparisonRow(componentIndex, label, initial, bestfit, uncertainty, scale, unit) {
+  const hasInitial = initial !== null && initial !== undefined && !Number.isNaN(Number(initial))
+  const hasBestfit = bestfit !== null && bestfit !== undefined && !Number.isNaN(Number(bestfit))
+  if (!hasInitial && !hasBestfit) {
     return ""
   }
-  const scaledValue = Number(value) * scale
+  const scaledInitial = hasInitial ? `${fmt(Number(initial) * scale, 3)}${unit ? ` ${unit}` : ""}` : "n/a"
+  const scaledBestfit = hasBestfit ? `${fmt(Number(bestfit) * scale, 3)}${unit ? ` ${unit}` : ""}` : "n/a"
   const scaledUncertainty = uncertainty === null || uncertainty === undefined || Number.isNaN(Number(uncertainty))
     ? "n/a"
     : `±${fmt(Number(uncertainty) * scale, 3)}${unit ? ` ${unit}` : ""}`
   return (
     `<tr>` +
+    `<td>${escapeHtml(`Component ${componentIndex + 1}`)}</td>` +
     `<td>${escapeHtml(label)}</td>` +
-    `<td>${escapeHtml(`${fmt(scaledValue, 3)}${unit ? ` ${unit}` : ""}`)}</td>` +
+    `<td>${escapeHtml(scaledInitial)}</td>` +
+    `<td>${escapeHtml(scaledBestfit)}</td>` +
     `<td>${escapeHtml(scaledUncertainty)}</td>` +
     `</tr>`
   )
@@ -3057,6 +3856,9 @@ function updateControlStates() {
     control.disabled = isBusy
   }
 
+  const fitGuessSource = state.view?.fitburst_guess?.source
+  const fitGuessFromAnnotations = fitGuessSource === "component_regions" || fitGuessSource === "manual_peaks"
+  fitComponentsInput.disabled = !hasSession || isBusy || fitGuessFromAnnotations
   notesInput.disabled = !hasSession || isBusy
   dmMetricInput.disabled = !hasSession || isBusy
   exportPlotPng.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("plots")
@@ -3618,6 +4420,96 @@ function formatPowerLawFitStatus(status) {
     unavailable: "Unavailable",
   }
   return labels[status] || status || "Unknown"
+}
+
+function formatCrossoverFrequency(temporalStructure) {
+  const value = temporalStructure?.crossover_frequency_hz
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "n/a"
+  }
+  const status = temporalStructure?.crossover_frequency_status
+  const suffix = status === "out_of_band" ? " (out of band)" : ""
+  return `${fmt(value, 3)} Hz${suffix}`
+}
+
+function formatCrossoverInterval(temporalStructure) {
+  const low = Number(temporalStructure?.crossover_frequency_hz_3sigma_low)
+  const high = Number(temporalStructure?.crossover_frequency_hz_3sigma_high)
+  if (!Number.isFinite(low) || !Number.isFinite(high)) {
+    return "n/a"
+  }
+  const start = Math.min(low, high)
+  const end = Math.max(low, high)
+  return `${fmt(start, 3)} to ${fmt(end, 3)} Hz`
+}
+
+function powerOfTenTicks(minValue, maxValue) {
+  const min = Number(minValue)
+  const max = Number(maxValue)
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max <= 0 || max < min) {
+    return []
+  }
+  const ticks = []
+  const minExponent = Math.floor(Math.log10(min))
+  const maxExponent = Math.ceil(Math.log10(max))
+  for (let exponent = minExponent; exponent <= maxExponent; exponent += 1) {
+    const value = 10 ** exponent
+    if (value >= min * 0.999 && value <= max * 1.001) {
+      ticks.push(value)
+    }
+  }
+  return ticks
+}
+
+function powerOfTenTickText(ticks, formatter = null) {
+  return ticks.map((value) => {
+    if (typeof formatter === "function") {
+      return formatter(value)
+    }
+    const exponent = Math.round(Math.log10(Number(value)))
+    return exponent === 0 ? "1" : `10<sup>${exponent}</sup>`
+  })
+}
+
+function formatLogTickNumber(value, maximumFractionDigits = 2) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) {
+    return ""
+  }
+  return numeric.toLocaleString(undefined, {
+    maximumFractionDigits,
+    minimumFractionDigits: 0,
+    useGrouping: false,
+  })
+}
+
+function formatFrequencyTickLabel(value) {
+  const frequency = Number(value)
+  if (!Number.isFinite(frequency) || frequency <= 0) {
+    return ""
+  }
+  if (frequency >= 1e6) {
+    return `${formatLogTickNumber(frequency / 1e6, frequency >= 1e7 ? 0 : 1)} MHz`
+  }
+  if (frequency >= 1e3) {
+    return `${formatLogTickNumber(frequency / 1e3, frequency >= 1e4 ? 0 : 1)} kHz`
+  }
+  return `${formatLogTickNumber(frequency, frequency >= 10 ? 0 : 1)} Hz`
+}
+
+function formatScaleTickLabelMs(value) {
+  const scaleMs = Number(value)
+  if (!Number.isFinite(scaleMs) || scaleMs <= 0) {
+    return ""
+  }
+  if (scaleMs >= 1) {
+    return `${formatLogTickNumber(scaleMs, scaleMs >= 10 ? 0 : 1)} ms`
+  }
+  const scaleUs = scaleMs * 1e3
+  if (scaleUs >= 1) {
+    return `${formatLogTickNumber(scaleUs, scaleUs >= 10 ? 0 : 1)} us`
+  }
+  return `${formatLogTickNumber(scaleMs * 1e6, 0)} ns`
 }
 
 function renderProvenanceItems(provenance) {

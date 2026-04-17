@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from importlib import import_module
 from math import ceil, floor
 from typing import Any
@@ -16,6 +16,7 @@ MIN_EVENT_BINS = 4
 MIN_SEGMENT_BINS = 2
 MIN_POWER_LAW_BINS = 12
 DEFAULT_SIGNIFICANCE_SIGMA = 5.0
+CROSSOVER_UNCERTAINTY_SIGMA = 3.0
 FWHM_PER_SIGMA = float(2.0 * np.sqrt(2.0 * np.log(2.0)))
 
 
@@ -119,6 +120,84 @@ def _raw_periodogram(event_series: np.ndarray, tsamp_ms: float) -> tuple[np.ndar
         float(freq_hz[1] - freq_hz[0]),
         float(0.5 / dt_sec),
     )
+
+
+def _compute_noise_psd(
+    offpulse_series_runs: Sequence[np.ndarray] | None,
+    *,
+    tsamp_ms: float,
+    segment_bins: int,
+    Lightcurve: type[Any],
+    AveragedPowerspectrum: type[Any],
+) -> dict[str, Any]:
+    if not offpulse_series_runs or segment_bins < MIN_SEGMENT_BINS:
+        return {
+            "noise_psd_freq_hz": np.array([], dtype=float),
+            "noise_psd_power": np.array([], dtype=float),
+            "noise_psd_segment_count": None,
+        }
+
+    dt_sec = float(tsamp_ms / 1e3)
+    segment_size_sec = float(segment_bins * dt_sec)
+    weighted_power: np.ndarray | None = None
+    reference_freq: np.ndarray | None = None
+    total_segments = 0
+
+    for run in offpulse_series_runs:
+        series = np.asarray(run, dtype=float)
+        if series.size < segment_bins or not np.isfinite(series).any():
+            continue
+
+        expected_segments = int(series.size // segment_bins)
+        if expected_segments < 1:
+            continue
+
+        time_sec = np.arange(series.size, dtype=float) * dt_sec
+        counts = np.nan_to_num(series, nan=0.0, posinf=0.0, neginf=0.0)
+        try:
+            lightcurve = Lightcurve(
+                time=time_sec,
+                counts=counts,
+                dt=dt_sec,
+                err_dist="gauss",
+                skip_checks=True,
+            )
+            spectrum = AveragedPowerspectrum(
+                lightcurve,
+                segment_size=segment_size_sec,
+                norm="none",
+                silent=True,
+                skip_checks=True,
+            )
+        except Exception:
+            continue
+
+        freq_hz = np.asarray(getattr(spectrum, "freq", []), dtype=float)
+        power = np.asarray(getattr(spectrum, "power", []), dtype=float)
+        segment_count = int(getattr(spectrum, "m", expected_segments) or expected_segments)
+        if freq_hz.size == 0 or power.size == 0 or freq_hz.shape != power.shape or segment_count <= 0:
+            continue
+        if reference_freq is None:
+            reference_freq = freq_hz
+            weighted_power = np.zeros_like(power, dtype=float)
+        elif freq_hz.shape != reference_freq.shape or not np.allclose(freq_hz, reference_freq, rtol=1e-7, atol=1e-12):
+            continue
+        assert weighted_power is not None
+        weighted_power += power * float(segment_count)
+        total_segments += segment_count
+
+    if reference_freq is None or weighted_power is None or total_segments <= 0:
+        return {
+            "noise_psd_freq_hz": np.array([], dtype=float),
+            "noise_psd_power": np.array([], dtype=float),
+            "noise_psd_segment_count": None,
+        }
+
+    return {
+        "noise_psd_freq_hz": np.asarray(reference_freq, dtype=float),
+        "noise_psd_power": np.asarray(weighted_power / float(total_segments), dtype=float),
+        "noise_psd_segment_count": int(total_segments),
+    }
 
 
 def _build_scale_ladder(event_bin_count: int) -> np.ndarray:
@@ -348,6 +427,80 @@ def _fit_power_law_model(
         "power_law_a_err": a_err,
         "power_law_alpha_err": alpha_err,
         "power_law_c_err": c_err,
+        "power_law_f_ref": f_ref,
+        "power_law_log_a_ref": log_a_ref_opt,
+        "power_law_log_c": log_c_opt,
+        "power_law_param_cov": cov,
+    }
+
+
+def _fit_crossover_frequency(power_law: dict[str, Any], freq_hz: np.ndarray) -> dict[str, float | str | None]:
+    unavailable = {
+        "crossover_frequency_hz": None,
+        "crossover_frequency_status": "unavailable",
+        "crossover_frequency_hz_3sigma_low": None,
+        "crossover_frequency_hz_3sigma_high": None,
+    }
+    if power_law.get("fit_status") != "ok":
+        return unavailable
+
+    a = power_law.get("power_law_a")
+    alpha = power_law.get("power_law_alpha")
+    c = power_law.get("power_law_c")
+    if not all(isinstance(value, (int, float)) and np.isfinite(value) and value > 0 for value in (a, alpha, c)):
+        return unavailable
+
+    assert a is not None and alpha is not None and c is not None
+    log_crossover = (float(np.log(a)) - float(np.log(c))) / float(alpha)
+    if not np.isfinite(log_crossover):
+        return unavailable
+
+    covariance = np.asarray(power_law.get("power_law_param_cov"), dtype=float)
+    low = None
+    high = None
+    if covariance.shape == (3, 3) and np.all(np.isfinite(covariance)):
+        log_a_ref = power_law.get("power_law_log_a_ref")
+        log_c = power_law.get("power_law_log_c")
+        if (
+            isinstance(log_a_ref, (int, float))
+            and isinstance(log_c, (int, float))
+            and np.isfinite(log_a_ref)
+            and np.isfinite(log_c)
+        ):
+            numerator = float(log_a_ref) - float(log_c)
+            gradient = np.asarray(
+                [
+                    1.0 / float(alpha),
+                    -numerator / (float(alpha) ** 2),
+                    -1.0 / float(alpha),
+                ],
+                dtype=float,
+            )
+            variance = float(np.dot(gradient, np.dot(covariance, gradient)))
+            if np.isfinite(variance) and variance >= 0:
+                sigma_log_frequency = float(np.sqrt(variance))
+                low = float(np.exp(np.clip(log_crossover - CROSSOVER_UNCERTAINTY_SIGMA * sigma_log_frequency, -745, 709)))
+                high = float(np.exp(np.clip(log_crossover + CROSSOVER_UNCERTAINTY_SIGMA * sigma_log_frequency, -745, 709)))
+                if not np.isfinite(low) or low <= 0:
+                    low = None
+                if not np.isfinite(high) or high <= 0:
+                    high = None
+
+    crossover_hz = float(np.exp(np.clip(log_crossover, -745, 709)))
+    if not np.isfinite(crossover_hz) or crossover_hz <= 0:
+        return unavailable
+
+    positive_freq = np.asarray(freq_hz, dtype=float)
+    positive_freq = positive_freq[np.isfinite(positive_freq) & (positive_freq > 0)]
+    status = "unavailable"
+    if positive_freq.size:
+        status = "ok" if float(np.min(positive_freq)) <= crossover_hz <= float(np.max(positive_freq)) else "out_of_band"
+
+    return {
+        "crossover_frequency_hz": crossover_hz,
+        "crossover_frequency_status": status,
+        "crossover_frequency_hz_3sigma_low": low,
+        "crossover_frequency_hz_3sigma_high": high,
     }
 
 
@@ -372,6 +525,13 @@ def temporal_to_spectral_result(result: TemporalStructureResult) -> SpectralAnal
         power_law_a_err=result.power_law_a_err,
         power_law_alpha_err=result.power_law_alpha_err,
         power_law_c_err=result.power_law_c_err,
+        crossover_frequency_hz=result.crossover_frequency_hz,
+        crossover_frequency_status=result.crossover_frequency_status,
+        crossover_frequency_hz_3sigma_low=result.crossover_frequency_hz_3sigma_low,
+        crossover_frequency_hz_3sigma_high=result.crossover_frequency_hz_3sigma_high,
+        noise_psd_freq_hz=np.asarray(result.noise_psd_freq_hz, dtype=float),
+        noise_psd_power=np.asarray(result.noise_psd_power, dtype=float),
+        noise_psd_segment_count=result.noise_psd_segment_count,
     )
 
 
@@ -384,6 +544,7 @@ def run_temporal_structure_analysis(
     event_window_ms: tuple[float, float],
     spectral_extent_mhz: tuple[float, float],
     fitburst_widths_ms: np.ndarray | None = None,
+    offpulse_series_runs: Sequence[np.ndarray] | None = None,
     backend_loader: Callable[[], tuple[type[Any] | None, type[Any] | None, str | None]] = _load_stingray_backend,
 ) -> TemporalStructureResult:
     series = np.asarray(event_series, dtype=float)
@@ -601,7 +762,15 @@ def run_temporal_structure_analysis(
     elif hasattr(spectrum, "df") and np.isfinite(getattr(spectrum, "df")):
         df = float(getattr(spectrum, "df"))
 
+    noise_psd = _compute_noise_psd(
+        offpulse_series_runs,
+        tsamp_ms=tsamp_ms,
+        segment_bins=segment_bins,
+        Lightcurve=Lightcurve,
+        AveragedPowerspectrum=AveragedPowerspectrum,
+    )
     power_law = _fit_power_law_model(freq_hz, power, resolved_segment_count)
+    crossover = _fit_crossover_frequency(power_law, freq_hz)
     combined_message = power_law["fit_message"]
 
     return TemporalStructureResult(
@@ -638,4 +807,11 @@ def run_temporal_structure_analysis(
         power_law_a_err=power_law["power_law_a_err"],
         power_law_alpha_err=power_law["power_law_alpha_err"],
         power_law_c_err=power_law["power_law_c_err"],
+        crossover_frequency_hz=crossover["crossover_frequency_hz"],
+        crossover_frequency_status=str(crossover["crossover_frequency_status"]),
+        crossover_frequency_hz_3sigma_low=crossover["crossover_frequency_hz_3sigma_low"],
+        crossover_frequency_hz_3sigma_high=crossover["crossover_frequency_hz_3sigma_high"],
+        noise_psd_freq_hz=np.asarray(noise_psd["noise_psd_freq_hz"], dtype=float),
+        noise_psd_power=np.asarray(noise_psd["noise_psd_power"], dtype=float),
+        noise_psd_segment_count=noise_psd["noise_psd_segment_count"],
     )

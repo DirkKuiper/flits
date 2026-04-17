@@ -247,16 +247,22 @@ class WebApiTest(unittest.TestCase):
         self.assertIn('data-analysis-tab="export"', index_html)
         self.assertIn('id="dmResidualPlot"', index_html)
         self.assertIn('id="fitScatteringButton"', index_html)
+        self.assertIn('id="fitGuessContent"', index_html)
+        self.assertIn('id="fitGuessPlot"', index_html)
         self.assertIn('id="fittingSpectrumPlot"', index_html)
         self.assertIn('id="fittingProfilePlot"', index_html)
         self.assertIn('id="analysisTemporalPanel"', index_html)
         self.assertIn('id="spectralContent"', index_html)
+        self.assertIn('id="acfPlot"', index_html)
         self.assertIn('id="temporalScalePlot"', index_html)
         self.assertIn('id="spectralPlot"', index_html)
         self.assertIn('id="spectralSegmentInput"', index_html)
         self.assertIn('id="runSpectralButton"', index_html)
         self.assertIn('id="buildExportButton"', index_html)
         self.assertIn('id="exportPreviewContent"', index_html)
+        self.assertIn("collectFitComponentGuesses", app_js)
+        self.assertIn("renderFitGuessPlot", app_js)
+        self.assertIn("component_guesses", app_js)
         self.assertIn('id="exportPreviewThumbs"', index_html)
         self.assertIn('id="exportIncludeJson"', index_html)
         self.assertIn('id="exportIncludePlots"', index_html)
@@ -268,6 +274,10 @@ class WebApiTest(unittest.TestCase):
         self.assertIn('id="notesInput"', index_html)
         self.assertIn('id="dmMetricInput"', index_html)
         self.assertIn("Component Region", index_html)
+        self.assertNotIn("Why this value?", app_js)
+        self.assertIn("function measurementTooltip", app_js)
+        self.assertIn("Peak event-window S/N times the radiometer flux scale", app_js)
+        self.assertIn("Selection and Provenance", app_js)
         self.assertIn("Clear Components", index_html)
         self.assertIn("activeAnalysisTab", app_js)
         self.assertIn("renderDirectoryOptions", app_js)
@@ -275,6 +285,20 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("syncDmPlots", app_js)
         self.assertIn("syncFittingPlot", app_js)
         self.assertIn("renderSpectral", app_js)
+        self.assertIn("renderAcfDiagnosticsSection", app_js)
+        self.assertIn("renderAcfPlot", app_js)
+        self.assertIn("syncAcfPlot", app_js)
+        self.assertIn("function acfTooltip", app_js)
+        self.assertIn("Burst Duration Guidance", app_js)
+        self.assertIn("not the same as full burst duration", app_js)
+        self.assertIn("function temporalTooltip", app_js)
+        self.assertIn("Minimum Structure Scale Scan", app_js)
+        self.assertIn("Scale Scan vs Duration", app_js)
+        self.assertIn("no turnover in the tested range", app_js)
+        self.assertIn("Power Spectrum", app_js)
+        self.assertIn("Crossover", app_js)
+        self.assertIn("Noise power spectrum", app_js)
+        self.assertIn("Residual ratio", app_js)
         self.assertIn("syncSpectralPlot", app_js)
         self.assertIn("syncSpectralSegmentInput", app_js)
         self.assertIn("exportManifest", app_js)
@@ -468,16 +492,27 @@ class WebApiTest(unittest.TestCase):
         session_id = "synthetic-fit-dispatch"
         session = _synthetic_session()
         session.fit_scattering = Mock(return_value=None)
+        payload = {
+            "num_components": 1,
+            "component_guesses": [
+                {
+                    "arrival_time_ms": 120.0,
+                    "width_ms": 2.0,
+                    "tau_ms": 1.0,
+                    "log_amplitude": 0.5,
+                }
+            ],
+        }
         SESSIONS[session_id] = session
         try:
             session_action(
                 session_id,
-                ActionRequest(type="fit_scattering", payload={}),
+                ActionRequest(type="fit_scattering", payload=payload),
             )
         finally:
             SESSIONS.pop(session_id, None)
 
-        session.fit_scattering.assert_called_once_with({})
+        session.fit_scattering.assert_called_once_with(payload)
 
     def test_session_action_run_spectral_analysis_returns_serialized_payload(self) -> None:
         session_id = "synthetic-spectral-dispatch"
@@ -496,6 +531,13 @@ class WebApiTest(unittest.TestCase):
             nyquist_hz=500.0,
             freq_hz=np.array([62.5, 125.0], dtype=float),
             power=np.array([1.5, 0.75], dtype=float),
+            crossover_frequency_hz=92.0,
+            crossover_frequency_status="ok",
+            crossover_frequency_hz_3sigma_low=80.0,
+            crossover_frequency_hz_3sigma_high=105.0,
+            noise_psd_freq_hz=np.array([62.5, 125.0], dtype=float),
+            noise_psd_power=np.array([0.2, 0.25], dtype=float),
+            noise_psd_segment_count=3,
         )
 
         def _run(segment_length_ms: float) -> SpectralAnalysisResult:
@@ -522,6 +564,10 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(analysis["segment_count"], 2)
         self.assertEqual(analysis["freq_hz"], [62.5, 125.0])
         self.assertEqual(analysis["power"], [1.5, 0.75])
+        self.assertEqual(analysis["crossover_frequency_hz"], 92.0)
+        self.assertEqual(analysis["crossover_frequency_status"], "ok")
+        self.assertEqual(analysis["noise_psd_power"], [0.2, 0.25])
+        self.assertEqual(analysis["noise_psd_segment_count"], 3)
 
     def test_session_action_run_temporal_structure_analysis_returns_serialized_payload(self) -> None:
         session_id = "synthetic-temporal-dispatch"
@@ -554,6 +600,13 @@ class WebApiTest(unittest.TestCase):
             wavelet_scales_ms=np.array([1.0, 2.0, 4.0], dtype=float),
             wavelet_sigma=np.array([1.8, 4.9, 3.0], dtype=float),
             wavelet_threshold_sigma=5.0,
+            crossover_frequency_hz=92.0,
+            crossover_frequency_status="out_of_band",
+            crossover_frequency_hz_3sigma_low=80.0,
+            crossover_frequency_hz_3sigma_high=105.0,
+            noise_psd_freq_hz=np.array([62.5, 125.0], dtype=float),
+            noise_psd_power=np.array([0.2, 0.25], dtype=float),
+            noise_psd_segment_count=3,
         )
 
         def _run(segment_length_ms: float) -> TemporalStructureResult:
@@ -582,6 +635,9 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(temporal["averaged_psd_power"], [1.5, 0.75])
         self.assertEqual(temporal["matched_filter_scales_ms"], [1.0, 2.0, 4.0])
         self.assertEqual(temporal["power_law_fit_status"], "underconstrained")
+        self.assertEqual(temporal["crossover_frequency_status"], "out_of_band")
+        self.assertEqual(temporal["noise_psd_freq_hz"], [62.5, 125.0])
+        self.assertEqual(temporal["noise_psd_segment_count"], 3)
 
     def test_session_action_supports_offpulse_width_and_notes_actions(self) -> None:
         session_id = "synthetic-phase1-actions"
@@ -660,6 +716,11 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("provenance", results)
         self.assertIn("diagnostics", results)
         self.assertIn("mjd_at_peak", results)
+        diagnostics = results["diagnostics"]
+        self.assertGreater(len(diagnostics["temporal_acf"]), 0)
+        self.assertGreater(len(diagnostics["temporal_acf_lags_ms"]), 0)
+        self.assertGreater(len(diagnostics["spectral_acf"]), 0)
+        self.assertGreater(len(diagnostics["spectral_acf_lags_mhz"]), 0)
         self.assertIn("spectral_analysis", payload["view"])
         self.assertIn("temporal_structure", payload["view"])
         self.assertIsNone(payload["view"]["spectral_analysis"])

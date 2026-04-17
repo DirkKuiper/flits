@@ -170,12 +170,14 @@ class ExportResultsTest(unittest.TestCase):
         self.assertIn("Science JSON", labels)
         self.assertIn("Dynamic Spectrum (PNG)", labels)
         self.assertIn("DM Curve (PNG)", labels)
-        self.assertEqual(sum(1 for artifact in preview["artifacts"] if artifact["kind"] == "plot"), 5)
+        self.assertIn("Power Spectrum (PNG)", labels)
+        self.assertEqual(sum(1 for artifact in preview["artifacts"] if artifact["kind"] == "plot"), 6)
 
         plot_previews = {item["plot_key"]: item for item in preview["plot_previews"]}
-        self.assertEqual(set(plot_previews), {"dynamic_spectrum", "profile_diagnostics", "acf_panel", "dm_curve", "dm_residuals"})
+        self.assertEqual(set(plot_previews), {"dynamic_spectrum", "profile_diagnostics", "acf_panel", "power_spectrum", "dm_curve", "dm_residuals"})
         self.assertTrue(plot_previews["dynamic_spectrum"]["svg"].lstrip().startswith("<svg"))
         self.assertEqual(plot_previews["dm_curve"]["status"], "ready")
+        self.assertEqual(plot_previews["power_spectrum"]["status"], "omitted")
         self.assertFalse(session.export_snapshots)
 
     def test_preview_omissions_match_built_export_selection(self) -> None:
@@ -191,6 +193,7 @@ class ExportResultsTest(unittest.TestCase):
         self.assertEqual(preview_artifacts["DM Curve (PNG)"]["status"], "omitted")
         self.assertEqual(preview_artifacts["DM Curve (PNG)"]["reason"], "dm_optimization_unavailable")
         self.assertEqual(preview_artifacts["DM Residuals (PNG)"]["reason"], "dm_optimization_unavailable")
+        self.assertEqual(preview_artifacts["Power Spectrum (PNG)"]["reason"], "temporal_structure_unavailable")
 
         manifest = session_action(
             session_id,
@@ -199,9 +202,11 @@ class ExportResultsTest(unittest.TestCase):
         artifact_by_name = {artifact["name"]: artifact for artifact in manifest["artifacts"]}
         dm_curve = next(artifact for name, artifact in artifact_by_name.items() if name.endswith("_dm_curve.png"))
         dm_residuals = next(artifact for name, artifact in artifact_by_name.items() if name.endswith("_dm_residuals.png"))
+        power_spectrum = next(artifact for name, artifact in artifact_by_name.items() if name.endswith("_power_spectrum.png"))
         self.assertEqual(dm_curve["status"], "omitted")
         self.assertEqual(dm_curve["reason"], "dm_optimization_unavailable")
         self.assertEqual(dm_residuals["reason"], "dm_optimization_unavailable")
+        self.assertEqual(power_spectrum["reason"], "temporal_structure_unavailable")
 
     def test_build_after_preview_uses_selected_export_set(self) -> None:
         session_id = "synthetic-export-preview-build"
@@ -337,13 +342,15 @@ class ExportResultsTest(unittest.TestCase):
 
         manifest = payload["export_manifest"]
         self.assertIsNotNone(manifest)
-        self.assertEqual(manifest["schema_version"], "1.3")
+        self.assertEqual(manifest["schema_version"], "1.4")
         artifact_names = {artifact["name"] for artifact in manifest["artifacts"]}
         self.assertTrue(any(name.endswith("_science.json") for name in artifact_names))
         self.assertTrue(any(name.endswith("_catalog.csv") for name in artifact_names))
         self.assertTrue(any(name.endswith("_diagnostics.npz") for name in artifact_names))
         self.assertTrue(any(name.endswith("_dynamic_spectrum.png") for name in artifact_names))
         self.assertTrue(any(name.endswith("_dynamic_spectrum.svg") for name in artifact_names))
+        self.assertTrue(any(name.endswith("_power_spectrum.png") for name in artifact_names))
+        self.assertTrue(any(name.endswith("_power_spectrum.svg") for name in artifact_names))
         self.assertTrue(any(name.endswith("_dm_curve.png") for name in artifact_names))
         self.assertTrue(any(name.endswith("_dm_residuals.svg") for name in artifact_names))
 
@@ -365,6 +372,8 @@ class ExportResultsTest(unittest.TestCase):
         self.assertIsNotNone(science["temporal_structure"])
         self.assertIn("min_structure_ms_primary", science["temporal_structure"])
         self.assertIn("power_law_fit_status", science["temporal_structure"])
+        self.assertIn("crossover_frequency_status", science["temporal_structure"])
+        self.assertIn("noise_psd_freq_hz", science["temporal_structure"])
 
         csv_name = next(name for name in artifact_names if name.endswith("_catalog.csv"))
         csv_response = session_export_artifact(session_id, manifest["export_id"], csv_name)
@@ -373,6 +382,8 @@ class ExportResultsTest(unittest.TestCase):
         self.assertIn("dm_best", csv_text.splitlines()[0])
         self.assertIn("min_structure_ms_primary", csv_text.splitlines()[0])
         self.assertIn("psd_fit_status", csv_text.splitlines()[0])
+        self.assertIn("psd_crossover_frequency_hz", csv_text.splitlines()[0])
+        self.assertIn("noise_psd_segment_count", csv_text.splitlines()[0])
         self.assertIn("npol", csv_text.splitlines()[0])
 
         npz_name = next(name for name in artifact_names if name.endswith("_diagnostics.npz"))
@@ -382,6 +393,8 @@ class ExportResultsTest(unittest.TestCase):
             self.assertIn("trial_dms", arrays.files)
             self.assertIn("raw_periodogram_freq_hz", arrays.files)
             self.assertIn("averaged_psd_power", arrays.files)
+            self.assertIn("crossover_frequency_hz", arrays.files)
+            self.assertIn("noise_psd_power", arrays.files)
             self.assertIn("matched_filter_scales_ms", arrays.files)
             self.assertIn("wavelet_sigma", arrays.files)
             self.assertEqual(

@@ -763,6 +763,13 @@ class SpectralAnalysisResult:
     power_law_a_err: float | None = None
     power_law_alpha_err: float | None = None
     power_law_c_err: float | None = None
+    crossover_frequency_hz: float | None = None
+    crossover_frequency_status: str = "unavailable"
+    crossover_frequency_hz_3sigma_low: float | None = None
+    crossover_frequency_hz_3sigma_high: float | None = None
+    noise_psd_freq_hz: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    noise_psd_power: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    noise_psd_segment_count: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -785,6 +792,13 @@ class SpectralAnalysisResult:
             "power_law_a_err": _float_or_none(self.power_law_a_err),
             "power_law_alpha_err": _float_or_none(self.power_law_alpha_err),
             "power_law_c_err": _float_or_none(self.power_law_c_err),
+            "crossover_frequency_hz": _float_or_none(self.crossover_frequency_hz),
+            "crossover_frequency_status": self.crossover_frequency_status,
+            "crossover_frequency_hz_3sigma_low": _float_or_none(self.crossover_frequency_hz_3sigma_low),
+            "crossover_frequency_hz_3sigma_high": _float_or_none(self.crossover_frequency_hz_3sigma_high),
+            "noise_psd_freq_hz": _jsonable_1d(self.noise_psd_freq_hz, digits=6),
+            "noise_psd_power": _jsonable_1d(self.noise_psd_power, digits=6),
+            "noise_psd_segment_count": _int_or_none(self.noise_psd_segment_count),
         }
 
     @classmethod
@@ -811,6 +825,13 @@ class SpectralAnalysisResult:
             power_law_a_err=_float_or_none(payload.get("power_law_a_err")),
             power_law_alpha_err=_float_or_none(payload.get("power_law_alpha_err")),
             power_law_c_err=_float_or_none(payload.get("power_law_c_err")),
+            crossover_frequency_hz=_float_or_none(payload.get("crossover_frequency_hz")),
+            crossover_frequency_status=str(payload.get("crossover_frequency_status", "unavailable")),
+            crossover_frequency_hz_3sigma_low=_float_or_none(payload.get("crossover_frequency_hz_3sigma_low")),
+            crossover_frequency_hz_3sigma_high=_float_or_none(payload.get("crossover_frequency_hz_3sigma_high")),
+            noise_psd_freq_hz=_array_1d(payload.get("noise_psd_freq_hz"), dtype=float),
+            noise_psd_power=_array_1d(payload.get("noise_psd_power"), dtype=float),
+            noise_psd_segment_count=_int_or_none(payload.get("noise_psd_segment_count")),
         )
 
 
@@ -849,6 +870,13 @@ class TemporalStructureResult:
     power_law_a_err: float | None = None
     power_law_alpha_err: float | None = None
     power_law_c_err: float | None = None
+    crossover_frequency_hz: float | None = None
+    crossover_frequency_status: str = "unavailable"
+    crossover_frequency_hz_3sigma_low: float | None = None
+    crossover_frequency_hz_3sigma_high: float | None = None
+    noise_psd_freq_hz: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    noise_psd_power: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    noise_psd_segment_count: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -885,6 +913,13 @@ class TemporalStructureResult:
             "power_law_a_err": _float_or_none(self.power_law_a_err),
             "power_law_alpha_err": _float_or_none(self.power_law_alpha_err),
             "power_law_c_err": _float_or_none(self.power_law_c_err),
+            "crossover_frequency_hz": _float_or_none(self.crossover_frequency_hz),
+            "crossover_frequency_status": self.crossover_frequency_status,
+            "crossover_frequency_hz_3sigma_low": _float_or_none(self.crossover_frequency_hz_3sigma_low),
+            "crossover_frequency_hz_3sigma_high": _float_or_none(self.crossover_frequency_hz_3sigma_high),
+            "noise_psd_freq_hz": _jsonable_1d(self.noise_psd_freq_hz, digits=6),
+            "noise_psd_power": _jsonable_1d(self.noise_psd_power, digits=6),
+            "noise_psd_segment_count": _int_or_none(self.noise_psd_segment_count),
         }
 
     @classmethod
@@ -927,6 +962,13 @@ class TemporalStructureResult:
             power_law_a_err=_float_or_none(payload.get("power_law_a_err")),
             power_law_alpha_err=_float_or_none(payload.get("power_law_alpha_err")),
             power_law_c_err=_float_or_none(payload.get("power_law_c_err")),
+            crossover_frequency_hz=_float_or_none(payload.get("crossover_frequency_hz")),
+            crossover_frequency_status=str(payload.get("crossover_frequency_status", "unavailable")),
+            crossover_frequency_hz_3sigma_low=_float_or_none(payload.get("crossover_frequency_hz_3sigma_low")),
+            crossover_frequency_hz_3sigma_high=_float_or_none(payload.get("crossover_frequency_hz_3sigma_high")),
+            noise_psd_freq_hz=_array_1d(payload.get("noise_psd_freq_hz"), dtype=float),
+            noise_psd_power=_array_1d(payload.get("noise_psd_power"), dtype=float),
+            noise_psd_segment_count=_int_or_none(payload.get("noise_psd_segment_count")),
         )
 
 

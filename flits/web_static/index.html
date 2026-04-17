@@ -311,6 +311,10 @@
                   <input id="fitComponentsInput" type="number" min="1" max="10" step="1" value="1">
                 </label>
               </div>
+              <div id="fitGuessContent" class="fit-guess-content">
+                <div class="empty-state">Load a session to inspect fitburst initial guesses.</div>
+              </div>
+              <div class="plot fitting-guess-plot is-empty" id="fitGuessPlot"></div>
               <div class="field" style="grid-column: 1 / -1; margin-top: 4px;">
                 <span>Fixed Parameters <span class="tooltip-icon" data-tooltip="Checked parameters will not be varied by the fitburst optimizer.">?</span></span>
                 <div class="checkbox-grid" id="fitFixedParamsContainer">
@@ -370,8 +374,9 @@
               <div id="spectralContent" class="results-content">
                 <div class="empty-state">No temporal-structure diagnostics yet. This tab uses the current crop, event/off-pulse windows, mask, spectral window, and applied DM.</div>
               </div>
-              <div class="plot dm-optimization-plot is-empty" id="temporalScalePlot"></div>
-              <div class="plot dm-optimization-plot is-empty" id="spectralPlot"></div>
+              <div class="plot acf-plot temporal-acf-plot is-empty" id="acfPlot"></div>
+              <div class="plot dm-optimization-plot temporal-scale-plot is-empty" id="temporalScalePlot"></div>
+              <div class="plot dm-optimization-plot temporal-psd-plot is-empty" id="spectralPlot"></div>
             </section>
 
             <section class="analysis-panel" id="analysisExportPanel" data-tab-panel="export" role="tabpanel" hidden>

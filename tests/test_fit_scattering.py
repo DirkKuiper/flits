@@ -156,6 +156,53 @@ class FitScatteringTest(unittest.TestCase):
         )
 
 class FitScatteringDispatchTest(unittest.TestCase):
+    def test_fitburst_guess_uses_component_regions(self) -> None:
+        session = _synthetic_scattering_dispatch_session()
+        session.add_region_ms(session.bin_to_ms(245), session.bin_to_ms(260))
+        session.add_region_ms(session.bin_to_ms(275), session.bin_to_ms(310))
+
+        guess = session.get_view()["fitburst_guess"]
+
+        self.assertEqual(guess["status"], "ok")
+        self.assertEqual(guess["source"], "component_regions")
+        self.assertEqual(guess["component_count"], 2)
+        arrivals = [row["arrival_time_ms"] for row in guess["component_guesses"]]
+        widths = [row["width_ms"] for row in guess["component_guesses"]]
+        self.assertNotEqual(arrivals[0], arrivals[1])
+        self.assertGreater(widths[0], 0.0)
+        self.assertGreater(widths[1], 0.0)
+        self.assertNotEqual(widths[0], widths[1])
+        self.assertEqual(len(guess["initial_parameters"]["arrival_time"]), 2)
+
+    def test_fitburst_guess_uses_manual_peaks_without_regions(self) -> None:
+        session = _synthetic_scattering_dispatch_session()
+        first_peak = session.bin_to_ms(250)
+        second_peak = session.bin_to_ms(290)
+        session.add_peak_ms(first_peak)
+        session.add_peak_ms(second_peak)
+
+        guess = session.get_view()["fitburst_guess"]
+
+        self.assertEqual(guess["status"], "ok")
+        self.assertEqual(guess["source"], "manual_peaks")
+        self.assertEqual(guess["component_count"], 2)
+        arrivals = [row["arrival_time_ms"] for row in guess["component_guesses"]]
+        self.assertEqual(arrivals, [first_peak, second_peak])
+        windows = [row["component_window_ms"] for row in guess["component_guesses"]]
+        self.assertLess(windows[0][1], windows[1][1])
+        self.assertAlmostEqual(windows[0][1], windows[1][0], places=6)
+
+    def test_fitburst_guess_falls_back_to_single_automatic_component(self) -> None:
+        session = _synthetic_scattering_dispatch_session()
+
+        guess = session.get_view()["fitburst_guess"]
+
+        self.assertEqual(guess["status"], "ok")
+        self.assertEqual(guess["source"], "automatic")
+        self.assertEqual(guess["component_count"], 1)
+        self.assertEqual(len(guess["component_guesses"]), 1)
+        self.assertEqual(len(guess["initial_parameters"]["arrival_time"]), 1)
+
     @patch("flits.session.fit_scattering_selected_band")
     def test_fit_scattering_uses_reduced_grid(self, mock_fit: object) -> None:
         session = _synthetic_scattering_dispatch_session()
@@ -185,6 +232,58 @@ class FitScatteringDispatchTest(unittest.TestCase):
         self.assertEqual(kwargs["freqs_mhz"].shape[0], session.total_channels // 2)
         self.assertEqual(results.width_ms_model, 1.0)
         self.assertEqual(results.tau_sc_ms, 2.0)
+
+    @patch("flits.session.fit_scattering_selected_band")
+    def test_fit_scattering_converts_component_guesses_to_initial_parameters(self, mock_fit: object) -> None:
+        session = _synthetic_scattering_dispatch_session()
+        first_arrival_ms = session.bin_to_ms(250)
+        second_arrival_ms = session.bin_to_ms(290)
+
+        mock_fit.return_value = FitburstScatteringResult(
+            status="ok",
+            message=None,
+            width_ms_model=1.0,
+            width_uncertainty_ms=0.1,
+            tau_sc_ms=2.0,
+            tau_uncertainty_ms=0.2,
+            diagnostics=ScatteringFitDiagnostics(
+                status="ok",
+                message=None,
+                fitter="fitburst",
+                component_count=2,
+                initial_parameters={},
+            ),
+        )
+
+        session.fit_scattering(
+            {
+                "num_components": 2,
+                "fixed_parameters": ["dm"],
+                "component_guesses": [
+                    {
+                        "arrival_time_ms": first_arrival_ms,
+                        "width_ms": 1.2,
+                        "tau_ms": 0.4,
+                        "log_amplitude": 0.7,
+                    },
+                    {
+                        "arrival_time_ms": second_arrival_ms,
+                        "width_ms": 1.8,
+                        "tau_ms": 0.5,
+                        "log_amplitude": 0.6,
+                    },
+                ],
+            }
+        )
+
+        config = mock_fit.call_args.kwargs["config"]
+        self.assertEqual(config.num_components, 2)
+        self.assertEqual(config.fixed_parameters, ["dm"])
+        self.assertAlmostEqual(config.initial_parameters["arrival_time"][0], first_arrival_ms / 1e3)
+        self.assertAlmostEqual(config.initial_parameters["arrival_time"][1], second_arrival_ms / 1e3)
+        self.assertEqual(config.initial_parameters["burst_width"], [0.0012, 0.0018])
+        self.assertEqual(config.initial_parameters["scattering_timescale"], [0.0004, 0.0005])
+        self.assertEqual(config.initial_parameters["amplitude"], [0.7, 0.6])
 
 
 if __name__ == "__main__":

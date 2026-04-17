@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from flits.session import BurstSession
 
 
-EXPORT_SCHEMA_VERSION = "1.3"
+EXPORT_SCHEMA_VERSION = "1.4"
 DEFAULT_EXPORT_INCLUDE = ("json", "csv", "npz", "plots")
 DEFAULT_PLOT_FORMATS = ("png", "svg")
 DEFAULT_WINDOW_FORMATS = ("npz",)
@@ -56,6 +56,8 @@ ASTROFLASH_COLORS = {
     "accent_alt": "#327cbc",
     "warning": "#8e6ebd",
     "alert": "#a23b61",
+    "noise": "#88d8dd",
+    "crossover": "#e2a144",
     "neutral": "#7d8290",
     "grid": "#e9e9ee",
 }
@@ -759,6 +761,23 @@ def _plot_plan(snapshot: ExportSnapshotData) -> list[PlotPlan]:
             )
         )
 
+    temporal = snapshot.temporal_structure or {}
+    if (
+        snapshot.temporal_structure is not None
+        and temporal.get("status") == "ok"
+        and len(temporal.get("averaged_psd_freq_hz", []) or []) > 0
+    ):
+        plots.append(PlotPlan(key="power_spectrum", title="Power Spectrum", status="ready", reason=None))
+    else:
+        plots.append(
+            PlotPlan(
+                key="power_spectrum",
+                title="Power Spectrum",
+                status="omitted",
+                reason="temporal_structure_unavailable",
+            )
+        )
+
     if snapshot.dm_optimization is None:
         plots.append(
             PlotPlan(
@@ -1034,6 +1053,11 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         "psd_alpha": temporal.get("power_law_alpha", ""),
         "psd_alpha_err": temporal.get("power_law_alpha_err", ""),
         "psd_fit_status": temporal.get("power_law_fit_status", ""),
+        "psd_crossover_frequency_hz": temporal.get("crossover_frequency_hz", ""),
+        "psd_crossover_frequency_status": temporal.get("crossover_frequency_status", ""),
+        "psd_crossover_frequency_hz_3sigma_low": temporal.get("crossover_frequency_hz_3sigma_low", ""),
+        "psd_crossover_frequency_hz_3sigma_high": temporal.get("crossover_frequency_hz_3sigma_high", ""),
+        "noise_psd_segment_count": temporal.get("noise_psd_segment_count", ""),
         "event_window_start_ms": snapshot.state.get("event_ms", ["", ""])[0],
         "event_window_end_ms": snapshot.state.get("event_ms", ["", ""])[1],
         "spectral_extent_start_mhz": snapshot.state.get("spectral_extent_mhz", ["", ""])[0],
@@ -1127,6 +1151,8 @@ def _build_diagnostics_npz(snapshot: ExportSnapshotData) -> bytes:
             "raw_periodogram_power",
             "averaged_psd_freq_hz",
             "averaged_psd_power",
+            "noise_psd_freq_hz",
+            "noise_psd_power",
             "matched_filter_scales_ms",
             "matched_filter_boxcar_sigma",
             "matched_filter_gaussian_sigma",
@@ -1134,6 +1160,17 @@ def _build_diagnostics_npz(snapshot: ExportSnapshotData) -> bytes:
             "wavelet_sigma",
         ):
             payload[key] = np.asarray(snapshot.temporal_structure.get(key, []), dtype=float)
+        for key in (
+            "crossover_frequency_hz",
+            "crossover_frequency_hz_3sigma_low",
+            "crossover_frequency_hz_3sigma_high",
+            "noise_psd_segment_count",
+        ):
+            payload[key] = np.asarray([snapshot.temporal_structure.get(key, np.nan)], dtype=float)
+        payload["crossover_frequency_status"] = np.asarray(
+            [snapshot.temporal_structure.get("crossover_frequency_status", "unavailable")],
+            dtype=str,
+        )
 
     buffer = io.BytesIO()
     np.savez_compressed(buffer, **payload)
@@ -1198,6 +1235,8 @@ def _plot_figure(snapshot: ExportSnapshotData, plot_key: str) -> plt.Figure:
         return _profile_diagnostics_figure(snapshot)
     if plot_key == "acf_panel":
         return _acf_panel_figure(snapshot)
+    if plot_key == "power_spectrum":
+        return _power_spectrum_figure(snapshot)
     if plot_key == "dm_curve":
         return _dm_curve_figure(snapshot)
     if plot_key == "dm_residuals":
@@ -1281,6 +1320,112 @@ def _acf_panel_figure(snapshot: ExportSnapshotData) -> plt.Figure:
     ax_spec.set_ylim(-0.05, 1.05)
     _style_export_axis(ax_time)
     _style_export_axis(ax_spec)
+    return fig
+
+
+def _positive_xy(x_values: Any, y_values: Any) -> tuple[np.ndarray, np.ndarray]:
+    x = np.asarray(x_values, dtype=float)
+    y = np.asarray(y_values, dtype=float)
+    mask = np.isfinite(x) & np.isfinite(y) & (x > 0) & (y > 0)
+    return np.asarray(x[mask], dtype=float), np.asarray(y[mask], dtype=float)
+
+
+def _power_spectrum_figure(snapshot: ExportSnapshotData) -> plt.Figure:
+    temporal = snapshot.temporal_structure or {}
+    freq_hz, power = _positive_xy(
+        temporal.get("averaged_psd_freq_hz", []),
+        temporal.get("averaged_psd_power", []),
+    )
+    noise_freq_hz, noise_power = _positive_xy(
+        temporal.get("noise_psd_freq_hz", []),
+        temporal.get("noise_psd_power", []),
+    )
+
+    fig, (ax_power, ax_residual) = plt.subplots(
+        2,
+        1,
+        figsize=(9.0, 6.6),
+        sharex=True,
+        constrained_layout=True,
+        gridspec_kw={"height_ratios": [3, 1]},
+    )
+    ax_power.loglog(freq_hz, power, color=ASTROFLASH_COLORS["neutral"], linewidth=1.2, label="Burst power spectrum")
+    if noise_freq_hz.size and noise_power.size:
+        ax_power.loglog(
+            noise_freq_hz,
+            noise_power,
+            color=ASTROFLASH_COLORS["noise"],
+            linewidth=1.0,
+            alpha=0.8,
+            label="Noise power spectrum",
+        )
+
+    a = temporal.get("power_law_a")
+    alpha = temporal.get("power_law_alpha")
+    c = temporal.get("power_law_c")
+    has_model = all(value is not None and np.isfinite(float(value)) and float(value) > 0 for value in (a, alpha, c))
+    model_freq = freq_hz
+    if has_model and model_freq.size:
+        a_value = float(a)
+        alpha_value = float(alpha)
+        c_value = float(c)
+        power_law = a_value * np.power(model_freq, -alpha_value)
+        white_noise = np.full_like(model_freq, c_value, dtype=float)
+        model = power_law + white_noise
+        ax_power.loglog(
+            model_freq,
+            power_law,
+            color=ASTROFLASH_COLORS["accent"],
+            linewidth=1.7,
+            linestyle="--",
+            label="Power law",
+        )
+        ax_power.loglog(
+            model_freq,
+            white_noise,
+            color=ASTROFLASH_COLORS["accent"],
+            linewidth=1.4,
+            linestyle=":",
+            label="White noise constant",
+        )
+
+        residual_mask = np.isfinite(model) & (model > 0)
+        residual_freq = model_freq[residual_mask]
+        residual_ratio = power[residual_mask] / model[residual_mask]
+        residual_mask = np.isfinite(residual_ratio) & (residual_ratio > 0)
+        ax_residual.semilogx(
+            residual_freq[residual_mask],
+            residual_ratio[residual_mask],
+            color=ASTROFLASH_COLORS["neutral"],
+            linewidth=1.0,
+        )
+
+    crossover = temporal.get("crossover_frequency_hz")
+    if crossover is not None and np.isfinite(float(crossover)) and float(crossover) > 0 and freq_hz.size:
+        crossover_hz = float(crossover)
+        visible_min = float(np.min(freq_hz))
+        visible_max = float(np.max(freq_hz))
+        low = temporal.get("crossover_frequency_hz_3sigma_low")
+        high = temporal.get("crossover_frequency_hz_3sigma_high")
+        if low is not None and high is not None and np.isfinite(float(low)) and np.isfinite(float(high)):
+            span_low = max(float(low), visible_min)
+            span_high = min(float(high), visible_max)
+            if span_high > span_low:
+                ax_power.axvspan(span_low, span_high, color=ASTROFLASH_COLORS["crossover"], alpha=0.22, linewidth=0)
+                ax_residual.axvspan(span_low, span_high, color=ASTROFLASH_COLORS["crossover"], alpha=0.22, linewidth=0)
+        if visible_min <= crossover_hz <= visible_max:
+            ax_power.axvline(crossover_hz, color=ASTROFLASH_COLORS["crossover"], linewidth=1.4, label="Crossover frequency")
+            ax_residual.axvline(crossover_hz, color=ASTROFLASH_COLORS["crossover"], linewidth=1.4)
+
+    ax_residual.axhline(1.0, color=ASTROFLASH_COLORS["accent"], linewidth=1.2)
+    ax_residual.set_yscale("log")
+    ax_power.set_title("Power Spectrum")
+    ax_power.set_ylabel("Power")
+    ax_residual.set_xlabel("Frequency (Hz)")
+    ax_residual.set_ylabel("Residuals")
+    ax_power.legend(frameon=False, loc="best")
+    _style_export_axis(ax_power)
+    _style_export_axis(ax_residual)
     return fig
 
 
