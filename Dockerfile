@@ -18,7 +18,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Then install the project itself; --no-deps skips re-resolving requirements.
 COPY pyproject.toml README.md MANIFEST.in ./
 COPY flits ./flits
-COPY tools ./tools
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-deps .
 
