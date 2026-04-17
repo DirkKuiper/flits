@@ -1,3 +1,10 @@
+"""Public analysis entry points exposed by FLITS.
+
+The analysis package groups the main higher-level routines used by the session
+layer: width/morphology measurements, DM optimization, averaged spectral
+analysis, and temporal-structure analysis.
+"""
+
 from __future__ import annotations
 
 from flits.analysis.dm_optimization import optimize_dm_trials

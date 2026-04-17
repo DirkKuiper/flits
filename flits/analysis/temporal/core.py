@@ -1,3 +1,19 @@
+"""Temporal-structure analysis for burst event time series.
+
+This module combines three related products for the currently selected event
+window:
+
+- a raw periodogram and averaged PSD,
+- minimum-timescale estimates from matched-filter and wavelet scans,
+- a simple power-law-plus-constant description of the averaged PSD together
+  with an inferred crossover frequency when the fit is well constrained.
+
+The session layer supplies a one-dimensional selected-band event series plus
+noise and provenance metadata. Sampling intervals are passed in milliseconds,
+frequency outputs are reported in Hz, and the structure metrics are reported in
+milliseconds.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
@@ -21,6 +37,7 @@ FWHM_PER_SIGMA = float(2.0 * np.sqrt(2.0 * np.log(2.0)))
 
 
 def default_segment_bins(event_bin_count: int) -> int:
+    """Choose a conservative default PSD segment length in bins."""
     event_bin_count = max(0, int(event_bin_count))
     if event_bin_count <= 0:
         return 0
@@ -30,6 +47,7 @@ def default_segment_bins(event_bin_count: int) -> int:
 
 
 def quantize_segment_bins(segment_length_ms: float, tsamp_ms: float) -> int:
+    """Convert a requested segment length to bins using half-up rounding."""
     return max(1, int(floor((float(segment_length_ms) / float(tsamp_ms)) + 0.5)))
 
 
@@ -56,6 +74,7 @@ def _failure(
     wavelet_sigma: np.ndarray | None = None,
     wavelet_threshold_sigma: float | None = None,
 ) -> TemporalStructureResult:
+    """Build a structured temporal-analysis failure result."""
     return TemporalStructureResult(
         status=status,
         message=message,
@@ -96,6 +115,7 @@ def _failure(
 
 
 def _load_stingray_backend() -> tuple[type[Any] | None, type[Any] | None, str | None]:
+    """Load the optional Stingray backend required for averaged PSD outputs."""
     try:
         Lightcurve = import_module("stingray.lightcurve").Lightcurve
         AveragedPowerspectrum = import_module("stingray.powerspectrum").AveragedPowerspectrum
@@ -105,6 +125,7 @@ def _load_stingray_backend() -> tuple[type[Any] | None, type[Any] | None, str | 
 
 
 def _raw_periodogram(event_series: np.ndarray, tsamp_ms: float) -> tuple[np.ndarray, np.ndarray, float | None, float | None]:
+    """Compute the single-window periodogram for the event series."""
     series = np.asarray(event_series, dtype=float)
     if series.size < 2 or not np.isfinite(series).any():
         return np.array([], dtype=float), np.array([], dtype=float), None, None
@@ -130,6 +151,7 @@ def _compute_noise_psd(
     Lightcurve: type[Any],
     AveragedPowerspectrum: type[Any],
 ) -> dict[str, Any]:
+    """Average PSD estimates across contiguous off-pulse runs."""
     if not offpulse_series_runs or segment_bins < MIN_SEGMENT_BINS:
         return {
             "noise_psd_freq_hz": np.array([], dtype=float),
@@ -201,6 +223,7 @@ def _compute_noise_psd(
 
 
 def _build_scale_ladder(event_bin_count: int) -> np.ndarray:
+    """Construct the logarithmic trial-scale ladder used in structure scans."""
     max_scale_bins = max(1, int(event_bin_count // 4))
     if max_scale_bins <= 1:
         return np.array([1], dtype=int)
@@ -210,12 +233,14 @@ def _build_scale_ladder(event_bin_count: int) -> np.ndarray:
 
 
 def _boxcar_kernel(scale_bins: int) -> np.ndarray:
+    """Return an L2-normalized boxcar matched-filter kernel."""
     kernel = np.ones(max(1, int(scale_bins)), dtype=float)
     kernel /= np.sqrt(np.sum(kernel**2))
     return kernel
 
 
 def _gaussian_kernel(scale_bins: int) -> np.ndarray:
+    """Return an L2-normalized Gaussian matched-filter kernel."""
     sigma_bins = max(float(scale_bins) / FWHM_PER_SIGMA, 0.5)
     radius = max(1, int(ceil(3.0 * sigma_bins)))
     x = np.arange(-radius, radius + 1, dtype=float)
@@ -225,6 +250,7 @@ def _gaussian_kernel(scale_bins: int) -> np.ndarray:
 
 
 def _mexican_hat_kernel(scale_bins: int) -> np.ndarray:
+    """Return an L2-normalized Mexican-hat wavelet kernel."""
     sigma_bins = max(float(scale_bins) / FWHM_PER_SIGMA, 0.5)
     radius = max(1, int(ceil(5.0 * sigma_bins)))
     x = np.arange(-radius, radius + 1, dtype=float)
@@ -237,6 +263,7 @@ def _mexican_hat_kernel(scale_bins: int) -> np.ndarray:
 
 
 def _familywise_threshold_sigma(trials: int, *, base_sigma: float = DEFAULT_SIGNIFICANCE_SIGMA) -> float:
+    """Convert a single-test sigma threshold to a familywise-corrected threshold."""
     one_sided_alpha = float(norm.sf(base_sigma))
     per_test_alpha = max(np.finfo(float).tiny, one_sided_alpha / max(1, int(trials)))
     return float(norm.isf(per_test_alpha))
@@ -249,6 +276,7 @@ def _scan_minimum_structure(
     noise_sigma: float,
     base_sigma: float = DEFAULT_SIGNIFICANCE_SIGMA,
 ) -> dict[str, Any]:
+    """Scan matched-filter and wavelet responses for the minimum detected scale."""
     profile = np.asarray(event_profile, dtype=float)
     if profile.size == 0 or not np.isfinite(noise_sigma) or noise_sigma <= 0:
         return {
@@ -314,6 +342,11 @@ def _fit_power_law_model(
     *,
     min_valid_bins: int = MIN_POWER_LAW_BINS,
 ) -> dict[str, Any]:
+    """Fit ``P(f) = a f^-alpha + c`` to a positive averaged PSD.
+
+    The fit is carried out in a Poisson-like likelihood on the linear PSD
+    values after seeding the parameters from a log-log linear regression.
+    """
     valid_mask = (np.asarray(freq_hz, dtype=float) > 0) & (np.asarray(power, dtype=float) > 0)
     valid_count = int(np.count_nonzero(valid_mask))
     if valid_count < min_valid_bins:
@@ -435,6 +468,7 @@ def _fit_power_law_model(
 
 
 def _fit_crossover_frequency(power_law: dict[str, Any], freq_hz: np.ndarray) -> dict[str, float | str | None]:
+    """Infer the power-law/white-noise crossover frequency from a fitted model."""
     unavailable = {
         "crossover_frequency_hz": None,
         "crossover_frequency_status": "unavailable",
@@ -505,6 +539,7 @@ def _fit_crossover_frequency(power_law: dict[str, Any], freq_hz: np.ndarray) -> 
 
 
 def temporal_to_spectral_result(result: TemporalStructureResult) -> SpectralAnalysisResult:
+    """Project temporal-analysis PSD products into the spectral result schema."""
     return SpectralAnalysisResult(
         status=result.status,
         message=result.power_law_fit_message if result.message is None else result.message,
@@ -547,6 +582,51 @@ def run_temporal_structure_analysis(
     offpulse_series_runs: Sequence[np.ndarray] | None = None,
     backend_loader: Callable[[], tuple[type[Any] | None, type[Any] | None, str | None]] = _load_stingray_backend,
 ) -> TemporalStructureResult:
+    """Run temporal-structure analysis on a selected event series.
+
+    Parameters
+    ----------
+    event_series
+        One-dimensional selected-band event series for the current event
+        window.
+    tsamp_ms
+        Sampling interval in milliseconds.
+    segment_length_ms
+        Requested segment length for the averaged PSD, in milliseconds.
+    noise_sigma
+        Off-pulse noise standard deviation used to normalize matched-filter and
+        wavelet responses.
+    event_window_ms
+        Event-window bounds in milliseconds for provenance.
+    spectral_extent_mhz
+        Selected spectral extent in MHz for provenance.
+    fitburst_widths_ms
+        Optional fitburst component widths in milliseconds. When provided, the
+        smallest positive width is recorded as a model-based cross-check.
+    offpulse_series_runs
+        Optional contiguous off-pulse time-series runs used to estimate a noise
+        PSD on the same segment grid.
+    backend_loader
+        Dependency-injection hook for loading Stingray-compatible backend
+        classes.
+
+    Returns
+    -------
+    TemporalStructureResult
+        Structured result containing the raw periodogram, averaged PSD,
+        minimum-timescale scan products, optional power-law fit, crossover
+        frequency estimate, and optional noise PSD. ``status`` is ``"ok"`` on
+        success and otherwise one of ``"insufficient_data"``,
+        ``"insufficient_time_bins"``, ``"invalid_segment_length"``,
+        ``"stingray_unavailable"``, or ``"stingray_failed"``.
+
+    Notes
+    -----
+    The primary minimum-structure estimate comes from the first matched-filter
+    scale whose boxcar or Gaussian response exceeds the familywise-corrected
+    threshold. The wavelet estimate is reported separately from the Mexican-hat
+    scan.
+    """
     series = np.asarray(event_series, dtype=float)
     tsamp_ms = float(tsamp_ms)
     segment_length_ms = float(segment_length_ms)

@@ -1,3 +1,11 @@
+"""Averaged power-spectrum analysis for selected burst time series.
+
+This module computes an averaged power spectrum for the current event window,
+optionally estimates an off-pulse noise PSD on the same segment grid, and fits
+a simple power-law-plus-constant model to the resulting PSD when the data are
+well constrained.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
@@ -20,6 +28,7 @@ MIN_SEGMENT_BINS = 2
 
 
 def default_segment_bins(event_bin_count: int) -> int:
+    """Choose a conservative default segment length in bins for PSD analysis."""
     event_bin_count = max(0, int(event_bin_count))
     if event_bin_count <= 0:
         return 0
@@ -39,6 +48,7 @@ def _failure(
     spectral_extent_mhz: tuple[float, float],
     tsamp_ms: float,
 ) -> SpectralAnalysisResult:
+    """Build a structured spectral-analysis failure result."""
     return SpectralAnalysisResult(
         status=status,
         message=message,
@@ -57,6 +67,7 @@ def _failure(
 
 
 def _load_stingray_backend() -> tuple[type[Any] | None, type[Any] | None, str | None]:
+    """Load the optional Stingray backend required for averaged PSDs."""
     try:
         Lightcurve = import_module("stingray.lightcurve").Lightcurve
         AveragedPowerspectrum = import_module("stingray.powerspectrum").AveragedPowerspectrum
@@ -75,6 +86,43 @@ def run_averaged_spectral_analysis(
     offpulse_series_runs: Sequence[np.ndarray] | None = None,
     backend_loader: Callable[[], tuple[type[Any] | None, type[Any] | None, str | None]] = _load_stingray_backend,
 ) -> SpectralAnalysisResult:
+    """Run averaged spectral analysis on a selected event time series.
+
+    Parameters
+    ----------
+    event_series
+        One-dimensional selected-band event series. The analysis uses the
+        provided samples as a uniformly sampled light curve.
+    tsamp_ms
+        Sampling interval in milliseconds.
+    segment_length_ms
+        Requested segment length for the averaged power spectrum, in
+        milliseconds.
+    event_window_ms
+        Event-window bounds in milliseconds for provenance.
+    spectral_extent_mhz
+        Selected spectral extent in MHz for provenance.
+    offpulse_series_runs
+        Optional contiguous off-pulse time-series runs. When provided, FLITS
+        computes a noise PSD using the same segment size and backend.
+    backend_loader
+        Dependency-injection hook for loading Stingray-compatible
+        ``Lightcurve`` and ``AveragedPowerspectrum`` classes.
+
+    Returns
+    -------
+    SpectralAnalysisResult
+        Structured PSD result. ``status`` is ``"ok"`` on success and otherwise
+        one of ``"insufficient_data"``, ``"insufficient_time_bins"``,
+        ``"invalid_segment_length"``, ``"stingray_unavailable"``, or
+        ``"stingray_failed"``.
+
+    Notes
+    -----
+    The returned frequency axis is in Hz, the PSD uses Stingray's ``norm="none"``
+    convention, and any fitted power-law parameters describe the averaged event
+    PSD rather than the off-pulse noise estimate.
+    """
     series = np.asarray(event_series, dtype=float)
     tsamp_ms = float(tsamp_ms)
     segment_length_ms = float(segment_length_ms)

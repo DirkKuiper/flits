@@ -1,3 +1,12 @@
+"""Width-analysis routines for selected burst profiles.
+
+This module measures burst widths from the selected-band time profile using a
+small set of complementary morphology estimators. Each method returns a
+structured :class:`~flits.models.WidthResult` in milliseconds together with
+quality flags, and the full set of results is bundled into a
+:class:`~flits.models.WidthAnalysisSummary`.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
@@ -25,6 +34,7 @@ def _prepare_event_profile(
     event_rel_end: int,
     tsamp_ms: float,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Extract the event-window profile and convert bin starts to bin centers."""
     event = np.asarray(profile[event_rel_start:event_rel_end], dtype=float)
     event = np.where(np.isfinite(event), event, 0.0)
     event_times = np.asarray(time_axis_ms[event_rel_start:event_rel_end], dtype=float) + (float(tsamp_ms) / 2.0)
@@ -32,6 +42,7 @@ def _prepare_event_profile(
 
 
 def _boxcar_width_ms(event_profile: np.ndarray, event_times_ms: np.ndarray, _: WidthAnalysisSettings) -> float | None:
+    """Estimate the boxcar-equivalent width from fluence divided by peak height."""
     positive = np.clip(np.asarray(event_profile, dtype=float), a_min=0.0, a_max=None)
     peak = float(np.nanmax(positive)) if positive.size else 0.0
     if peak <= 0 or not np.isfinite(peak):
@@ -46,6 +57,7 @@ def _fit_gaussian(
     event_profile: np.ndarray,
     event_times_ms: np.ndarray,
 ) -> tuple[float | None, list[str]]:
+    """Fit a 1D Gaussian and return its sigma in milliseconds plus fit flags."""
     if event_profile.size < 4 or event_times_ms.size != event_profile.size:
         return None, ["insufficient_time_bins"]
     if not np.isfinite(event_profile).any():
@@ -78,11 +90,13 @@ def _fit_gaussian(
 
 
 def _gaussian_sigma_ms(event_profile: np.ndarray, event_times_ms: np.ndarray, _: WidthAnalysisSettings) -> float | None:
+    """Return the fitted Gaussian sigma in milliseconds."""
     sigma, _flags = _fit_gaussian(event_profile, event_times_ms)
     return sigma
 
 
 def _gaussian_fwhm_ms(event_profile: np.ndarray, event_times_ms: np.ndarray, _: WidthAnalysisSettings) -> float | None:
+    """Return the fitted Gaussian FWHM in milliseconds."""
     sigma, _flags = _fit_gaussian(event_profile, event_times_ms)
     if sigma is None:
         return None
@@ -94,6 +108,7 @@ def _fluence_percentile_width_ms(
     event_times_ms: np.ndarray,
     settings: WidthAnalysisSettings,
 ) -> float | None:
+    """Measure the width between cumulative-fluence percentiles."""
     positive = np.clip(np.asarray(event_profile, dtype=float), a_min=0.0, a_max=None)
     if positive.size == 0 or not np.any(positive > 0):
         return None
@@ -128,6 +143,7 @@ def _trial_uncertainty(
     noise_sigma: float,
     settings: WidthAnalysisSettings,
 ) -> tuple[float | None, list[str]]:
+    """Estimate a width uncertainty from noise-perturbed Monte Carlo trials."""
     if event_profile.size == 0 or not np.isfinite(noise_sigma) or noise_sigma <= 0:
         return None, ["uncertainty_unavailable"]
 
@@ -151,6 +167,7 @@ def _result_flags(
     noise_summary: NoiseEstimateSummary,
     extra_flags: Sequence[str],
 ) -> list[str]:
+    """Assemble shared quality flags for all width methods."""
     flags = list(extra_flags)
     if noise_summary.basis != "explicit":
         flags.append("implicit_offpulse")
@@ -179,6 +196,51 @@ def compute_width_analysis(
     existing_accepted_method: str | None = None,
     extra_flags: Sequence[str] = (),
 ) -> WidthAnalysisSummary:
+    """Compute the full set of morphology-based burst-width measurements.
+
+    Parameters
+    ----------
+    selected_profile
+        Selected-band time profile for the current crop, typically already in
+        signal-to-noise units.
+    time_axis_ms
+        Time axis in milliseconds matching ``selected_profile``.
+    event_rel_start, event_rel_end
+        Half-open event window in profile-bin coordinates.
+    tsamp_ms
+        Effective time resolution of the profile in milliseconds.
+    noise_summary
+        Off-pulse noise estimate and warning flags associated with the current
+        selection.
+    settings
+        Width-analysis settings. If omitted, defaults from
+        :class:`WidthAnalysisSettings` are used.
+    event_window_ms
+        Event-window bounds in milliseconds for provenance.
+    spectral_extent_mhz
+        Selected spectral extent in MHz for provenance.
+    offpulse_windows_ms
+        Off-pulse windows in milliseconds for provenance.
+    masked_channels
+        Masked channel indices for provenance.
+    effective_bandwidth_mhz
+        Effective unmasked bandwidth in MHz, if known.
+    existing_accepted_method
+        Previously user-accepted width method. If present and still available,
+        it is preserved as the accepted width.
+    extra_flags
+        Additional quality flags propagated to every method result.
+
+    Returns
+    -------
+    WidthAnalysisSummary
+        Structured width results for all registered methods plus the accepted
+        width selection and the noise summary used to derive uncertainties.
+
+    Notes
+    -----
+    All width values and uncertainties are reported in milliseconds.
+    """
     settings = WidthAnalysisSettings() if settings is None else settings
     event_profile, event_times_ms = _prepare_event_profile(
         np.asarray(selected_profile, dtype=float),
