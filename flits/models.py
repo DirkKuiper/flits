@@ -815,6 +815,122 @@ class SpectralAnalysisResult:
 
 
 @dataclass(frozen=True)
+class TemporalStructureResult:
+    status: str
+    message: str | None
+    segment_length_ms: float | None
+    segment_bins: int | None
+    segment_count: int | None
+    normalization: str
+    event_window_ms: list[float]
+    spectral_extent_mhz: list[float]
+    tsamp_ms: float
+    frequency_resolution_hz: float | None
+    nyquist_hz: float | None
+    min_structure_ms_primary: float | None = None
+    min_structure_ms_wavelet: float | None = None
+    fitburst_min_component_ms: float | None = None
+    power_law_fit_status: str = "unavailable"
+    power_law_fit_message: str | None = None
+    raw_periodogram_freq_hz: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    raw_periodogram_power: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    averaged_psd_freq_hz: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    averaged_psd_power: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    matched_filter_scales_ms: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    matched_filter_boxcar_sigma: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    matched_filter_gaussian_sigma: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    matched_filter_threshold_sigma: float | None = None
+    wavelet_scales_ms: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    wavelet_sigma: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    wavelet_threshold_sigma: float | None = None
+    power_law_a: float | None = None
+    power_law_alpha: float | None = None
+    power_law_c: float | None = None
+    power_law_a_err: float | None = None
+    power_law_alpha_err: float | None = None
+    power_law_c_err: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "message": self.message,
+            "segment_length_ms": _float_or_none(self.segment_length_ms),
+            "segment_bins": _int_or_none(self.segment_bins),
+            "segment_count": _int_or_none(self.segment_count),
+            "normalization": self.normalization,
+            "event_window_ms": [float(value) for value in self.event_window_ms],
+            "spectral_extent_mhz": [float(value) for value in self.spectral_extent_mhz],
+            "tsamp_ms": float(self.tsamp_ms),
+            "frequency_resolution_hz": _float_or_none(self.frequency_resolution_hz),
+            "nyquist_hz": _float_or_none(self.nyquist_hz),
+            "min_structure_ms_primary": _float_or_none(self.min_structure_ms_primary),
+            "min_structure_ms_wavelet": _float_or_none(self.min_structure_ms_wavelet),
+            "fitburst_min_component_ms": _float_or_none(self.fitburst_min_component_ms),
+            "power_law_fit_status": self.power_law_fit_status,
+            "power_law_fit_message": self.power_law_fit_message,
+            "raw_periodogram_freq_hz": _jsonable_1d(self.raw_periodogram_freq_hz, digits=6),
+            "raw_periodogram_power": _jsonable_1d(self.raw_periodogram_power, digits=6),
+            "averaged_psd_freq_hz": _jsonable_1d(self.averaged_psd_freq_hz, digits=6),
+            "averaged_psd_power": _jsonable_1d(self.averaged_psd_power, digits=6),
+            "matched_filter_scales_ms": _jsonable_1d(self.matched_filter_scales_ms, digits=6),
+            "matched_filter_boxcar_sigma": _jsonable_1d(self.matched_filter_boxcar_sigma, digits=6),
+            "matched_filter_gaussian_sigma": _jsonable_1d(self.matched_filter_gaussian_sigma, digits=6),
+            "matched_filter_threshold_sigma": _float_or_none(self.matched_filter_threshold_sigma),
+            "wavelet_scales_ms": _jsonable_1d(self.wavelet_scales_ms, digits=6),
+            "wavelet_sigma": _jsonable_1d(self.wavelet_sigma, digits=6),
+            "wavelet_threshold_sigma": _float_or_none(self.wavelet_threshold_sigma),
+            "power_law_a": _float_or_none(self.power_law_a),
+            "power_law_alpha": _float_or_none(self.power_law_alpha),
+            "power_law_c": _float_or_none(self.power_law_c),
+            "power_law_a_err": _float_or_none(self.power_law_a_err),
+            "power_law_alpha_err": _float_or_none(self.power_law_alpha_err),
+            "power_law_c_err": _float_or_none(self.power_law_c_err),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any] | None) -> "TemporalStructureResult | None":
+        if payload is None:
+            return None
+        return cls(
+            status=str(payload.get("status", "unknown")),
+            message=None if payload.get("message") in (None, "") else str(payload.get("message")),
+            segment_length_ms=_float_or_none(payload.get("segment_length_ms")),
+            segment_bins=_int_or_none(payload.get("segment_bins")),
+            segment_count=_int_or_none(payload.get("segment_count")),
+            normalization=str(payload.get("normalization", "none")),
+            event_window_ms=[float(value) for value in payload.get("event_window_ms", [])],
+            spectral_extent_mhz=[float(value) for value in payload.get("spectral_extent_mhz", [])],
+            tsamp_ms=float(payload.get("tsamp_ms", 0.0)),
+            frequency_resolution_hz=_float_or_none(payload.get("frequency_resolution_hz")),
+            nyquist_hz=_float_or_none(payload.get("nyquist_hz")),
+            min_structure_ms_primary=_float_or_none(payload.get("min_structure_ms_primary")),
+            min_structure_ms_wavelet=_float_or_none(payload.get("min_structure_ms_wavelet")),
+            fitburst_min_component_ms=_float_or_none(payload.get("fitburst_min_component_ms")),
+            power_law_fit_status=str(payload.get("power_law_fit_status", "unavailable")),
+            power_law_fit_message=None
+            if payload.get("power_law_fit_message") in (None, "")
+            else str(payload.get("power_law_fit_message")),
+            raw_periodogram_freq_hz=_array_1d(payload.get("raw_periodogram_freq_hz"), dtype=float),
+            raw_periodogram_power=_array_1d(payload.get("raw_periodogram_power"), dtype=float),
+            averaged_psd_freq_hz=_array_1d(payload.get("averaged_psd_freq_hz"), dtype=float),
+            averaged_psd_power=_array_1d(payload.get("averaged_psd_power"), dtype=float),
+            matched_filter_scales_ms=_array_1d(payload.get("matched_filter_scales_ms"), dtype=float),
+            matched_filter_boxcar_sigma=_array_1d(payload.get("matched_filter_boxcar_sigma"), dtype=float),
+            matched_filter_gaussian_sigma=_array_1d(payload.get("matched_filter_gaussian_sigma"), dtype=float),
+            matched_filter_threshold_sigma=_float_or_none(payload.get("matched_filter_threshold_sigma")),
+            wavelet_scales_ms=_array_1d(payload.get("wavelet_scales_ms"), dtype=float),
+            wavelet_sigma=_array_1d(payload.get("wavelet_sigma"), dtype=float),
+            wavelet_threshold_sigma=_float_or_none(payload.get("wavelet_threshold_sigma")),
+            power_law_a=_float_or_none(payload.get("power_law_a")),
+            power_law_alpha=_float_or_none(payload.get("power_law_alpha")),
+            power_law_c=_float_or_none(payload.get("power_law_c")),
+            power_law_a_err=_float_or_none(payload.get("power_law_a_err")),
+            power_law_alpha_err=_float_or_none(payload.get("power_law_alpha_err")),
+            power_law_c_err=_float_or_none(payload.get("power_law_c_err")),
+        )
+
+
+@dataclass(frozen=True)
 class MeasurementUncertainties:
     toa_topo_mjd: float | None = None
     snr_peak: float | None = None
@@ -1201,6 +1317,7 @@ class AnalysisSessionSnapshot:
     dm: float
     preset_key: str
     sefd_jy: float | None
+    npol_override: int | None
     read_start_sec: float
     read_end_sec: float | None
     auto_mask_profile: str
@@ -1224,6 +1341,7 @@ class AnalysisSessionSnapshot:
     width_analysis: WidthAnalysisSummary | None
     dm_optimization: DmOptimizationResult | None
     spectral_analysis: SpectralAnalysisResult | None
+    temporal_structure: TemporalStructureResult | None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1232,6 +1350,7 @@ class AnalysisSessionSnapshot:
             "dm": float(self.dm),
             "preset_key": self.preset_key,
             "sefd_jy": _float_or_none(self.sefd_jy),
+            "npol_override": None if self.npol_override is None else int(self.npol_override),
             "read_start_sec": float(self.read_start_sec),
             "read_end_sec": _float_or_none(self.read_end_sec),
             "auto_mask_profile": self.auto_mask_profile,
@@ -1255,6 +1374,7 @@ class AnalysisSessionSnapshot:
             "width_analysis": None if self.width_analysis is None else self.width_analysis.to_dict(),
             "dm_optimization": None if self.dm_optimization is None else self.dm_optimization.to_dict(),
             "spectral_analysis": None if self.spectral_analysis is None else self.spectral_analysis.to_dict(),
+            "temporal_structure": None if self.temporal_structure is None else self.temporal_structure.to_dict(),
         }
 
     @classmethod
@@ -1265,6 +1385,7 @@ class AnalysisSessionSnapshot:
             dm=float(payload["dm"]),
             preset_key=str(payload.get("preset_key", "generic")),
             sefd_jy=_float_or_none(payload.get("sefd_jy")),
+            npol_override=_int_or_none(payload.get("npol_override")),
             read_start_sec=float(payload.get("read_start_sec", 0.0)),
             read_end_sec=_float_or_none(payload.get("read_end_sec")),
             auto_mask_profile=str(payload.get("auto_mask_profile", "auto")),
@@ -1300,6 +1421,7 @@ class AnalysisSessionSnapshot:
                 else DmOptimizationResult.from_dict(payload["dm_optimization"])
             ),
             spectral_analysis=SpectralAnalysisResult.from_dict(payload.get("spectral_analysis")),
+            temporal_structure=TemporalStructureResult.from_dict(payload.get("temporal_structure")),
         )
 
 
@@ -1340,4 +1462,58 @@ class ExportManifest:
             "schema_version": self.schema_version,
             "created_at_utc": self.created_at_utc,
             "artifacts": [artifact.to_dict() for artifact in self.artifacts],
+        }
+
+
+@dataclass(frozen=True)
+class ExportPreviewArtifact:
+    label: str
+    kind: str
+    content_type: str
+    format: str | None
+    status: str
+    reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "label": self.label,
+            "kind": self.kind,
+            "content_type": self.content_type,
+            "format": self.format,
+            "status": self.status,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class ExportPlotPreview:
+    plot_key: str
+    title: str
+    status: str
+    reason: str | None
+    svg: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "plot_key": self.plot_key,
+            "title": self.title,
+            "status": self.status,
+            "reason": self.reason,
+            "svg": self.svg,
+        }
+
+
+@dataclass(frozen=True)
+class ExportPreview:
+    selection: dict[str, list[str]]
+    artifacts: list[ExportPreviewArtifact]
+    plot_previews: list[ExportPlotPreview]
+    generated_at_utc: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "selection": self.selection,
+            "artifacts": [artifact.to_dict() for artifact in self.artifacts],
+            "plot_previews": [preview.to_dict() for preview in self.plot_previews],
+            "generated_at_utc": self.generated_at_utc,
         }

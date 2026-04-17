@@ -11,7 +11,8 @@ import numpy as np
 from flits.analysis.dm_optimization import DMMetricInput, available_dm_metrics, optimize_dm_trials
 from flits.analysis.spectral.core import run_averaged_spectral_analysis
 from flits.analysis.morphology import compute_width_analysis
-from flits.exports import MAX_EXPORT_SNAPSHOTS, StoredExportSnapshot, create_export_snapshot
+from flits.analysis.temporal.core import run_temporal_structure_analysis, temporal_to_spectral_result
+from flits.exports import MAX_EXPORT_SNAPSHOTS, StoredExportSnapshot, create_export_snapshot, preview_export
 from flits.analysis.fitting import fit_scattering_selected_band
 from flits.analysis.fitting.fitburst_adapter import FitburstRequestConfig
 from flits.measurements import (
@@ -34,11 +35,13 @@ from flits.models import (
     DmOptimizationResult,
     ExportArtifact,
     ExportManifest,
+    ExportPreview,
     FilterbankMetadata,
     NoiseEstimateSettings,
     OffPulseRegion,
     SessionSourceRef,
     SpectralAnalysisResult,
+    TemporalStructureResult,
     WidthAnalysisSettings,
     WidthAnalysisSummary,
 )
@@ -53,7 +56,7 @@ except Exception:  # pragma: no cover - optional dependency
     jess = SimpleNamespace(channel_masks=SimpleNamespace(channel_masker=None))
 
 
-SESSION_SNAPSHOT_SCHEMA_VERSION = "1.1"
+SESSION_SNAPSHOT_SCHEMA_VERSION = "1.2"
 JESS_MASK_DTYPE = np.float32
 JESS_WORKING_COPY_FACTOR = 6
 JESS_TEST_SEQUENCE = ("skew", "stand-dev")
@@ -171,6 +174,7 @@ class BurstSession:
     results: BurstMeasurements | None = None
     dm_optimization: DmOptimizationResult | None = None
     spectral_analysis: SpectralAnalysisResult | None = None
+    temporal_structure: TemporalStructureResult | None = None
     export_snapshots: dict[str, StoredExportSnapshot] = field(default_factory=dict)
     export_order: list[str] = field(default_factory=list)
 
@@ -182,6 +186,7 @@ class BurstSession:
         telescope: str | None = None,
         *,
         sefd_jy: float | None = None,
+        npol_override: int | None = None,
         read_start_sec: float | None = None,
         read_end_sec: float | None = None,
         auto_mask_profile: str | None = "auto",
@@ -196,6 +201,7 @@ class BurstSession:
             dm=dm,
             preset_key=preset_key,
             sefd_jy=sefd_jy,
+            npol_override=npol_override,
             read_start_sec=read_start_sec,
             read_end_sec=read_end_sec,
             auto_mask_profile=auto_mask_profile,
@@ -233,6 +239,7 @@ class BurstSession:
             dm=float(snapshot.dm),
             telescope=snapshot.preset_key,
             sefd_jy=snapshot.sefd_jy,
+            npol_override=snapshot.npol_override,
             read_start_sec=snapshot.read_start_sec,
             read_end_sec=snapshot.read_end_sec,
             auto_mask_profile=snapshot.auto_mask_profile,
@@ -282,6 +289,7 @@ class BurstSession:
             session.width_analysis = snapshot.width_analysis
             session.dm_optimization = snapshot.dm_optimization
             session.spectral_analysis = snapshot.spectral_analysis
+            session.temporal_structure = snapshot.temporal_structure
             if session.results is not None:
                 session._apply_width_analysis_to_results()
         return session
@@ -331,6 +339,10 @@ class BurstSession:
         return self.metadata.npol
 
     @property
+    def header_npol(self) -> int:
+        return self.metadata.header_npol
+
+    @property
     def freqs(self) -> np.ndarray:
         return self.metadata.freqs_mhz
 
@@ -360,11 +372,15 @@ class BurstSession:
     def clear_spectral_analysis(self) -> None:
         self.spectral_analysis = None
 
+    def clear_temporal_structure(self) -> None:
+        self.temporal_structure = None
+
     def invalidate_analysis_state(self) -> None:
         self.invalidate_results()
         self.clear_width_analysis()
         self.clear_dm_optimization()
         self.clear_spectral_analysis()
+        self.clear_temporal_structure()
 
     def bin_to_ms(self, time_bin: int | float) -> float:
         return float(time_bin) * self.tsamp_ms + float(self.config.read_start_sec) * 1000.0
@@ -783,11 +799,13 @@ class BurstSession:
                 "machine_id": self.metadata.machine_id,
                 "source_name": self.metadata.source_name,
                 "sefd_jy": self.sefd,
+                "npol_override": self.config.npol_override,
                 "auto_mask_profile": self.config.auto_mask_profile,
                 "auto_mask_profile_label": get_auto_mask_profile(self.config.auto_mask_profile).label,
                 "tsamp_us": self.tsamp * 1e6,
                 "freqres_mhz": self.freqres,
                 "npol": self.npol,
+                "header_npol": self.header_npol,
                 "distance_mpc": self.config.distance_mpc,
                 "redshift": self.config.redshift,
                 "shape": [self.total_channels, self.total_time_bins],
@@ -833,6 +851,9 @@ class BurstSession:
             "dm_optimization": self.dm_optimization.to_dict() if self.dm_optimization is not None else None,
             "spectral_analysis": (
                 None if self.spectral_analysis is None else self.spectral_analysis.to_dict()
+            ),
+            "temporal_structure": (
+                None if self.temporal_structure is None else self.temporal_structure.to_dict()
             ),
         }
 
@@ -1438,25 +1459,49 @@ class BurstSession:
                 scattering_fit=fit_result.diagnostics,
             ),
         )
+        if self.temporal_structure is not None:
+            updated_widths_ms = self._fitburst_component_widths_ms()
+            finite_widths = updated_widths_ms[np.isfinite(updated_widths_ms) & (updated_widths_ms > 0)]
+            self.temporal_structure = replace(
+                self.temporal_structure,
+                fitburst_min_component_ms=(
+                    None if finite_widths.size == 0 else float(np.min(finite_widths))
+                ),
+            )
         self._apply_width_analysis_to_results()
         return self.results
 
-    def run_spectral_analysis(self, segment_length_ms: float) -> SpectralAnalysisResult:
+    def _fitburst_component_widths_ms(self) -> np.ndarray:
+        if self.results is None or self.results.diagnostics.scattering_fit is None:
+            return np.array([], dtype=float)
+        bestfit = self.results.diagnostics.scattering_fit.bestfit_parameters or {}
+        widths_sec = np.asarray(bestfit.get("burst_width", []), dtype=float)
+        widths_sec = widths_sec[np.isfinite(widths_sec) & (widths_sec > 0)]
+        return widths_sec * 1e3
+
+    def run_temporal_structure_analysis(self, segment_length_ms: float) -> TemporalStructureResult:
         grid, context = self._build_measurement_context_for_data()
         event_series = np.asarray(
             context.selected_profile_baselined[context.event_rel_start:context.event_rel_end],
             dtype=float,
         )
-        self.spectral_analysis = run_averaged_spectral_analysis(
+        self.temporal_structure = run_temporal_structure_analysis(
             event_series=event_series,
             tsamp_ms=grid.effective_tsamp_ms,
             segment_length_ms=float(segment_length_ms),
+            noise_sigma=float(context.noise_summary.sigma),
             event_window_ms=self._current_event_window_ms(context, tsamp_ms=grid.effective_tsamp_ms),
             spectral_extent_mhz=[
                 float(np.min(context.spectral_axis_mhz)) if context.spectral_axis_mhz.size else 0.0,
                 float(np.max(context.spectral_axis_mhz)) if context.spectral_axis_mhz.size else 0.0,
             ],
+            fitburst_widths_ms=self._fitburst_component_widths_ms(),
         )
+        self.spectral_analysis = temporal_to_spectral_result(self.temporal_structure)
+        return self.temporal_structure
+
+    def run_spectral_analysis(self, segment_length_ms: float) -> SpectralAnalysisResult:
+        self.run_temporal_structure_analysis(segment_length_ms)
         return self.spectral_analysis
 
     def _build_source_ref(self) -> SessionSourceRef:
@@ -1512,6 +1557,7 @@ class BurstSession:
             dm=float(self.dm),
             preset_key=self.config.preset_key,
             sefd_jy=self.config.sefd_jy,
+            npol_override=self.config.npol_override,
             read_start_sec=float(self.config.read_start_sec),
             read_end_sec=self.config.read_end_sec,
             auto_mask_profile=self.config.auto_mask_profile,
@@ -1541,6 +1587,7 @@ class BurstSession:
             width_analysis=self.width_analysis,
             dm_optimization=self.dm_optimization,
             spectral_analysis=self.spectral_analysis,
+            temporal_structure=self.temporal_structure,
         )
 
     def snapshot_dict(self) -> dict[str, Any]:
@@ -1552,12 +1599,16 @@ class BurstSession:
         session_id: str,
         include: list[str] | tuple[str, ...] | None = None,
         plot_formats: list[str] | tuple[str, ...] | None = None,
+        window_formats: list[str] | tuple[str, ...] | None = None,
+        window_resolutions: list[str] | tuple[str, ...] | None = None,
     ) -> ExportManifest:
         snapshot = create_export_snapshot(
             self,
             session_id=session_id,
             include=include,
             plot_formats=plot_formats,
+            window_formats=window_formats,
+            window_resolutions=window_resolutions,
         )
         self.export_snapshots[snapshot.manifest.export_id] = snapshot
         self.export_order.append(snapshot.manifest.export_id)
@@ -1565,6 +1616,22 @@ class BurstSession:
             evicted_id = self.export_order.pop(0)
             self.export_snapshots.pop(evicted_id, None)
         return snapshot.manifest
+
+    def preview_export_results(
+        self,
+        *,
+        include: list[str] | tuple[str, ...] | None = None,
+        plot_formats: list[str] | tuple[str, ...] | None = None,
+        window_formats: list[str] | tuple[str, ...] | None = None,
+        window_resolutions: list[str] | tuple[str, ...] | None = None,
+    ) -> ExportPreview:
+        return preview_export(
+            self,
+            include=include,
+            plot_formats=plot_formats,
+            window_formats=window_formats,
+            window_resolutions=window_resolutions,
+        )
 
     def get_export_manifest(self, export_id: str) -> ExportManifest:
         snapshot = self.export_snapshots.get(export_id)

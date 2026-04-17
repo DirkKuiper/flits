@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import errno
+import os
+import shutil
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Iterator
 
 import numpy as np
 
@@ -18,6 +24,54 @@ except Exception as exc:  # pragma: no cover - depends on optional runtime stack
     _YOUR_IMPORT_ERROR = exc
 
 your = _your
+
+
+def _is_mmap_deadlock(exc: BaseException) -> bool:
+    return isinstance(exc, OSError) and exc.errno == errno.EDEADLK
+
+
+def _close_reader(reader: object | None) -> None:
+    if reader is None:
+        return
+    fp = getattr(reader, "fp", None)
+    if fp is not None and not getattr(fp, "closed", True):
+        try:
+            fp.close()
+        except OSError:
+            pass
+
+
+@contextmanager
+def _open_reader(source_path: Path) -> Iterator["your.Your"]:
+    """Open a your.Your reader, falling back to a local copy if the source mount rejects mmap.
+
+    Why: some network/FUSE mounts (sshfs, SMB, iCloud, etc.) return EDEADLK from mmap(),
+    which breaks pysigproc's reader. Copying the file to a local tempdir sidesteps this
+    without changing the read path.
+    """
+    if your.Your is None:
+        raise RuntimeError("The 'your' package is unavailable in the active environment.") from _YOUR_IMPORT_ERROR
+
+    temp_path: Path | None = None
+    reader: object | None = None
+    try:
+        try:
+            reader = your.Your(str(source_path))
+        except OSError as exc:
+            if not _is_mmap_deadlock(exc):
+                raise
+            tmp_dir = Path(tempfile.gettempdir())
+            temp_path = tmp_dir / f"flits_fb_{os.getpid()}_{source_path.name}"
+            shutil.copyfile(source_path, temp_path)
+            reader = your.Your(str(temp_path))
+        yield reader
+    finally:
+        _close_reader(reader)
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 @dataclass(frozen=True)
@@ -75,15 +129,8 @@ def _inspect_reader(reader: your.Your, source_path: Path) -> FilterbankInspectio
 
 def inspect_filterbank(path: str | Path) -> FilterbankInspection:
     source_path = Path(path).expanduser().resolve()
-    if your.Your is None:
-        raise RuntimeError("The 'your' package is unavailable in the active environment.") from _YOUR_IMPORT_ERROR
-    reader = your.Your(str(source_path))
-    try:
+    with _open_reader(source_path) as reader:
         return _inspect_reader(reader, source_path)
-    finally:
-        file_handle = getattr(reader, "fp", None)
-        if file_handle is not None and not file_handle.closed:
-            file_handle.close()
 
 
 def load_filterbank_data(
@@ -92,10 +139,7 @@ def load_filterbank_data(
     inspection: FilterbankInspection | None = None,
 ) -> tuple[np.ndarray, FilterbankMetadata]:
     source_path = Path(path).expanduser().resolve()
-    if your.Your is None:
-        raise RuntimeError("The 'your' package is unavailable in the active environment.") from _YOUR_IMPORT_ERROR
-    reader = your.Your(str(source_path))
-    try:
+    with _open_reader(source_path) as reader:
         header = reader.your_header
         filterbank_inspection = inspection or _inspect_reader(reader, source_path)
 
@@ -126,6 +170,7 @@ def load_filterbank_data(
 
         raw = reader.get_data(nstart, nread, npoln=header_npol)
         stokes_i, effective_npol = _build_stokes_i(raw)
+        effective_npol = max(1, int(config.npol_override)) if config.npol_override is not None else effective_npol
         stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp)
 
         tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
@@ -151,7 +196,3 @@ def load_filterbank_data(
             detection_basis=filterbank_inspection.detection_basis,
         )
         return stokes_i, metadata
-    finally:
-        file_handle = getattr(reader, "fp", None)
-        if file_handle is not None and not file_handle.closed:
-            file_handle.close()

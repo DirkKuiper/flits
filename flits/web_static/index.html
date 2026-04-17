@@ -55,6 +55,10 @@
             <span>SEFD (Jy) <span class="tooltip-icon" data-tooltip="System Equivalent Flux Density. Used to convert arbitrary data units into physical Janskys (Jy). Leave blank to remain in arbitrary units.">?</span></span>
             <input id="sefdInput" type="number" step="0.1" placeholder="optional">
           </label>
+          <label class="field">
+            <span>npol Override <span class="tooltip-icon" data-tooltip="Optional override for the number of summed polarizations used in radiometer calibration. Leave blank to use the value inferred from the data/header.">?</span></span>
+            <input id="npolInput" type="number" step="1" min="1" placeholder="header default">
+          </label>
           <div class="field-row">
             <label class="field">
               <span>Read Start (s) <span class="tooltip-icon" data-tooltip="Offset in seconds from the start of the file to begin reading. Useful for skipping header artifacts or seeking into large files.">?</span></span>
@@ -244,7 +248,7 @@
                 <button class="analysis-tab active" type="button" role="tab" aria-selected="true" data-analysis-tab="prepare">Prepare</button>
                 <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="dm">DM</button>
                 <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="fitting">Fitting</button>
-                <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="spectral">Spectral</button>
+                <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="temporal">Temporal</button>
                 <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="export">Export</button>
               </div>
             </div>
@@ -349,33 +353,147 @@
               <div class="plot fitting-plot is-empty" id="fittingProfilePlot"></div>
             </section>
 
-            <section class="analysis-panel" id="analysisSpectralPanel" data-tab-panel="spectral" role="tabpanel" hidden>
+            <section class="analysis-panel" id="analysisTemporalPanel" data-tab-panel="temporal" role="tabpanel" hidden>
               <div class="analysis-panel-head">
-                <h4>Spectral Structure</h4>
-                <p>Compute an averaged power spectrum using Stingray to analyze red noise and spectral indices. The power-law fit uses Maximum Likelihood Estimation (MLE) with a white-noise constant (C) to accurately model the &#967;&sup2; noise of the periodogram.</p>
+                <h4>Temporal Structure</h4>
+                <p>Measure the shortest statistically supported burst structure and inspect the fluctuation-frequency distribution with raw and averaged power spectra.</p>
               </div>
               <div class="field-row">
                 <label class="field">
-                  <span>Segment Length <span class="tooltip-icon" data-tooltip="Length of each time segment used for the averaged power spectrum. Shorter segments decrease frequency resolution but increase averaging (less noise). Longer segments increase frequency resolution but reduce averaging (more noise).">?</span></span>
+                  <span>Segment Length <span class="tooltip-icon" data-tooltip="Length of each time segment used for the averaged power spectrum. Shorter segments decrease frequency resolution but increase averaging. Longer segments increase frequency resolution but reduce averaging.">?</span></span>
                   <input id="spectralSegmentInput" type="number" step="0.001" min="0.001">
                 </label>
               </div>
               <div class="export-actions">
-                <button class="primary-button" id="runSpectralButton">Run Power Spectrum</button>
+                <button class="primary-button" id="runSpectralButton">Run Temporal Analysis</button>
               </div>
               <div id="spectralContent" class="results-content">
-                <div class="empty-state">No spectral-structure diagnostics yet. This tab will use the current crop, event/off-pulse windows, mask, spectral window, and applied DM.</div>
+                <div class="empty-state">No temporal-structure diagnostics yet. This tab uses the current crop, event/off-pulse windows, mask, spectral window, and applied DM.</div>
               </div>
+              <div class="plot dm-optimization-plot is-empty" id="temporalScalePlot"></div>
               <div class="plot dm-optimization-plot is-empty" id="spectralPlot"></div>
             </section>
 
             <section class="analysis-panel" id="analysisExportPanel" data-tab-panel="export" role="tabpanel" hidden>
               <div class="analysis-panel-head">
                 <h4>Export Results</h4>
-                <p>Build an immutable science bundle from the current session state, then download structured outputs, diagnostic arrays, and publication plots.</p>
+                <p>Choose the outputs you actually need, inspect the exact artifact set, and then build the immutable bundle from the current session state.</p>
               </div>
-              <div class="export-actions">
-                <button class="primary-button" id="buildExportButton">Build Export Bundle</button>
+              <div class="export-planner">
+                <div class="export-planner-grid">
+                  <section class="export-planner-column export-config-column" aria-labelledby="exportPlannerHeading">
+                    <div class="analysis-panel-head compact">
+                      <h5 id="exportPlannerHeading">Export Planner</h5>
+                      <p>Select structured outputs, arrays, and plots before generating the final bundle.</p>
+                    </div>
+                    <div class="export-option-list">
+                      <label class="export-option" for="exportIncludeJson">
+                        <input id="exportIncludeJson" type="checkbox">
+                        <span class="export-option-copy">
+                          <strong>Science JSON</strong>
+                          <span>Session metadata, measurement state, and artifact manifest.</span>
+                        </span>
+                      </label>
+                      <label class="export-option" for="exportIncludeCsv">
+                        <input id="exportIncludeCsv" type="checkbox">
+                        <span class="export-option-copy">
+                          <strong>Catalog CSV</strong>
+                          <span>Single-row catalog export for quick ingestion and comparison.</span>
+                        </span>
+                      </label>
+                      <label class="export-option" for="exportIncludeNpz">
+                        <input id="exportIncludeNpz" type="checkbox">
+                        <span class="export-option-copy">
+                          <strong>Diagnostics NPZ</strong>
+                          <span>Compressed arrays for downstream analysis and reproducibility.</span>
+                        </span>
+                      </label>
+                      <label class="export-option" for="exportIncludePlots">
+                        <input id="exportIncludePlots" type="checkbox">
+                        <span class="export-option-copy">
+                          <strong>Plots</strong>
+                          <span>Publication-ready figures for the current event, mask, and DM state.</span>
+                        </span>
+                      </label>
+                      <label class="export-option" for="exportIncludeWindow">
+                        <input id="exportIncludeWindow" type="checkbox">
+                        <span class="export-option-copy">
+                          <strong>Window Data</strong>
+                          <span>Export the selected event-plus-padding window and spectral extent as reusable data products.</span>
+                        </span>
+                      </label>
+                    </div>
+                    <div class="export-format-panel" id="exportPlotFormatSection" hidden>
+                      <div class="analysis-panel-head compact">
+                        <h5>Plot Formats</h5>
+                        <p>PNG is enabled by default when plot export is selected; add SVG if you need vector output.</p>
+                      </div>
+                      <div class="export-format-list">
+                        <label class="export-format-option" for="exportPlotPng">
+                          <input id="exportPlotPng" type="checkbox">
+                          <span>PNG</span>
+                        </label>
+                        <label class="export-format-option" for="exportPlotSvg">
+                          <input id="exportPlotSvg" type="checkbox">
+                          <span>SVG</span>
+                        </label>
+                      </div>
+                    </div>
+                    <div class="export-format-panel" id="exportWindowFormatSection" hidden>
+                      <div class="analysis-panel-head compact">
+                        <h5>Window Formats</h5>
+                        <p>NPZ is the rich analysis bundle; FIL is the interchange export for downstream radio tools.</p>
+                      </div>
+                      <div class="export-format-list">
+                        <label class="export-format-option" for="exportWindowNpz">
+                          <input id="exportWindowNpz" type="checkbox">
+                          <span>NPZ</span>
+                        </label>
+                        <label class="export-format-option" for="exportWindowFil">
+                          <input id="exportWindowFil" type="checkbox">
+                          <span>FIL</span>
+                        </label>
+                      </div>
+                    </div>
+                    <div class="export-format-panel" id="exportWindowResolutionSection" hidden>
+                      <div class="analysis-panel-head compact">
+                        <h5>Window Resolution</h5>
+                        <p>Native exports full current-session bins; View follows the current time and frequency reduction.</p>
+                      </div>
+                      <div class="export-format-list">
+                        <label class="export-format-option" for="exportWindowNative">
+                          <input id="exportWindowNative" type="checkbox">
+                          <span>Native</span>
+                        </label>
+                        <label class="export-format-option" for="exportWindowView">
+                          <input id="exportWindowView" type="checkbox">
+                          <span>View</span>
+                        </label>
+                      </div>
+                    </div>
+                    <div class="export-build-bar">
+                      <div class="export-selection-summary" id="exportSelectionSummary">Select one or more outputs to generate a preview.</div>
+                      <div class="export-actions">
+                        <button class="primary-button" id="buildExportButton">Build Export Bundle</button>
+                      </div>
+                    </div>
+                  </section>
+                  <section class="export-planner-column export-preview-column" aria-labelledby="exportPreviewHeading">
+                    <div class="analysis-panel-head compact">
+                      <h5 id="exportPreviewHeading">Preview</h5>
+                      <p>Exact artifact rows and small plot previews for the current selection.</p>
+                    </div>
+                    <div id="exportPreviewMeta" class="export-preview-meta"></div>
+                    <div id="exportPreviewThumbs" class="export-preview-thumbs"></div>
+                    <div id="exportPreviewContent" class="results-content">
+                      <div class="empty-state">Select outputs to preview the bundle before building it.</div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+              <div class="analysis-panel-head compact">
+                <h5>Last Built Bundle</h5>
+                <p>The most recent immutable export snapshot, with final filenames and downloads.</p>
               </div>
               <div id="exportManifestContent" class="results-content">
                 <div class="empty-state">No export bundle yet. Build one from the current measurements, masking, event window, and DM state.</div>

@@ -2,6 +2,16 @@ const state = {
   sessionId: null,
   view: null,
   exportManifest: null,
+  exportPreview: null,
+  exportPreviewStale: false,
+  exportPreviewPending: false,
+  exportPreviewError: null,
+  exportSelection: {
+    include: [],
+    plot_formats: [],
+    window_formats: [],
+    window_resolutions: [],
+  },
   mode: "event",
   activeAnalysisTab: "prepare",
   pending: null,
@@ -46,6 +56,7 @@ const fileInput = document.getElementById("fileInput")
 const dmInput = document.getElementById("dmInput")
 const telescopeInput = document.getElementById("telescopeInput")
 const sefdInput = document.getElementById("sefdInput")
+const npolInput = document.getElementById("npolInput")
 const readStartInput = document.getElementById("readStartInput")
 const readEndInput = document.getElementById("readEndInput")
 const distanceInput = document.getElementById("distanceInput")
@@ -77,9 +88,28 @@ const fittingProfilePlot = document.getElementById("fittingProfilePlot")
 const fitComponentsInput = document.getElementById("fitComponentsInput")
 const fitFixedParamsContainer = document.getElementById("fitFixedParamsContainer")
 const spectralContent = document.getElementById("spectralContent")
+const temporalScalePlot = document.getElementById("temporalScalePlot")
 const spectralPlot = document.getElementById("spectralPlot")
 const spectralSegmentInput = document.getElementById("spectralSegmentInput")
 const runSpectralButton = document.getElementById("runSpectralButton")
+const exportIncludeJson = document.getElementById("exportIncludeJson")
+const exportIncludeCsv = document.getElementById("exportIncludeCsv")
+const exportIncludeNpz = document.getElementById("exportIncludeNpz")
+const exportIncludePlots = document.getElementById("exportIncludePlots")
+const exportIncludeWindow = document.getElementById("exportIncludeWindow")
+const exportPlotFormatSection = document.getElementById("exportPlotFormatSection")
+const exportPlotPng = document.getElementById("exportPlotPng")
+const exportPlotSvg = document.getElementById("exportPlotSvg")
+const exportWindowFormatSection = document.getElementById("exportWindowFormatSection")
+const exportWindowResolutionSection = document.getElementById("exportWindowResolutionSection")
+const exportWindowNpz = document.getElementById("exportWindowNpz")
+const exportWindowFil = document.getElementById("exportWindowFil")
+const exportWindowNative = document.getElementById("exportWindowNative")
+const exportWindowView = document.getElementById("exportWindowView")
+const exportSelectionSummary = document.getElementById("exportSelectionSummary")
+const exportPreviewMeta = document.getElementById("exportPreviewMeta")
+const exportPreviewThumbs = document.getElementById("exportPreviewThumbs")
+const exportPreviewContent = document.getElementById("exportPreviewContent")
 const exportManifestContent = document.getElementById("exportManifestContent")
 const exportSessionButton = document.getElementById("exportSessionButton")
 const importSessionInput = document.getElementById("importSessionInput")
@@ -104,6 +134,8 @@ const freqUpButton = document.getElementById("freqUpButton")
 const toastStack = document.getElementById("toastStack")
 const presetDefaults = new Map()
 let syncingPresetSelection = false
+let exportPreviewTimer = null
+let exportPreviewRequestId = 0
 const ROOT_DIRECTORY_VALUE = "__flits_root__"
 const viewerDomains = {
   heatmap: { x: [0.0, 0.78], y: [0.0, 0.78] },
@@ -158,6 +190,17 @@ const sessionControls = [
   fitScatteringButton,
   runSpectralButton,
   buildExportButton,
+  exportIncludeJson,
+  exportIncludeCsv,
+  exportIncludeNpz,
+  exportIncludePlots,
+  exportIncludeWindow,
+  exportPlotPng,
+  exportPlotSvg,
+  exportWindowNpz,
+  exportWindowFil,
+  exportWindowNative,
+  exportWindowView,
   exportSessionButton,
   saveNotesButton,
   resetViewButton,
@@ -210,7 +253,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 function initialAnalysisTab() {
   const fromHash = window.location.hash.replace(/^#/, "").trim().toLowerCase()
-  const valid = new Set(["prepare", "dm", "fitting", "spectral", "export"])
+  const valid = new Set(["prepare", "dm", "fitting", "temporal", "export"])
   return valid.has(fromHash) ? fromHash : state.activeAnalysisTab
 }
 
@@ -291,11 +334,22 @@ function bindControls() {
     });
   })
   runSpectralButton.addEventListener("click", () => {
-    postAction("run_spectral_analysis", {
+    postAction("run_temporal_structure_analysis", {
       segment_length_ms: Number(spectralSegmentInput.value),
     })
   })
-  buildExportButton.addEventListener("click", () => postAction("export_results"))
+  exportIncludeJson.addEventListener("change", () => updateExportSelection("json", exportIncludeJson.checked))
+  exportIncludeCsv.addEventListener("change", () => updateExportSelection("csv", exportIncludeCsv.checked))
+  exportIncludeNpz.addEventListener("change", () => updateExportSelection("npz", exportIncludeNpz.checked))
+  exportIncludePlots.addEventListener("change", () => updateExportSelection("plots", exportIncludePlots.checked))
+  exportIncludeWindow.addEventListener("change", () => updateExportSelection("window", exportIncludeWindow.checked))
+  exportPlotPng.addEventListener("change", () => updateExportPlotFormat("png", exportPlotPng.checked))
+  exportPlotSvg.addEventListener("change", () => updateExportPlotFormat("svg", exportPlotSvg.checked))
+  exportWindowNpz.addEventListener("change", () => updateExportWindowFormat("npz", exportWindowNpz.checked))
+  exportWindowFil.addEventListener("change", () => updateExportWindowFormat("fil", exportWindowFil.checked))
+  exportWindowNative.addEventListener("change", () => updateExportWindowResolution("native", exportWindowNative.checked))
+  exportWindowView.addEventListener("change", () => updateExportWindowResolution("view", exportWindowView.checked))
+  buildExportButton.addEventListener("click", () => postAction("export_results", exportRequestPayload()))
   resetViewButton.addEventListener("click", () => postAction("reset_view"))
   clearRegionsButton.addEventListener("click", () => postAction("clear_regions"))
   clearOffpulseButton.addEventListener("click", () => postAction("clear_offpulse"))
@@ -318,6 +372,246 @@ function bindControls() {
   analysisTabButtons.forEach((button) => {
     button.addEventListener("click", () => setAnalysisTab(button.dataset.analysisTab))
   })
+}
+
+function exportRequestPayload() {
+  const includeOrder = ["json", "csv", "npz", "plots", "window"]
+  const formatOrder = ["png", "svg"]
+  const windowFormatOrder = ["npz", "fil"]
+  const windowResolutionOrder = ["native", "view"]
+  return {
+    include: includeOrder.filter((item) => state.exportSelection.include.includes(item)),
+    plot_formats: formatOrder.filter((item) => state.exportSelection.plot_formats.includes(item)),
+    window_formats: windowFormatOrder.filter((item) => state.exportSelection.window_formats.includes(item)),
+    window_resolutions: windowResolutionOrder.filter((item) => state.exportSelection.window_resolutions.includes(item)),
+  }
+}
+
+function resetExportSelection() {
+  state.exportSelection = {
+    include: [],
+    plot_formats: [],
+    window_formats: [],
+    window_resolutions: [],
+  }
+  state.exportPreview = null
+  state.exportPreviewStale = false
+  state.exportPreviewPending = false
+  state.exportPreviewError = null
+  if (exportPreviewTimer) {
+    window.clearTimeout(exportPreviewTimer)
+    exportPreviewTimer = null
+  }
+  syncExportPlannerControls()
+}
+
+function updateExportSelection(kind, enabled) {
+  const include = new Set(state.exportSelection.include)
+  if (enabled) {
+    include.add(kind)
+  } else {
+    include.delete(kind)
+  }
+
+  const plotFormats = new Set(state.exportSelection.plot_formats)
+  if (kind === "plots") {
+    if (enabled && plotFormats.size === 0) {
+      plotFormats.add("png")
+    }
+    if (!enabled) {
+      plotFormats.clear()
+    }
+  }
+
+  const windowFormats = new Set(state.exportSelection.window_formats)
+  const windowResolutions = new Set(state.exportSelection.window_resolutions)
+  if (kind === "window") {
+    if (enabled && windowFormats.size === 0) {
+      windowFormats.add("npz")
+    }
+    if (enabled && windowResolutions.size === 0) {
+      windowResolutions.add("native")
+    }
+    if (!enabled) {
+      windowFormats.clear()
+      windowResolutions.clear()
+    }
+  }
+
+  state.exportSelection = {
+    include: Array.from(include),
+    plot_formats: Array.from(plotFormats),
+    window_formats: Array.from(windowFormats),
+    window_resolutions: Array.from(windowResolutions),
+  }
+  state.exportPreviewStale = false
+  state.exportPreviewError = null
+  syncExportPlannerControls()
+  scheduleExportPreview()
+}
+
+function updateExportPlotFormat(format, enabled) {
+  const plotFormats = new Set(state.exportSelection.plot_formats)
+  if (enabled) {
+    plotFormats.add(format)
+  } else {
+    plotFormats.delete(format)
+  }
+
+  state.exportSelection = {
+    include: state.exportSelection.include.filter((item) => item !== "plots" || plotFormats.size > 0),
+    plot_formats: Array.from(plotFormats),
+    window_formats: Array.from(state.exportSelection.window_formats),
+    window_resolutions: Array.from(state.exportSelection.window_resolutions),
+  }
+  state.exportPreviewStale = false
+  state.exportPreviewError = null
+  syncExportPlannerControls()
+  scheduleExportPreview()
+}
+
+function updateExportWindowFormat(format, enabled) {
+  const windowFormats = new Set(state.exportSelection.window_formats)
+  if (enabled) {
+    windowFormats.add(format)
+  } else {
+    windowFormats.delete(format)
+  }
+
+  const include = state.exportSelection.include.filter((item) =>
+    item !== "window" || (windowFormats.size > 0 && state.exportSelection.window_resolutions.length > 0),
+  )
+
+  state.exportSelection = {
+    include,
+    plot_formats: Array.from(state.exportSelection.plot_formats),
+    window_formats: Array.from(windowFormats),
+    window_resolutions: Array.from(state.exportSelection.window_resolutions),
+  }
+  state.exportPreviewStale = false
+  state.exportPreviewError = null
+  syncExportPlannerControls()
+  scheduleExportPreview()
+}
+
+function updateExportWindowResolution(mode, enabled) {
+  const windowResolutions = new Set(state.exportSelection.window_resolutions)
+  if (enabled) {
+    windowResolutions.add(mode)
+  } else {
+    windowResolutions.delete(mode)
+  }
+
+  const include = state.exportSelection.include.filter((item) =>
+    item !== "window" || (state.exportSelection.window_formats.length > 0 && windowResolutions.size > 0),
+  )
+
+  state.exportSelection = {
+    include,
+    plot_formats: Array.from(state.exportSelection.plot_formats),
+    window_formats: Array.from(state.exportSelection.window_formats),
+    window_resolutions: Array.from(windowResolutions),
+  }
+  state.exportPreviewStale = false
+  state.exportPreviewError = null
+  syncExportPlannerControls()
+  scheduleExportPreview()
+}
+
+function syncExportPlannerControls() {
+  const include = new Set(state.exportSelection.include)
+  const plotFormats = new Set(state.exportSelection.plot_formats)
+  const windowFormats = new Set(state.exportSelection.window_formats)
+  const windowResolutions = new Set(state.exportSelection.window_resolutions)
+  exportIncludeJson.checked = include.has("json")
+  exportIncludeCsv.checked = include.has("csv")
+  exportIncludeNpz.checked = include.has("npz")
+  exportIncludePlots.checked = include.has("plots")
+  exportIncludeWindow.checked = include.has("window")
+  exportPlotPng.checked = plotFormats.has("png")
+  exportPlotSvg.checked = plotFormats.has("svg")
+  exportWindowNpz.checked = windowFormats.has("npz")
+  exportWindowFil.checked = windowFormats.has("fil")
+  exportWindowNative.checked = windowResolutions.has("native")
+  exportWindowView.checked = windowResolutions.has("view")
+  exportPlotFormatSection.hidden = !include.has("plots")
+  exportWindowFormatSection.hidden = !include.has("window")
+  exportWindowResolutionSection.hidden = !include.has("window")
+}
+
+function exportSelectionCount() {
+  return state.exportSelection.include.length
+}
+
+function markExportPreviewStale() {
+  if (!state.exportPreview && exportSelectionCount() === 0) {
+    return
+  }
+  state.exportPreviewStale = true
+  state.exportPreviewPending = false
+  state.exportPreviewError = null
+  if (exportPreviewTimer) {
+    window.clearTimeout(exportPreviewTimer)
+    exportPreviewTimer = null
+  }
+}
+
+function scheduleExportPreview({ immediate = false } = {}) {
+  if (exportPreviewTimer) {
+    window.clearTimeout(exportPreviewTimer)
+    exportPreviewTimer = null
+  }
+
+  if (!state.sessionId || exportSelectionCount() === 0) {
+    state.exportPreview = null
+    state.exportPreviewStale = false
+    state.exportPreviewPending = false
+    state.exportPreviewError = null
+    renderExportPlanner()
+    updateControlStates()
+    return
+  }
+
+  state.exportPreviewPending = true
+  state.exportPreviewError = null
+  renderExportPlanner()
+  const delay = immediate ? 0 : 220
+  exportPreviewTimer = window.setTimeout(() => {
+    requestExportPreview()
+  }, delay)
+}
+
+async function requestExportPreview() {
+  if (!state.sessionId || exportSelectionCount() === 0) {
+    return
+  }
+
+  const requestId = ++exportPreviewRequestId
+  state.exportPreviewPending = true
+  renderExportPlanner()
+  try {
+    const response = await api(`/api/sessions/${state.sessionId}/actions`, {
+      method: "POST",
+      body: JSON.stringify({ type: "preview_export_results", payload: exportRequestPayload() }),
+    })
+    if (requestId !== exportPreviewRequestId) {
+      return
+    }
+    state.exportPreview = response.export_preview || null
+    state.exportPreviewPending = false
+    state.exportPreviewStale = false
+    state.exportPreviewError = null
+    renderExportPlanner()
+    updateControlStates()
+  } catch (error) {
+    if (requestId !== exportPreviewRequestId) {
+      return
+    }
+    state.exportPreviewPending = false
+    state.exportPreviewStale = true
+    state.exportPreviewError = error.message
+    renderExportPlanner()
+  }
 }
 
 async function downloadSessionSnapshot() {
@@ -375,6 +669,7 @@ async function importSessionSnapshot(event) {
     })
     state.sessionId = payload.session_id
     state.exportManifest = null
+    resetExportSelection()
     applyView(payload.view)
     if (previousSessionId && previousSessionId !== payload.session_id) {
       try {
@@ -634,6 +929,7 @@ async function loadSession(options = {}) {
         dm: Number(dmInput.value),
         telescope: telescopeInput.value,
         sefd_jy: parseOptionalNumber(sefdInput.value),
+        npol_override: parseOptionalInteger(npolInput.value),
         read_start_sec: parseOptionalNumber(readStartInput.value),
         read_end_sec: parseOptionalNumber(readEndInput.value),
         distance_mpc: parseOptionalNumber(distanceInput.value),
@@ -643,6 +939,7 @@ async function loadSession(options = {}) {
     })
     state.sessionId = payload.session_id
     state.exportManifest = null
+    resetExportSelection()
     applyView(payload.view)
     if (previousSessionId && previousSessionId !== payload.session_id) {
       try {
@@ -685,13 +982,18 @@ async function postAction(type, payload = {}) {
       state.activeAnalysisTab = "prepare"
     } else if (type === "fit_scattering") {
       state.activeAnalysisTab = "fitting"
-    } else if (type === "run_spectral_analysis") {
-      state.activeAnalysisTab = "spectral"
+    } else if (type === "run_temporal_structure_analysis" || type === "run_spectral_analysis") {
+      state.activeAnalysisTab = "temporal"
     } else if (type === "export_results") {
       state.activeAnalysisTab = "export"
     }
     if (response.export_manifest) {
       state.exportManifest = response.export_manifest
+    }
+    if (type === "export_results") {
+      state.exportPreviewStale = false
+    } else {
+      markExportPreviewStale()
     }
     applyView(response.view)
     setStatus("Ready", "success")
@@ -720,6 +1022,7 @@ function applyView(view) {
   syncDmMetricOptions(view)
   dmInput.value = String(view.meta.dm)
   sefdInput.value = view.meta.sefd_jy === null || view.meta.sefd_jy === undefined ? "" : String(view.meta.sefd_jy)
+  npolInput.value = view.meta.npol_override === null || view.meta.npol_override === undefined ? "" : String(view.meta.npol_override)
   distanceInput.value = view.meta.distance_mpc === null || view.meta.distance_mpc === undefined ? "" : String(view.meta.distance_mpc)
   redshiftInput.value = view.meta.redshift === null || view.meta.redshift === undefined ? "" : String(view.meta.redshift)
   notesInput.value = view.state.notes || ""
@@ -735,6 +1038,7 @@ function applyView(view) {
   renderDmOptimization(view)
   renderFitting(view.results)
   renderSpectral(view)
+  renderExportPlanner()
   renderExportManifest()
   setAnalysisTab(state.activeAnalysisTab)
   renderPlots(view)
@@ -861,6 +1165,9 @@ function renderSessionFacts(view) {
     ["Selected profile", view.meta.telescope],
     ["Detected profile", view.meta.detected_telescope],
     ["Auto mask profile", view.meta.auto_mask_profile_label],
+    ["npol", view.meta.npol === null || view.meta.npol === undefined ? "missing" : String(view.meta.npol)],
+    ["Header npol", view.meta.header_npol === null || view.meta.header_npol === undefined ? "missing" : String(view.meta.header_npol)],
+    ["npol override", view.meta.npol_override === null || view.meta.npol_override === undefined ? "none" : String(view.meta.npol_override)],
     ["Telescope ID", view.meta.telescope_id === null ? "missing" : String(view.meta.telescope_id)],
     ["Machine ID", view.meta.machine_id === null ? "missing" : String(view.meta.machine_id)],
     ["Detection", view.meta.detection_basis],
@@ -901,13 +1208,18 @@ function renderPrepare(view) {
   }
 
   const acceptedWidth = results?.accepted_width || widthAnalysis?.accepted_width || null
-  const acceptedMethod = acceptedWidth?.method ? formatWidthMethod(acceptedWidth.method) : (results?.provenance?.width_method || "n/a")
-  const acceptedWidthValue = acceptedWidth?.value === null || acceptedWidth?.value === undefined
-    ? (results?.width_ms_acf === null || results?.width_ms_acf === undefined ? "n/a" : `${fmt(results.width_ms_acf, 3)} ms`)
-    : `${fmt(acceptedWidth.value, 3)} ${acceptedWidth.units || "ms"}`
-  const acceptedWidthUncertainty = acceptedWidth?.uncertainty === null || acceptedWidth?.uncertainty === undefined
-    ? (results?.uncertainties?.width_ms_acf === null || results?.uncertainties?.width_ms_acf === undefined ? "n/a" : `±${fmt(results.uncertainties.width_ms_acf, 3)} ms`)
-    : `±${fmt(acceptedWidth.uncertainty, 3)} ${acceptedWidth.units || "ms"}`
+  const hasAcceptedWidth = acceptedWidth?.value !== null && acceptedWidth?.value !== undefined
+  const hasAcfFallback = !hasAcceptedWidth && results?.width_ms_acf !== null && results?.width_ms_acf !== undefined
+  const acceptedWidthTitle = hasAcceptedWidth ? "Accepted Width" : "Temporal Correlation Width (ACF)"
+  const acceptedMethod = hasAcceptedWidth
+    ? formatWidthMethod(acceptedWidth.method)
+    : (hasAcfFallback ? "ACF half max" : "n/a")
+  const acceptedWidthValue = hasAcceptedWidth
+    ? `${fmt(acceptedWidth.value, 3)} ${acceptedWidth.units || "ms"}`
+    : (hasAcfFallback ? `${fmt(results.width_ms_acf, 3)} ms` : "n/a")
+  const acceptedWidthUncertainty = hasAcceptedWidth
+    ? (acceptedWidth.uncertainty === null || acceptedWidth.uncertainty === undefined ? "n/a" : `±${fmt(acceptedWidth.uncertainty, 3)} ${acceptedWidth.units || "ms"}`)
+    : (results?.uncertainties?.width_ms_acf === null || results?.uncertainties?.width_ms_acf === undefined ? "n/a" : `±${fmt(results.uncertainties.width_ms_acf, 3)} ms`)
 
   const cards = [
     renderMeasurementCard("TOA (Topo MJD)", results?.toa_topo_mjd === null || results?.toa_topo_mjd === undefined ? "n/a" : fmt(results.toa_topo_mjd, 8), {
@@ -926,11 +1238,11 @@ function renderPrepare(view) {
       flags: results?.measurement_flags || [],
       details: renderMeasurementDetails(results?.provenance),
     }),
-    renderMeasurementCard("Accepted Width", acceptedWidthValue, {
+    renderMeasurementCard(acceptedWidthTitle, acceptedWidthValue, {
       uncertainty: acceptedWidthUncertainty === "n/a" ? null : acceptedWidthUncertainty,
       method: acceptedMethod,
       flags: acceptedWidthFlags(widthAnalysis, acceptedWidth),
-      details: renderAcceptedWidthDetails(widthAnalysis, acceptedWidth, results?.provenance),
+      details: renderAcceptedWidthDetails(widthAnalysis, acceptedWidth, results?.provenance, hasAcfFallback),
     }),
     renderMeasurementCard("Fluence", results?.fluence_jyms === null || results?.fluence_jyms === undefined ? "n/a" : `${fmt(results.fluence_jyms, 3)} Jy ms`, {
       uncertainty: results?.uncertainties?.fluence_jyms ? `±${fmt(results.uncertainties.fluence_jyms, 3)} Jy ms` : null,
@@ -947,7 +1259,7 @@ function renderPrepare(view) {
   ]
 
   const secondaryTiles = [
-    resultTile("Spectral Width (ACF)", results?.spectral_width_mhz_acf === null || results?.spectral_width_mhz_acf === undefined ? "n/a" : `${fmt(results.spectral_width_mhz_acf, 3)} MHz`, "secondary"),
+    resultTile("Spectral Correlation Width (ACF)", results?.spectral_width_mhz_acf === null || results?.spectral_width_mhz_acf === undefined ? "n/a" : `${fmt(results.spectral_width_mhz_acf, 3)} MHz`, "secondary"),
     resultTile("Spectral Window", results?.spectral_extent_mhz === null || results?.spectral_extent_mhz === undefined ? "n/a" : `${fmt(results.spectral_extent_mhz, 2)} MHz`, "secondary"),
     resultTile("Event Duration", results?.event_duration_ms === null || results?.event_duration_ms === undefined ? "n/a" : `${fmt(results.event_duration_ms, 3)} ms`, "secondary"),
     resultTile("Isotropic Energy", formatIsoEnergy(results?.iso_e, results?.provenance?.energy_unit), "secondary"),
@@ -963,10 +1275,8 @@ function renderPrepare(view) {
     <div class="results-secondary">
       ${secondaryTiles.join("")}
     </div>
-    ${renderWidthAnalysisSection(widthAnalysis)}
     ${renderPrepareDiagnostics(results, widthAnalysis)}
   `
-  bindWidthActionButtons()
 }
 
 function renderPrepareChecklist(view, results) {
@@ -988,7 +1298,7 @@ function renderPrepareChecklist(view, results) {
     <section class="results-section">
       <div class="analysis-panel-head compact">
         <h5>Readiness</h5>
-        <p>Everything in DM, Fitting, and Spectral uses this same crop, event/off-pulse selection, mask, spectral window, and applied DM.</p>
+        <p>Everything in DM, Fitting, and Temporal uses this same crop, event/off-pulse selection, mask, spectral window, and applied DM.</p>
       </div>
       <div class="results-secondary">
         ${readinessTiles.join("")}
@@ -1331,7 +1641,9 @@ function renderFitting(results) {
 }
 
 function renderSpectral(view) {
-  const spectralAnalysis = view?.spectral_analysis
+  const temporalStructure = view?.temporal_structure
+  const widthAnalysis = view?.width_analysis
+  const results = view?.results
   const sharedStateTiles = [
     resultTile("Applied DM", fmt(view.meta.dm, 6), "secondary"),
     resultTile("Crop", `${fmt(view.state.crop_ms[0], 2)} to ${fmt(view.state.crop_ms[1], 2)} ms`, "secondary"),
@@ -1341,43 +1653,55 @@ function renderSpectral(view) {
     resultTile("Masked Channels", String(view.state.masked_channels.length), "secondary"),
   ]
 
-  let spectralBody = '<div class="empty-state">No averaged power spectrum yet. Choose a segment length and run the analysis on the current event window.</div>'
-  if (spectralAnalysis) {
+  let spectralBody = '<div class="empty-state">No temporal-structure diagnostics yet. Choose a segment length and run the analysis on the current event window.</div>'
+  if (temporalStructure) {
+    const summaryTiles = [
+      resultTile("Min Structure", temporalStructure.min_structure_ms_primary === null || temporalStructure.min_structure_ms_primary === undefined ? "n/a" : `${fmt(temporalStructure.min_structure_ms_primary, 3)} ms`, "primary"),
+      resultTile("Wavelet Scale", temporalStructure.min_structure_ms_wavelet === null || temporalStructure.min_structure_ms_wavelet === undefined ? "n/a" : `${fmt(temporalStructure.min_structure_ms_wavelet, 3)} ms`, "primary"),
+      resultTile("PSD Slope", temporalStructure.power_law_alpha === null || temporalStructure.power_law_alpha === undefined ? "n/a" : `${fmt(temporalStructure.power_law_alpha, 3)} ± ${fmt(temporalStructure.power_law_alpha_err, 3)}`, "primary"),
+      resultTile("fitburst Cross-Check", temporalStructure.fitburst_min_component_ms === null || temporalStructure.fitburst_min_component_ms === undefined ? "n/a" : `${fmt(temporalStructure.fitburst_min_component_ms, 3)} ms`, "primary"),
+    ]
     const resultTiles = [
-      resultTile("Status", spectralStatusLabel(spectralAnalysis.status), "secondary"),
-      resultTile("Normalization", spectralAnalysis.normalization || "none", "secondary"),
-      resultTile("Segment Length", spectralAnalysis.segment_length_ms === null || spectralAnalysis.segment_length_ms === undefined ? "n/a" : `${fmt(spectralAnalysis.segment_length_ms, 3)} ms`, "secondary"),
-      resultTile("Segments", spectralAnalysis.segment_count === null || spectralAnalysis.segment_count === undefined ? "n/a" : String(spectralAnalysis.segment_count), "secondary"),
-      resultTile("Event Window", Array.isArray(spectralAnalysis.event_window_ms) && spectralAnalysis.event_window_ms.length === 2 ? `${fmt(spectralAnalysis.event_window_ms[0], 3)} to ${fmt(spectralAnalysis.event_window_ms[1], 3)} ms` : "n/a", "secondary"),
-      resultTile("Resolution", spectralAnalysis.frequency_resolution_hz === null || spectralAnalysis.frequency_resolution_hz === undefined ? "n/a" : `${fmt(spectralAnalysis.frequency_resolution_hz, 3)} Hz`, "secondary"),
-      resultTile("Nyquist", spectralAnalysis.nyquist_hz === null || spectralAnalysis.nyquist_hz === undefined ? "n/a" : `${fmt(spectralAnalysis.nyquist_hz, 3)} Hz`, "secondary"),
-      resultTile("Bins", Array.isArray(spectralAnalysis.freq_hz) ? String(spectralAnalysis.freq_hz.length) : String(spectralAnalysis.freq_hz?.length || 0), "secondary"),
-      resultTile("Power-L. Index", spectralAnalysis.power_law_alpha === null || spectralAnalysis.power_law_alpha === undefined ? "n/a" : `${fmt(spectralAnalysis.power_law_alpha, 3)} ± ${fmt(spectralAnalysis.power_law_alpha_err, 3)}`, "secondary"),
-      resultTile("Noise Floor (C)", spectralAnalysis.power_law_c === null || spectralAnalysis.power_law_c === undefined ? "n/a" : `${fmt(spectralAnalysis.power_law_c, 3)} ± ${fmt(spectralAnalysis.power_law_c_err, 3)}`, "secondary"),
+      resultTile("Status", spectralStatusLabel(temporalStructure.status), "secondary"),
+      resultTile("Segment Length", temporalStructure.segment_length_ms === null || temporalStructure.segment_length_ms === undefined ? "n/a" : `${fmt(temporalStructure.segment_length_ms, 3)} ms`, "secondary"),
+      resultTile("Segments", temporalStructure.segment_count === null || temporalStructure.segment_count === undefined ? "n/a" : String(temporalStructure.segment_count), "secondary"),
+      resultTile("Resolution", temporalStructure.frequency_resolution_hz === null || temporalStructure.frequency_resolution_hz === undefined ? "n/a" : `${fmt(temporalStructure.frequency_resolution_hz, 3)} Hz`, "secondary"),
+      resultTile("Nyquist", temporalStructure.nyquist_hz === null || temporalStructure.nyquist_hz === undefined ? "n/a" : `${fmt(temporalStructure.nyquist_hz, 3)} Hz`, "secondary"),
+      resultTile("Raw Bins", Array.isArray(temporalStructure.raw_periodogram_freq_hz) ? String(temporalStructure.raw_periodogram_freq_hz.length) : String(temporalStructure.raw_periodogram_freq_hz?.length || 0), "secondary"),
+      resultTile("Averaged Bins", Array.isArray(temporalStructure.averaged_psd_freq_hz) ? String(temporalStructure.averaged_psd_freq_hz.length) : String(temporalStructure.averaged_psd_freq_hz?.length || 0), "secondary"),
+      resultTile("PSD Fit", formatPowerLawFitStatus(temporalStructure.power_law_fit_status), "secondary"),
+      resultTile("Noise Floor (C)", temporalStructure.power_law_c === null || temporalStructure.power_law_c === undefined ? "n/a" : `${fmt(temporalStructure.power_law_c, 3)} ± ${fmt(temporalStructure.power_law_c_err, 3)}`, "secondary"),
+      resultTile("Scattering Tau", results?.tau_sc_ms === null || results?.tau_sc_ms === undefined ? "n/a" : `${fmt(results.tau_sc_ms, 3)} ms`, "secondary"),
     ]
     spectralBody = `
       <div class="results-section">
         <div class="analysis-panel-head compact">
-          <h5>Averaged Power Spectrum</h5>
-          <p>Stingray uses the current event window only, after shared masking, spectral-window selection, and off-pulse baseline subtraction.</p>
+          <h5>Temporal Structure Summary</h5>
+          <p>Use the current selected-band event profile to estimate the shortest significant structure and compare raw and averaged power-spectrum diagnostics.</p>
+        </div>
+        <div class="results-primary">
+          ${summaryTiles.join("")}
         </div>
         <div class="results-secondary">
           ${resultTiles.join("")}
         </div>
         <div class="dm-fit-note" data-tone="neutral" style="margin-top: 1rem;">
-          <strong>Power-law Fit (MLE)</strong>
-          <span>The power-law parameters are estimated using Maximum Likelihood Estimation (MLE) maximizing the Whittle likelihood. Frequencies are normalized by their geometric mean to decouple the amplitude from the spectral index.</span>
+          <strong>How To Read This Tab</strong>
+          <span>The primary minimum-timescale metric is data-driven. The PSD slope is fit only on the averaged periodogram, while fitburst widths are shown as a model-based cross-check when available.</span>
         </div>
       </div>
-      ${spectralAnalysis.message ? `<div class="empty-state">${escapeHtml(spectralAnalysis.message)}</div>` : ""}
+      ${temporalStructure.message ? `<div class="empty-state">${escapeHtml(temporalStructure.message)}</div>` : ""}
+      ${renderWidthAnalysisSection(widthAnalysis)}
     `
+  } else if (widthAnalysis) {
+    spectralBody = renderWidthAnalysisSection(widthAnalysis)
   }
 
   spectralContent.innerHTML = `
     <div class="results-section">
       <div class="analysis-panel-head compact">
         <h5>Shared Session State</h5>
-        <p>The power-spectrum workflow uses the same current session state as Prepare, DM, and Fitting.</p>
+        <p>The temporal-structure workflow uses the same current session state as Prepare, DM, and Fitting.</p>
       </div>
       <div class="results-secondary">
         ${sharedStateTiles.join("")}
@@ -1385,20 +1709,110 @@ function renderSpectral(view) {
     </div>
     ${spectralBody}
   `
-  if (spectralAnalysis?.status === "ok") {
+  bindWidthActionButtons()
+  if (temporalStructure?.status === "ok") {
+    temporalScalePlot.classList.remove("is-empty")
     spectralPlot.classList.remove("is-empty")
-    if (state.activeAnalysisTab === "spectral") {
-      renderSpectralPlot(spectralAnalysis)
+    if (state.activeAnalysisTab === "temporal") {
+      renderTemporalScalePlot(temporalStructure)
+      renderSpectralPlot(temporalStructure)
     }
   } else {
+    temporalScalePlot.classList.add("is-empty")
+    Plotly.purge(temporalScalePlot)
+    temporalScalePlot.replaceChildren()
     spectralPlot.classList.add("is-empty")
     Plotly.purge(spectralPlot)
     spectralPlot.replaceChildren()
   }
 }
 
-async function renderSpectralPlot(spectralAnalysis) {
-  if (!spectralAnalysis || spectralAnalysis.status !== "ok") {
+async function renderTemporalScalePlot(temporalStructure) {
+  if (!temporalStructure || temporalStructure.status !== "ok") {
+    temporalScalePlot.classList.add("is-empty")
+    Plotly.purge(temporalScalePlot)
+    temporalScalePlot.replaceChildren()
+    return
+  }
+
+  temporalScalePlot.classList.remove("is-empty")
+  const traces = [
+    {
+      x: temporalStructure.matched_filter_scales_ms,
+      y: temporalStructure.matched_filter_boxcar_sigma,
+      mode: "lines+markers",
+      type: "scattergl",
+      line: { color: plotTheme.accent, width: 2 },
+      name: "Boxcar matched filter",
+      hovertemplate: "Scale %{x:.4f} ms<br>Significance %{y:.3f} sigma<extra></extra>",
+    },
+    {
+      x: temporalStructure.matched_filter_scales_ms,
+      y: temporalStructure.matched_filter_gaussian_sigma,
+      mode: "lines+markers",
+      type: "scattergl",
+      line: { color: plotTheme.accentAlt, width: 2 },
+      name: "Gaussian matched filter",
+      hovertemplate: "Scale %{x:.4f} ms<br>Significance %{y:.3f} sigma<extra></extra>",
+    },
+    {
+      x: temporalStructure.wavelet_scales_ms,
+      y: temporalStructure.wavelet_sigma,
+      mode: "lines+markers",
+      type: "scattergl",
+      line: { color: plotTheme.muted, width: 2, dash: "dot" },
+      name: "Wavelet scan",
+      hovertemplate: "Scale %{x:.4f} ms<br>Significance %{y:.3f} sigma<extra></extra>",
+    },
+  ]
+  if (typeof temporalStructure.matched_filter_threshold_sigma === "number" && Array.isArray(temporalStructure.matched_filter_scales_ms) && temporalStructure.matched_filter_scales_ms.length > 0) {
+    traces.push({
+      x: temporalStructure.matched_filter_scales_ms,
+      y: temporalStructure.matched_filter_scales_ms.map(() => temporalStructure.matched_filter_threshold_sigma),
+      mode: "lines",
+      type: "scattergl",
+      line: { color: plotTheme.warning, width: 1.5, dash: "dash" },
+      name: "Matched threshold",
+      hoverinfo: "skip",
+    })
+  }
+  if (typeof temporalStructure.wavelet_threshold_sigma === "number" && Array.isArray(temporalStructure.wavelet_scales_ms) && temporalStructure.wavelet_scales_ms.length > 0) {
+    traces.push({
+      x: temporalStructure.wavelet_scales_ms,
+      y: temporalStructure.wavelet_scales_ms.map(() => temporalStructure.wavelet_threshold_sigma),
+      mode: "lines",
+      type: "scattergl",
+      line: { color: plotTheme.alert, width: 1.5, dash: "dash" },
+      name: "Wavelet threshold",
+      hoverinfo: "skip",
+    })
+  }
+
+  await Plotly.react(
+    "temporalScalePlot",
+    traces,
+    {
+      margin: { l: 70, r: 24, t: 18, b: 54 },
+      paper_bgcolor: plotTheme.paperBg,
+      plot_bgcolor: plotTheme.plotBg,
+      showlegend: true,
+      legend: { orientation: "h" },
+      xaxis: {
+        title: "Scale (ms)",
+        type: "log",
+        gridcolor: plotTheme.grid,
+      },
+      yaxis: {
+        title: "Detection Significance (sigma)",
+        gridcolor: plotTheme.grid,
+      },
+    },
+    { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] },
+  )
+}
+
+async function renderSpectralPlot(temporalStructure) {
+  if (!temporalStructure || temporalStructure.status !== "ok") {
     spectralPlot.classList.add("is-empty")
     Plotly.purge(spectralPlot)
     spectralPlot.replaceChildren()
@@ -1408,25 +1822,35 @@ async function renderSpectralPlot(spectralAnalysis) {
   spectralPlot.classList.remove("is-empty")
   const traces = [
     {
-      x: spectralAnalysis.freq_hz,
-      y: spectralAnalysis.power,
+      x: temporalStructure.raw_periodogram_freq_hz,
+      y: temporalStructure.raw_periodogram_power,
+      mode: "lines",
+      type: "scattergl",
+      line: { color: plotTheme.neutral, width: 1.25 },
+      name: "Raw periodogram",
+      opacity: 0.7,
+      hovertemplate: "Raw %{x:.3f} Hz<br>Power %{y:.4g}<extra></extra>",
+    },
+    {
+      x: temporalStructure.averaged_psd_freq_hz,
+      y: temporalStructure.averaged_psd_power,
       mode: "lines",
       type: "scattergl",
       line: { color: plotTheme.accent, width: 2 },
-      name: "Averaged power",
+      name: "Averaged PSD",
       hovertemplate: "Frequency %{x:.3f} Hz<br>Power %{y:.4g}<extra></extra>",
     },
   ]
-  if (spectralAnalysis.power_law_a !== null && spectralAnalysis.power_law_a !== undefined && spectralAnalysis.power_law_alpha !== null && spectralAnalysis.power_law_alpha !== undefined && Array.isArray(spectralAnalysis.freq_hz) && spectralAnalysis.freq_hz.length > 0) {
-    const powerC = typeof spectralAnalysis.power_law_c === "number" ? spectralAnalysis.power_law_c : 0
-    const fitPower = spectralAnalysis.freq_hz.map(f => f > 0 ? spectralAnalysis.power_law_a * Math.pow(f, -spectralAnalysis.power_law_alpha) + powerC : null)
+  if (temporalStructure.power_law_a !== null && temporalStructure.power_law_a !== undefined && temporalStructure.power_law_alpha !== null && temporalStructure.power_law_alpha !== undefined && Array.isArray(temporalStructure.averaged_psd_freq_hz) && temporalStructure.averaged_psd_freq_hz.length > 0) {
+    const powerC = typeof temporalStructure.power_law_c === "number" ? temporalStructure.power_law_c : 0
+    const fitPower = temporalStructure.averaged_psd_freq_hz.map(f => f > 0 ? temporalStructure.power_law_a * Math.pow(f, -temporalStructure.power_law_alpha) + powerC : null)
     traces.push({
-      x: spectralAnalysis.freq_hz,
+      x: temporalStructure.averaged_psd_freq_hz,
       y: fitPower,
       mode: "lines",
       type: "scattergl",
       line: { color: plotTheme.accentAlt, width: 2, dash: "dash" },
-      name: "Power-law fit",
+      name: "Averaged PSD fit",
       hovertemplate: "Fit Power %{y:.4g}<extra></extra>",
     })
   }
@@ -1438,7 +1862,8 @@ async function renderSpectralPlot(spectralAnalysis) {
       margin: { l: 70, r: 24, t: 18, b: 54 },
       paper_bgcolor: plotTheme.paperBg,
       plot_bgcolor: plotTheme.plotBg,
-      showlegend: false,
+      showlegend: true,
+      legend: { orientation: "h" },
       xaxis: {
         title: "Frequency (Hz)",
         type: "log",
@@ -1473,6 +1898,7 @@ function renderExportManifest() {
     structured: artifacts.filter((artifact) => artifact.kind === "structured"),
     catalog: artifacts.filter((artifact) => artifact.kind === "catalog"),
     arrays: artifacts.filter((artifact) => artifact.kind === "arrays"),
+    window: artifacts.filter((artifact) => artifact.kind === "window"),
     plots: artifacts.filter((artifact) => artifact.kind === "plot"),
   }
 
@@ -1488,8 +1914,75 @@ function renderExportManifest() {
     ${renderArtifactGroup("Structured", groupedArtifacts.structured)}
     ${renderArtifactGroup("Catalog", groupedArtifacts.catalog)}
     ${renderArtifactGroup("Arrays", groupedArtifacts.arrays)}
+    ${renderArtifactGroup("Window", groupedArtifacts.window)}
     ${renderArtifactGroup("Plots", groupedArtifacts.plots)}
   `
+}
+
+function renderExportPlanner() {
+  syncExportPlannerControls()
+
+  if (!state.sessionId || !state.view) {
+    exportSelectionSummary.textContent = "Load a session to configure an export preview."
+    exportPreviewMeta.textContent = ""
+    exportPreviewThumbs.innerHTML = ""
+    exportPreviewContent.innerHTML =
+      '<div class="empty-state">Load a session before planning export products.</div>'
+    return
+  }
+
+  const labels = []
+  if (state.exportSelection.include.includes("json")) labels.push("JSON")
+  if (state.exportSelection.include.includes("csv")) labels.push("CSV")
+  if (state.exportSelection.include.includes("npz")) labels.push("NPZ")
+  if (state.exportSelection.include.includes("plots")) {
+    const formats = state.exportSelection.plot_formats.map((value) => value.toUpperCase()).join(" + ")
+    labels.push(formats ? `Plots (${formats})` : "Plots")
+  }
+  if (state.exportSelection.include.includes("window")) {
+    const formats = state.exportSelection.window_formats.map((value) => value.toUpperCase()).join(" + ")
+    const modes = state.exportSelection.window_resolutions.map((value) => value === "native" ? "Native" : "View").join(" + ")
+    labels.push(`Window${formats || modes ? ` (${[formats, modes].filter(Boolean).join(" · ")})` : ""}`)
+  }
+  exportSelectionSummary.textContent = labels.length
+    ? `Selected: ${labels.join(" · ")}`
+    : "Select one or more outputs to generate a preview."
+
+  if (exportSelectionCount() === 0) {
+    exportPreviewMeta.textContent = ""
+    exportPreviewThumbs.innerHTML = ""
+    exportPreviewContent.innerHTML =
+      '<div class="empty-state">Select outputs to preview the bundle before building it.</div>'
+    return
+  }
+
+  if (state.exportPreviewPending) {
+    exportPreviewMeta.textContent = "Refreshing exact preview..."
+    exportPreviewMeta.dataset.tone = "neutral"
+  } else if (state.exportPreviewError) {
+    exportPreviewMeta.textContent = state.exportPreviewError
+    exportPreviewMeta.dataset.tone = "warning"
+  } else if (state.exportPreviewStale) {
+    exportPreviewMeta.textContent = "Preview is out of date after session changes. It refreshes automatically in this tab."
+    exportPreviewMeta.dataset.tone = "warning"
+  } else if (state.exportPreview?.generated_at_utc) {
+    exportPreviewMeta.textContent = `Preview ready · ${formatUtcTimestamp(state.exportPreview.generated_at_utc)}`
+    exportPreviewMeta.dataset.tone = "success"
+  } else {
+    exportPreviewMeta.textContent = ""
+    exportPreviewMeta.dataset.tone = "neutral"
+  }
+
+  const preview = state.exportPreview
+  if (!preview) {
+    exportPreviewThumbs.innerHTML = ""
+    exportPreviewContent.innerHTML =
+      '<div class="empty-state">Preview pending. Adjust the selection and wait for the exact artifact list.</div>'
+    return
+  }
+
+  exportPreviewThumbs.innerHTML = renderExportPreviewThumbs(preview.plot_previews || [])
+  exportPreviewContent.innerHTML = renderExportPreviewArtifacts(preview.artifacts || [])
 }
 
 function resultTile(label, value, variant, tooltip = "") {
@@ -1534,11 +2027,15 @@ function renderMeasurementDetails(provenance) {
   `
 }
 
-function renderAcceptedWidthDetails(widthAnalysis, acceptedWidth, provenance) {
+function renderAcceptedWidthDetails(widthAnalysis, acceptedWidth, provenance, hasAcfFallback = false) {
   const result = widthAnalysis?.results?.find((item) => item.method === acceptedWidth?.method)
   const items = []
   if (acceptedWidth?.method) {
     items.push(["Accepted method", formatWidthMethod(acceptedWidth.method)])
+  }
+  if (hasAcfFallback) {
+    items.push(["Shown value", "ACF correlation-width fallback"])
+    items.push(["Interpretation", "Tracks coherence scale, not full burst extent"])
   }
   if (result?.algorithm_name) {
     items.push(["Algorithm", result.algorithm_name])
@@ -1859,11 +2356,18 @@ function syncFittingPlot() {
 }
 
 function syncSpectralPlot() {
-  const spectralAnalysis = state.view?.spectral_analysis
-  if (!spectralAnalysis || state.activeAnalysisTab !== "spectral" || spectralAnalysis.status !== "ok") {
+  const temporalStructure = state.view?.temporal_structure
+  if (!temporalStructure || state.activeAnalysisTab !== "temporal" || temporalStructure.status !== "ok") {
+    temporalScalePlot.classList.add("is-empty")
+    Plotly.purge(temporalScalePlot)
+    temporalScalePlot.replaceChildren()
+    spectralPlot.classList.add("is-empty")
+    Plotly.purge(spectralPlot)
+    spectralPlot.replaceChildren()
     return
   }
-  renderSpectralPlot(spectralAnalysis)
+  renderTemporalScalePlot(temporalStructure)
+  renderSpectralPlot(temporalStructure)
 }
 
 async function renderDmResidualPlot(optimization) {
@@ -2313,7 +2817,7 @@ function setMode(mode) {
 }
 
 function setAnalysisTab(tab) {
-  const normalizedTab = ["prepare", "dm", "fitting", "spectral", "export"].includes(tab) ? tab : "prepare"
+  const normalizedTab = ["prepare", "dm", "fitting", "temporal", "export"].includes(tab) ? tab : "prepare"
   state.activeAnalysisTab = normalizedTab
   analysisTabButtons.forEach((button) => {
     const isActive = button.dataset.analysisTab === normalizedTab
@@ -2332,8 +2836,10 @@ function setAnalysisTab(tab) {
     syncDmPlots()
   } else if (normalizedTab === "fitting") {
     syncFittingPlot()
-  } else if (normalizedTab === "spectral") {
+  } else if (normalizedTab === "temporal") {
     syncSpectralPlot()
+  } else if (normalizedTab === "export" && state.sessionId && exportSelectionCount() > 0 && (state.exportPreviewStale || !state.exportPreview)) {
+    scheduleExportPreview({ immediate: true })
   }
 }
 
@@ -2553,6 +3059,13 @@ function updateControlStates() {
 
   notesInput.disabled = !hasSession || isBusy
   dmMetricInput.disabled = !hasSession || isBusy
+  exportPlotPng.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("plots")
+  exportPlotSvg.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("plots")
+  exportWindowNpz.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("window")
+  exportWindowFil.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("window")
+  exportWindowNative.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("window")
+  exportWindowView.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("window")
+  buildExportButton.disabled = !hasSession || isBusy || exportSelectionCount() === 0
 
   loadButton.disabled = isBusy || !hasBurstPath
   applyBestDmButton.disabled = !hasSession || isBusy || !hasBestDm
@@ -2593,6 +3106,7 @@ function busyButtonForAction(action) {
   if (action === "auto_mask_jess") return jessButton
   if (action === "optimize_dm") return optimizeDmButton
   if (action === "fit_scattering") return fitScatteringButton
+  if (action === "run_temporal_structure_analysis") return runSpectralButton
   if (action === "run_spectral_analysis") return runSpectralButton
   if (action === "export_results") return buildExportButton
   if (action === "set_notes") return saveNotesButton
@@ -2609,6 +3123,7 @@ function busyButtonText(action) {
   if (action === "auto_mask_jess") return "Masking..."
   if (action === "optimize_dm") return "Sweeping DM..."
   if (action === "fit_scattering") return "Fitting..."
+  if (action === "run_temporal_structure_analysis") return "Running..."
   if (action === "run_spectral_analysis") return "Running..."
   if (action === "export_results") return "Building..."
   if (action === "set_notes") return "Saving..."
@@ -2640,6 +3155,7 @@ function actionBusyText(action) {
     compute_widths: "Computing width comparison",
     accept_width_result: "Accepting width result",
     fit_scattering: "Running scattering fit",
+    run_temporal_structure_analysis: "Running temporal structure",
     run_spectral_analysis: "Running power spectrum",
     export_results: "Building export bundle",
     set_notes: "Saving notes",
@@ -2660,6 +3176,7 @@ function actionSuccessText(action) {
     compute_widths: "Width comparison updated",
     accept_width_result: "Accepted width updated",
     fit_scattering: "Scattering fit completed",
+    run_temporal_structure_analysis: "Temporal structure updated",
     run_spectral_analysis: "Power spectrum updated",
     export_results: "Export bundle built",
     set_notes: "Notes saved",
@@ -2799,6 +3316,12 @@ function parseOptionalNumber(value) {
   if (trimmed === "") return null
   const num = Number(trimmed)
   return isNaN(num) ? null : num
+}
+
+function parseOptionalInteger(value) {
+  const num = parseOptionalNumber(value)
+  if (num === null) return null
+  return Math.max(1, Math.round(num))
 }
 
 function infoChip(label, value, tone = "neutral") {
@@ -3086,6 +3609,17 @@ function spectralStatusLabel(status) {
   return labels[status] || status || "Unknown"
 }
 
+function formatPowerLawFitStatus(status) {
+  const labels = {
+    ok: "Fit ready",
+    underconstrained: "Underconstrained",
+    fit_failed: "Fit failed",
+    unstable_covariance: "Unstable covariance",
+    unavailable: "Unavailable",
+  }
+  return labels[status] || status || "Unknown"
+}
+
 function renderProvenanceItems(provenance) {
   const items = [
     ["Peak selection", provenance.peak_selection || "n/a"],
@@ -3121,6 +3655,73 @@ function compactList(values) {
   if (!values.length) return "0"
   if (values.length <= 10) return values.join(", ")
   return `${values.slice(0, 10).join(", ")} ... (+${values.length - 10})`
+}
+
+function renderExportPreviewArtifacts(artifacts) {
+  if (!artifacts.length) {
+    return '<div class="empty-state">No artifacts in the current selection.</div>'
+  }
+  return `<div class="preview-artifact-list">${artifacts.map((artifact) => renderExportPreviewArtifactRow(artifact)).join("")}</div>`
+}
+
+function renderExportPreviewArtifactRow(artifact) {
+  const detail = artifact.status === "ready"
+    ? [artifact.format ? String(artifact.format).toUpperCase() : null, artifact.content_type].filter(Boolean).join(" · ")
+    : formatArtifactReason(artifact.reason)
+  return `
+    <div class="preview-artifact-row" data-status="${escapeHtml(artifact.status || "unknown")}">
+      <div class="preview-artifact-copy">
+        <strong>${escapeHtml(artifact.label || "artifact")}</strong>
+        <span>${escapeHtml(detail)}</span>
+      </div>
+      <span class="preview-artifact-badge">${escapeHtml(previewArtifactBadge(artifact))}</span>
+    </div>
+  `
+}
+
+function previewArtifactBadge(artifact) {
+  if (artifact.status !== "ready") {
+    return "Unavailable"
+  }
+  if (artifact.kind === "plot") {
+    return "Plot"
+  }
+  if (artifact.kind === "structured") {
+    return "Structured"
+  }
+  if (artifact.kind === "catalog") {
+    return "Catalog"
+  }
+  if (artifact.kind === "arrays") {
+    return "Arrays"
+  }
+  if (artifact.kind === "window") {
+    return "Window"
+  }
+  return "Ready"
+}
+
+function renderExportPreviewThumbs(previews) {
+  if (!previews.length) {
+    return ""
+  }
+  return previews.map((preview) => renderExportPreviewThumb(preview)).join("")
+}
+
+function renderExportPreviewThumb(preview) {
+  const figure = preview.svg
+    ? `<div class="preview-thumb-figure">${preview.svg}</div>`
+    : `<div class="preview-thumb-figure"><div class="preview-thumb-placeholder">${escapeHtml(formatArtifactReason(preview.reason))}</div></div>`
+  const detail = preview.status === "ready" ? "Selected for export preview." : formatArtifactReason(preview.reason)
+  return `
+    <article class="preview-thumb" data-status="${escapeHtml(preview.status || "unknown")}">
+      ${figure}
+      <div class="preview-thumb-copy">
+        <strong>${escapeHtml(preview.title || "Plot Preview")}</strong>
+        <span>${escapeHtml(detail)}</span>
+      </div>
+    </article>
+  `
 }
 
 function renderArtifactGroup(title, artifacts) {

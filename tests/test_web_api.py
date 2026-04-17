@@ -12,7 +12,7 @@ import numpy as np
 from fastapi import HTTPException
 
 from flits.io.filterbank import FilterbankInspection, your
-from flits.models import FilterbankMetadata, SpectralAnalysisResult
+from flits.models import FilterbankMetadata, SpectralAnalysisResult, TemporalStructureResult
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
 from flits.web.app import (
@@ -243,17 +243,23 @@ class WebApiTest(unittest.TestCase):
         self.assertIn('data-analysis-tab="prepare"', index_html)
         self.assertIn('data-analysis-tab="dm"', index_html)
         self.assertIn('data-analysis-tab="fitting"', index_html)
-        self.assertIn('data-analysis-tab="spectral"', index_html)
+        self.assertIn('data-analysis-tab="temporal"', index_html)
         self.assertIn('data-analysis-tab="export"', index_html)
         self.assertIn('id="dmResidualPlot"', index_html)
         self.assertIn('id="fitScatteringButton"', index_html)
         self.assertIn('id="fittingSpectrumPlot"', index_html)
         self.assertIn('id="fittingProfilePlot"', index_html)
+        self.assertIn('id="analysisTemporalPanel"', index_html)
         self.assertIn('id="spectralContent"', index_html)
+        self.assertIn('id="temporalScalePlot"', index_html)
         self.assertIn('id="spectralPlot"', index_html)
         self.assertIn('id="spectralSegmentInput"', index_html)
         self.assertIn('id="runSpectralButton"', index_html)
         self.assertIn('id="buildExportButton"', index_html)
+        self.assertIn('id="exportPreviewContent"', index_html)
+        self.assertIn('id="exportPreviewThumbs"', index_html)
+        self.assertIn('id="exportIncludeJson"', index_html)
+        self.assertIn('id="exportIncludePlots"', index_html)
         self.assertIn('data-mode="offpulse"', index_html)
         self.assertIn('data-mode="region"', index_html)
         self.assertIn('id="clearOffpulseButton"', index_html)
@@ -272,6 +278,9 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("syncSpectralPlot", app_js)
         self.assertIn("syncSpectralSegmentInput", app_js)
         self.assertIn("exportManifest", app_js)
+        self.assertIn("exportPreview", app_js)
+        self.assertIn("preview_export_results", app_js)
+        self.assertIn("renderExportPlanner", app_js)
         self.assertIn("compute_widths", app_js)
         self.assertIn("downloadSessionSnapshot", app_js)
         self.assertIn("importSessionSnapshot", app_js)
@@ -281,8 +290,35 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("DMphase Reference", app_js)
         self.assertIn("renderDmMetricDefinition", app_js)
         self.assertIn("replaceState", app_js)
+        self.assertIn("run_temporal_structure_analysis", app_js)
         self.assertIn("run_spectral_analysis", app_js)
         self.assertNotIn("time_downsample_factor", app_js)
+
+    def test_preview_export_action_returns_preview_payload(self) -> None:
+        session_id = "synthetic-export-preview-web"
+        session = _synthetic_session()
+        session.compute_properties()
+        session.optimize_dm(center_dm=50.0, half_range=4.0, step=0.5)
+        SESSIONS[session_id] = session
+
+        payload = session_action(
+            session_id,
+            ActionRequest(type="preview_export_results", payload={"include": ["json", "plots"], "plot_formats": ["png"]}),
+        )
+
+        self.assertIsNone(payload["export_manifest"])
+        self.assertIsNotNone(payload["export_preview"])
+        self.assertEqual(
+            payload["export_preview"]["selection"],
+            {
+                "include": ["json", "plots"],
+                "plot_formats": ["png"],
+                "window_formats": [],
+                "window_resolutions": [],
+            },
+        )
+        self.assertTrue(any(item["label"] == "Science JSON" for item in payload["export_preview"]["artifacts"]))
+        self.assertTrue(any(item["plot_key"] == "dynamic_spectrum" for item in payload["export_preview"]["plot_previews"]))
 
     @patch("flits.web.app.BurstSession.from_file")
     @patch("flits.web.app.resolve_burst_path")
@@ -308,11 +344,47 @@ class WebApiTest(unittest.TestCase):
                 dm=50.0,
                 telescope=None,
                 sefd_jy=None,
+                npol_override=None,
                 read_start_sec=None,
                 read_end_sec=None,
                 auto_mask_profile="thorough",
                 distance_mpc=123.0,
                 redshift=0.12,
+            )
+        finally:
+            SESSIONS.pop(payload["session_id"], None)
+
+    @patch("flits.web.app.BurstSession.from_file")
+    @patch("flits.web.app.resolve_burst_path")
+    def test_create_session_passes_npol_override(self, mock_resolve_path: object, mock_from_file: object) -> None:
+        mock_resolve_path.return_value = Path("/tmp/synthetic.fil")
+        session = _synthetic_session()
+        session.config = ObservationConfig.from_preset(dm=0.0, preset_key="generic", sefd_jy=10.0, npol_override=1)
+        mock_from_file.return_value = session
+
+        payload = create_session(
+            CreateSessionRequest(
+                bfile="synthetic.fil",
+                dm=50.0,
+                npol_override=1,
+            )
+        )
+
+        try:
+            self.assertEqual(payload["view"]["meta"]["npol"], 1)
+            self.assertEqual(payload["view"]["meta"]["npol_override"], 1)
+            self.assertEqual(payload["view"]["meta"]["header_npol"], 1)
+            mock_from_file.assert_called_once_with(
+                "/tmp/synthetic.fil",
+                dm=50.0,
+                telescope=None,
+                sefd_jy=None,
+                npol_override=1,
+                read_start_sec=None,
+                read_end_sec=None,
+                auto_mask_profile="auto",
+                distance_mpc=None,
+                redshift=None,
             )
         finally:
             SESSIONS.pop(payload["session_id"], None)
@@ -451,6 +523,66 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(analysis["freq_hz"], [62.5, 125.0])
         self.assertEqual(analysis["power"], [1.5, 0.75])
 
+    def test_session_action_run_temporal_structure_analysis_returns_serialized_payload(self) -> None:
+        session_id = "synthetic-temporal-dispatch"
+        session = _synthetic_session()
+        expected = TemporalStructureResult(
+            status="ok",
+            message=None,
+            segment_length_ms=16.0,
+            segment_bins=16,
+            segment_count=2,
+            normalization="none",
+            event_window_ms=[112.0, 128.0],
+            spectral_extent_mhz=[1000.0, 1100.0],
+            tsamp_ms=1.0,
+            frequency_resolution_hz=62.5,
+            nyquist_hz=500.0,
+            min_structure_ms_primary=2.0,
+            min_structure_ms_wavelet=4.0,
+            fitburst_min_component_ms=3.0,
+            power_law_fit_status="underconstrained",
+            power_law_fit_message="Need at least 12 bins.",
+            raw_periodogram_freq_hz=np.array([62.5, 125.0], dtype=float),
+            raw_periodogram_power=np.array([1.8, 0.9], dtype=float),
+            averaged_psd_freq_hz=np.array([62.5, 125.0], dtype=float),
+            averaged_psd_power=np.array([1.5, 0.75], dtype=float),
+            matched_filter_scales_ms=np.array([1.0, 2.0, 4.0], dtype=float),
+            matched_filter_boxcar_sigma=np.array([2.5, 5.7, 4.1], dtype=float),
+            matched_filter_gaussian_sigma=np.array([2.0, 5.1, 3.8], dtype=float),
+            matched_filter_threshold_sigma=5.0,
+            wavelet_scales_ms=np.array([1.0, 2.0, 4.0], dtype=float),
+            wavelet_sigma=np.array([1.8, 4.9, 3.0], dtype=float),
+            wavelet_threshold_sigma=5.0,
+        )
+
+        def _run(segment_length_ms: float) -> TemporalStructureResult:
+            session.temporal_structure = expected
+            return expected
+
+        session.run_temporal_structure_analysis = Mock(side_effect=_run)
+        SESSIONS[session_id] = session
+        try:
+            payload = session_action(
+                session_id,
+                ActionRequest(type="run_temporal_structure_analysis", payload={"segment_length_ms": 16.0}),
+            )
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        session.run_temporal_structure_analysis.assert_called_once_with(segment_length_ms=16.0)
+        temporal = payload["view"]["temporal_structure"]
+        self.assertIsNotNone(temporal)
+        self.assertEqual(temporal["status"], "ok")
+        self.assertEqual(temporal["segment_length_ms"], 16.0)
+        self.assertEqual(temporal["min_structure_ms_primary"], 2.0)
+        self.assertEqual(temporal["min_structure_ms_wavelet"], 4.0)
+        self.assertEqual(temporal["fitburst_min_component_ms"], 3.0)
+        self.assertEqual(temporal["raw_periodogram_freq_hz"], [62.5, 125.0])
+        self.assertEqual(temporal["averaged_psd_power"], [1.5, 0.75])
+        self.assertEqual(temporal["matched_filter_scales_ms"], [1.0, 2.0, 4.0])
+        self.assertEqual(temporal["power_law_fit_status"], "underconstrained")
+
     def test_session_action_supports_offpulse_width_and_notes_actions(self) -> None:
         session_id = "synthetic-phase1-actions"
         session = _synthetic_session()
@@ -529,7 +661,9 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("diagnostics", results)
         self.assertIn("mjd_at_peak", results)
         self.assertIn("spectral_analysis", payload["view"])
+        self.assertIn("temporal_structure", payload["view"])
         self.assertIsNone(payload["view"]["spectral_analysis"])
+        self.assertIsNone(payload["view"]["temporal_structure"])
 
     def test_delete_session_removes_session(self) -> None:
         session_id = "synthetic-delete"

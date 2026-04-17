@@ -29,6 +29,7 @@ class CreateSessionRequest(BaseModel):
     dm: float
     telescope: str | None = None
     sefd_jy: float | None = None
+    npol_override: int | None = None
     read_start_sec: float | None = None
     read_end_sec: float | None = None
     auto_mask_profile: str | None = "auto"
@@ -174,6 +175,7 @@ def create_session(request: CreateSessionRequest) -> dict[str, Any]:
         dm=request.dm,
         telescope=request.telescope,
         sefd_jy=request.sefd_jy,
+        npol_override=request.npol_override,
         read_start_sec=request.read_start_sec,
         read_end_sec=request.read_end_sec,
         auto_mask_profile=request.auto_mask_profile,
@@ -253,6 +255,7 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
     action = request.type
     payload = request.payload
     export_manifest: dict[str, Any] | None = None
+    export_preview: dict[str, Any] | None = None
 
     try:
         if action == "time_factor":
@@ -306,17 +309,31 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
             session.compute_properties()
         elif action == "fit_scattering":
             session.fit_scattering(payload)
+        elif action == "run_temporal_structure_analysis":
+            session.run_temporal_structure_analysis(
+                segment_length_ms=float(payload["segment_length_ms"]),
+            )
         elif action == "run_spectral_analysis":
             session.run_spectral_analysis(
                 segment_length_ms=float(payload["segment_length_ms"]),
             )
         elif action == "set_notes":
             session.set_notes(payload.get("notes"))
+        elif action == "preview_export_results":
+            preview = session.preview_export_results(
+                include=payload.get("include"),
+                plot_formats=payload.get("plot_formats"),
+                window_formats=payload.get("window_formats"),
+                window_resolutions=payload.get("window_resolutions"),
+            )
+            export_preview = preview.to_dict()
         elif action == "export_results":
             manifest = session.export_results(
                 session_id=session_id,
                 include=payload.get("include"),
                 plot_formats=payload.get("plot_formats"),
+                window_formats=payload.get("window_formats"),
+                window_resolutions=payload.get("window_resolutions"),
             )
             export_manifest = manifest.to_dict()
         else:
@@ -326,7 +343,12 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return {"session_id": session_id, "view": session.get_view(), "export_manifest": export_manifest}
+    return {
+        "session_id": session_id,
+        "view": session.get_view(),
+        "export_manifest": export_manifest,
+        "export_preview": export_preview,
+    }
 
 
 def main() -> None:

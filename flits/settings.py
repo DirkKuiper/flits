@@ -221,6 +221,7 @@ class ObservationConfig:
     preset_key: str = "generic"
     telescope_label: str = "Generic Filterbank"
     sefd_jy: float | None = None
+    npol_override: int | None = None
     read_start_sec: float = 0.0
     read_end_sec: float | None = None
     normalization_tail_fraction: float = 0.25
@@ -235,6 +236,7 @@ class ObservationConfig:
         preset_key: str | None = "generic",
         *,
         sefd_jy: float | None = None,
+        npol_override: int | None = None,
         read_start_sec: float | None = None,
         read_end_sec: float | None = None,
         auto_mask_profile: str | None = "auto",
@@ -249,6 +251,7 @@ class ObservationConfig:
             preset_key=preset.key,
             telescope_label=preset.label,
             sefd_jy=preset.sefd_jy if sefd_jy is None else float(sefd_jy),
+            npol_override=None if npol_override is None else max(1, int(npol_override)),
             read_start_sec=preset.read_start_sec if read_start_sec is None else float(read_start_sec),
             read_end_sec=preset.read_end_sec if read_end_sec is None else float(read_end_sec),
             normalization_tail_fraction=preset.normalization_tail_fraction,

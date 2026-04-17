@@ -20,21 +20,32 @@ from matplotlib.colors import LinearSegmentedColormap
 
 from flits import __version__
 from flits.analysis.dm_optimization import dm_metric_definition
+from flits.io.sigproc import SigprocFilterbankHeader, build_sigproc_filterbank_bytes
 from flits.measurements import _acf_width
-from flits.models import ExportArtifact, ExportManifest
+from flits.models import (
+    ExportArtifact,
+    ExportManifest,
+    ExportPlotPreview,
+    ExportPreview,
+    ExportPreviewArtifact,
+)
 
 
 if TYPE_CHECKING:
     from flits.session import BurstSession
 
 
-EXPORT_SCHEMA_VERSION = "1.1"
+EXPORT_SCHEMA_VERSION = "1.3"
 DEFAULT_EXPORT_INCLUDE = ("json", "csv", "npz", "plots")
 DEFAULT_PLOT_FORMATS = ("png", "svg")
+DEFAULT_WINDOW_FORMATS = ("npz",)
+DEFAULT_WINDOW_RESOLUTIONS = ("native",)
 MAX_EXPORT_SNAPSHOTS = 3
 
-_VALID_INCLUDE = frozenset(DEFAULT_EXPORT_INCLUDE)
+_VALID_INCLUDE = frozenset((*DEFAULT_EXPORT_INCLUDE, "window"))
 _VALID_PLOT_FORMATS = frozenset(DEFAULT_PLOT_FORMATS)
+_VALID_WINDOW_FORMATS = frozenset(("fil", "npz"))
+_VALID_WINDOW_RESOLUTIONS = frozenset(("native", "view"))
 
 ASTROFLASH_COLORS = {
     "ink": "#323232",
@@ -70,6 +81,7 @@ class ExportSnapshotData:
     results: dict[str, Any] | None
     width_analysis: dict[str, Any] | None
     dm_optimization: dict[str, Any] | None
+    temporal_structure: dict[str, Any] | None
     dynamic_spectrum: np.ndarray
     time_axis_ms: np.ndarray
     freq_axis_mhz: np.ndarray
@@ -94,84 +106,172 @@ class ExportSnapshotData:
     peak_positions_ms: np.ndarray
 
 
+@dataclass(frozen=True)
+class ExportSelection:
+    include: tuple[str, ...]
+    plot_formats: tuple[str, ...]
+    window_formats: tuple[str, ...]
+    window_resolutions: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, list[str]]:
+        return {
+            "include": list(self.include),
+            "plot_formats": list(self.plot_formats),
+            "window_formats": list(self.window_formats),
+            "window_resolutions": list(self.window_resolutions),
+        }
+
+
+@dataclass(frozen=True)
+class PlannedArtifact:
+    key: str
+    label: str
+    kind: str
+    content_type: str
+    status: str
+    reason: str | None
+    filename_suffix: str
+    build_target: str
+    format: str | None = None
+    plot_key: str | None = None
+    window_mode: str | None = None
+
+    def materialized_name(self, bundle_name: str) -> str:
+        return f"{bundle_name}_{self.filename_suffix}"
+
+
+@dataclass(frozen=True)
+class PlotPlan:
+    key: str
+    title: str
+    status: str
+    reason: str | None
+
+
+@dataclass(frozen=True)
+class WindowExportData:
+    mode: str
+    dynamic_spectrum: np.ndarray
+    time_axis_ms: np.ndarray
+    freq_axis_mhz: np.ndarray
+    time_start_bin: int
+    time_end_bin: int
+    crop_start_bin: int
+    crop_end_bin: int
+    event_start_rel_bin: int
+    event_end_rel_bin: int
+    spectral_extent_channels: tuple[int, int]
+    spectral_extent_mhz: tuple[float, float]
+    masked_channels: np.ndarray
+    time_factor: int
+    freq_factor: int
+    effective_tsamp_sec: float
+    effective_freqres_mhz: float
+    frequency_step_mhz: float
+
+
+def preview_export(
+    session: "BurstSession",
+    *,
+    include: Sequence[str] | None = None,
+    plot_formats: Sequence[str] | None = None,
+    window_formats: Sequence[str] | None = None,
+    window_resolutions: Sequence[str] | None = None,
+) -> ExportPreview:
+    selection = _normalize_selection(
+        include=include,
+        plot_formats=plot_formats,
+        window_formats=window_formats,
+        window_resolutions=window_resolutions,
+    )
+    snapshot = _build_snapshot_data(session)
+    plan = _plan_export(snapshot, selection)
+    plot_previews = _build_plot_previews(snapshot, plan)
+    return ExportPreview(
+        selection=selection.to_dict(),
+        artifacts=[
+            ExportPreviewArtifact(
+                label=artifact.label,
+                kind=artifact.kind,
+                content_type=artifact.content_type,
+                format=artifact.format,
+                status=artifact.status,
+                reason=artifact.reason,
+            )
+            for artifact in plan
+        ],
+        plot_previews=plot_previews,
+        generated_at_utc=snapshot.created_at_utc,
+    )
+
+
 def create_export_snapshot(
     session: "BurstSession",
     *,
     session_id: str,
     include: Sequence[str] | None = None,
     plot_formats: Sequence[str] | None = None,
+    window_formats: Sequence[str] | None = None,
+    window_resolutions: Sequence[str] | None = None,
 ) -> StoredExportSnapshot:
-    include_types = _normalize_requested(include, _VALID_INCLUDE, DEFAULT_EXPORT_INCLUDE, "export include")
-    formats = _normalize_requested(plot_formats, _VALID_PLOT_FORMATS, DEFAULT_PLOT_FORMATS, "plot format")
+    selection = _normalize_selection(
+        include=include,
+        plot_formats=plot_formats,
+        window_formats=window_formats,
+        window_resolutions=window_resolutions,
+    )
     snapshot = _build_snapshot_data(session)
+    window_exports = _build_window_exports(session, selection)
+    window_metadata = {
+        mode: _build_window_metadata_payload(snapshot, window)
+        for mode, window in window_exports.items()
+    }
+    plan = _plan_export(snapshot, selection)
+    plot_figure_cache = _build_plot_figure_cache(snapshot, plan)
 
     specs: list[dict[str, Any]] = []
     contents: dict[str, bytes] = {}
 
-    if "csv" in include_types:
-        csv_name = f"{snapshot.bundle_name}_catalog.csv"
-        csv_bytes = _build_catalog_csv(snapshot)
-        specs.append(
-            _ready_artifact_spec(
-                session_id=session_id,
-                export_id=snapshot.export_id,
-                name=csv_name,
-                kind="catalog",
-                content_type="text/csv; charset=utf-8",
-                content=csv_bytes,
-            )
-        )
-        contents[csv_name] = csv_bytes
+    for artifact in plan:
+        if artifact.build_target == "json":
+            continue
 
-    if "npz" in include_types:
-        npz_name = f"{snapshot.bundle_name}_diagnostics.npz"
-        npz_bytes = _build_diagnostics_npz(snapshot)
-        specs.append(
-            _ready_artifact_spec(
-                session_id=session_id,
-                export_id=snapshot.export_id,
-                name=npz_name,
-                kind="arrays",
-                content_type="application/x-npz",
-                content=npz_bytes,
-            )
-        )
-        contents[npz_name] = npz_bytes
-
-    if "plots" in include_types:
-        for plot_name, figure, reason in _build_plot_figures(snapshot):
-            for fmt in formats:
-                artifact_name = f"{snapshot.bundle_name}_{plot_name}.{fmt}"
-                content_type = "image/png" if fmt == "png" else "image/svg+xml"
-                if figure is None:
-                    specs.append(
-                        _omitted_artifact_spec(
-                            name=artifact_name,
-                            kind="plot",
-                            content_type=content_type,
-                            reason=reason or "plot_unavailable",
-                        )
-                    )
-                    continue
-                plot_bytes = _figure_bytes(figure, fmt)
-                specs.append(
-                    _ready_artifact_spec(
-                        session_id=session_id,
-                        export_id=snapshot.export_id,
-                        name=artifact_name,
-                        kind="plot",
-                        content_type=content_type,
-                        content=plot_bytes,
-                    )
+        artifact_name = artifact.materialized_name(snapshot.bundle_name)
+        if artifact.status != "ready":
+            specs.append(
+                _omitted_artifact_spec(
+                    name=artifact_name,
+                    kind=artifact.kind,
+                    content_type=artifact.content_type,
+                    reason=artifact.reason or "plot_unavailable",
                 )
-                contents[artifact_name] = plot_bytes
-            if figure is not None:
-                plt.close(figure)
+            )
+            continue
 
-    json_name = f"{snapshot.bundle_name}_science.json"
+        content = _materialize_artifact(
+            snapshot,
+            artifact,
+            plot_figure_cache,
+            window_exports=window_exports,
+            window_metadata=window_metadata,
+        )
+        specs.append(
+            _ready_artifact_spec(
+                session_id=session_id,
+                export_id=snapshot.export_id,
+                name=artifact_name,
+                kind=artifact.kind,
+                content_type=artifact.content_type,
+                content=content,
+            )
+        )
+        contents[artifact_name] = content
+
+    json_plan = next((artifact for artifact in plan if artifact.build_target == "json"), None)
     json_bytes = b""
     json_size: int | None = None
-    if "json" in include_types:
+    if json_plan is not None:
+        json_name = json_plan.materialized_name(snapshot.bundle_name)
         for _ in range(3):
             manifest = ExportManifest(
                 export_id=snapshot.export_id,
@@ -198,13 +298,16 @@ def create_export_snapshot(
                 session_id=session_id,
                 export_id=snapshot.export_id,
                 name=json_name,
-                kind="structured",
-                content_type="application/json; charset=utf-8",
+                kind=json_plan.kind,
+                content_type=json_plan.content_type,
                 content=json_bytes,
                 size_override=json_size,
             ),
         )
         contents[json_name] = json_bytes
+
+    for figure in plot_figure_cache.values():
+        plt.close(figure)
 
     manifest = ExportManifest(
         export_id=snapshot.export_id,
@@ -227,6 +330,9 @@ def _build_snapshot_data(session: "BurstSession") -> ExportSnapshotData:
     bundle_name = f"{_slugify(Path(session.burst_file).stem)}_{created.strftime('%Y%m%dT%H%M%SZ')}_{export_id[:8]}"
 
     view = session.get_view()
+    export_meta = dict(view["meta"])
+    export_meta["start_mjd"] = float(session.start_mjd)
+    export_meta["read_start_sec"] = float(session.plus_mjd_sec)
     grid, context = session._build_measurement_context_for_data()
     event_start_ms, event_end_ms = _event_window_ms(
         context.time_axis_ms,
@@ -254,11 +360,14 @@ def _build_snapshot_data(session: "BurstSession") -> ExportSnapshotData:
         export_id=export_id,
         bundle_name=bundle_name,
         created_at_utc=created_at_utc,
-        meta=view["meta"],
+        meta=export_meta,
         state=view["state"],
         results=session.results.to_dict() if session.results is not None else None,
         width_analysis=session.width_analysis.to_dict() if session.width_analysis is not None else None,
         dm_optimization=session.dm_optimization.to_dict() if session.dm_optimization is not None else None,
+        temporal_structure=(
+            session.temporal_structure.to_dict() if session.temporal_structure is not None else None
+        ),
         dynamic_spectrum=np.asarray(grid.masked, dtype=float),
         time_axis_ms=np.asarray(context.time_axis_ms, dtype=float),
         freq_axis_mhz=np.asarray(grid.freqs_mhz, dtype=float),
@@ -284,11 +393,240 @@ def _build_snapshot_data(session: "BurstSession") -> ExportSnapshotData:
     )
 
 
+def _window_time_bounds(session: "BurstSession") -> tuple[int, int]:
+    event_width = max(1, int(session.event_end) - int(session.event_start))
+    start = max(int(session.crop_start), int(session.event_start) - event_width)
+    end = min(int(session.crop_end), int(session.event_end) + event_width)
+    if end <= start:
+        end = min(int(session.crop_end), start + max(1, event_width))
+    return int(start), int(end)
+
+
+def _build_window_exports(
+    session: "BurstSession",
+    selection: ExportSelection,
+) -> dict[str, WindowExportData]:
+    if "window" not in selection.include or not selection.window_resolutions or not selection.window_formats:
+        return {}
+
+    spec_lo_abs, spec_hi_abs = session._selected_channel_bounds()
+    selected_masked_channels = np.flatnonzero(session.channel_mask[spec_lo_abs : spec_hi_abs + 1]).astype(int) + spec_lo_abs
+    time_start_abs, time_end_abs = _window_time_bounds(session)
+    exports: dict[str, WindowExportData] = {}
+    native_freq_sign = -1.0 if session.freqs.size > 1 and float(session.freqs[1] - session.freqs[0]) < 0 else 1.0
+
+    for mode in selection.window_resolutions:
+        if mode == "native":
+            masked_crop = session.get_masked_crop()
+            time_lo_rel = max(0, int(time_start_abs) - int(session.crop_start))
+            time_hi_rel = min(masked_crop.shape[1], int(time_end_abs) - int(session.crop_start))
+            dynamic = np.asarray(
+                masked_crop[spec_lo_abs : spec_hi_abs + 1, time_lo_rel:time_hi_rel],
+                dtype=float,
+            )
+            time_axis_ms = session._bins_to_ms_array(np.arange(time_start_abs, time_end_abs, dtype=float))
+            freq_axis_mhz = np.asarray(session.freqs[spec_lo_abs : spec_hi_abs + 1], dtype=float)
+            event_rel_start = max(0, min(dynamic.shape[1], int(session.event_start) - int(time_start_abs)))
+            event_rel_end = max(event_rel_start + 1, min(dynamic.shape[1], int(session.event_end) - int(time_start_abs)))
+            exports[mode] = WindowExportData(
+                mode=mode,
+                dynamic_spectrum=dynamic,
+                time_axis_ms=np.asarray(time_axis_ms, dtype=float),
+                freq_axis_mhz=freq_axis_mhz,
+                time_start_bin=int(time_start_abs),
+                time_end_bin=int(time_end_abs),
+                crop_start_bin=int(session.crop_start),
+                crop_end_bin=int(session.crop_end),
+                event_start_rel_bin=int(event_rel_start),
+                event_end_rel_bin=int(event_rel_end),
+                spectral_extent_channels=(int(spec_lo_abs), int(spec_hi_abs)),
+                spectral_extent_mhz=tuple(sorted((float(freq_axis_mhz.min()), float(freq_axis_mhz.max())))),
+                masked_channels=np.asarray(selected_masked_channels, dtype=int),
+                time_factor=1,
+                freq_factor=1,
+                effective_tsamp_sec=float(session.tsamp),
+                effective_freqres_mhz=float(abs(session.freqres)),
+                frequency_step_mhz=(
+                    float(np.nanmedian(np.diff(freq_axis_mhz)))
+                    if freq_axis_mhz.size > 1
+                    else float(native_freq_sign * abs(session.freqres))
+                ),
+            )
+            continue
+
+        grid = session._reduced_analysis_grid()
+        time_bounds = session._reduce_interval(
+            time_start_abs,
+            time_end_abs,
+            base=int(session.crop_start),
+            factor=int(session.time_factor),
+            max_bins=int(grid.masked.shape[1]),
+            require_nonempty=True,
+        )
+        spec_bounds = session._reduce_interval(
+            spec_lo_abs,
+            spec_hi_abs + 1,
+            base=0,
+            factor=int(session.freq_factor),
+            max_bins=int(grid.masked.shape[0]),
+            require_nonempty=True,
+            )
+        event_bounds = session._reduce_interval(
+            int(session.event_start),
+            int(session.event_end),
+            base=int(session.crop_start),
+            factor=int(session.time_factor),
+            max_bins=int(grid.masked.shape[1]),
+            require_nonempty=True,
+        )
+        assert time_bounds is not None
+        assert spec_bounds is not None
+        assert event_bounds is not None
+        time_lo_red, time_hi_red = time_bounds
+        spec_lo_red, spec_hi_red_exclusive = spec_bounds
+        event_lo_red, event_hi_red = event_bounds
+        dynamic = np.asarray(
+            grid.masked[spec_lo_red:spec_hi_red_exclusive, time_lo_red:time_hi_red],
+            dtype=float,
+        )
+        time_axis_ms = np.asarray(grid.time_axis_ms[time_lo_red:time_hi_red], dtype=float)
+        freq_axis_mhz = np.asarray(grid.freqs_mhz[spec_lo_red:spec_hi_red_exclusive], dtype=float)
+        exports[mode] = WindowExportData(
+            mode=mode,
+            dynamic_spectrum=dynamic,
+            time_axis_ms=time_axis_ms,
+            freq_axis_mhz=freq_axis_mhz,
+            time_start_bin=int(session.crop_start + (time_lo_red * session.time_factor)),
+            time_end_bin=int(min(session.crop_end, session.crop_start + (time_hi_red * session.time_factor))),
+            crop_start_bin=int(session.crop_start),
+            crop_end_bin=int(session.crop_end),
+            event_start_rel_bin=max(0, int(event_lo_red - time_lo_red)),
+            event_end_rel_bin=max(1, int(event_hi_red - time_lo_red)),
+            spectral_extent_channels=(int(spec_lo_abs), int(spec_hi_abs)),
+            spectral_extent_mhz=tuple(sorted((float(freq_axis_mhz.min()), float(freq_axis_mhz.max())))),
+            masked_channels=np.asarray(selected_masked_channels, dtype=int),
+            time_factor=int(session.time_factor),
+            freq_factor=int(session.freq_factor),
+            effective_tsamp_sec=float(grid.effective_tsamp_ms / 1000.0),
+            effective_freqres_mhz=float(grid.effective_freqres_mhz),
+            frequency_step_mhz=(
+                float(np.nanmedian(np.diff(freq_axis_mhz)))
+                if freq_axis_mhz.size > 1
+                else float(native_freq_sign * grid.effective_freqres_mhz)
+            ),
+        )
+
+    return exports
+
+
+def _build_window_metadata_payload(snapshot: ExportSnapshotData, window: WindowExportData) -> dict[str, Any]:
+    event_start_ms, event_end_ms = _event_window_ms(
+        window.time_axis_ms,
+        float(window.effective_tsamp_sec * 1000.0),
+        int(window.event_start_rel_bin),
+        int(window.event_end_rel_bin),
+    )
+    window_end_ms = (
+        float(window.time_axis_ms[-1] + (window.effective_tsamp_sec * 1000.0))
+        if window.time_axis_ms.size
+        else float(snapshot.state.get("event_ms", [0.0, 0.0])[1])
+    )
+    return {
+        "schema_version": EXPORT_SCHEMA_VERSION,
+        "flits_version": __version__,
+        "export_id": snapshot.export_id,
+        "bundle_name": snapshot.bundle_name,
+        "exported_at_utc": snapshot.created_at_utc,
+        "type": "window_metadata",
+        "data_semantics": "dedispersed_normalized_stokes_i",
+        "resolution_mode": window.mode,
+        "time_factor": int(window.time_factor),
+        "freq_factor": int(window.freq_factor),
+        "effective_tsamp_sec": float(window.effective_tsamp_sec),
+        "effective_freqres_mhz": float(window.effective_freqres_mhz),
+        "frequency_step_mhz": float(window.frequency_step_mhz),
+        "meta": snapshot.meta,
+        "state": snapshot.state,
+        "window": {
+            "policy": "event_plus_one_event_width_clipped_to_crop",
+            "time_bins": [int(window.time_start_bin), int(window.time_end_bin)],
+            "time_ms": [
+                float(window.time_axis_ms[0]) if window.time_axis_ms.size else event_start_ms,
+                window_end_ms,
+            ],
+            "event_window_bins": [int(window.event_start_rel_bin), int(window.event_end_rel_bin)],
+            "event_window_ms": [float(event_start_ms), float(event_end_ms)],
+            "crop_bins": [int(window.crop_start_bin), int(window.crop_end_bin)],
+            "spectral_extent_channels": [int(window.spectral_extent_channels[0]), int(window.spectral_extent_channels[1])],
+            "spectral_extent_mhz": [float(window.spectral_extent_mhz[0]), float(window.spectral_extent_mhz[1])],
+            "masked_channels": [int(value) for value in np.asarray(window.masked_channels, dtype=int)],
+            "shape": [int(window.dynamic_spectrum.shape[0]), int(window.dynamic_spectrum.shape[1])],
+        },
+    }
+
+
+def _normalize_selection(
+    *,
+    include: Sequence[str] | None,
+    plot_formats: Sequence[str] | None,
+    window_formats: Sequence[str] | None,
+    window_resolutions: Sequence[str] | None,
+) -> ExportSelection:
+    include_types = _normalize_requested(
+        include,
+        _VALID_INCLUDE,
+        DEFAULT_EXPORT_INCLUDE,
+        "export include",
+        allow_empty=True,
+    )
+    formats = (
+        _normalize_requested(
+            plot_formats,
+            _VALID_PLOT_FORMATS,
+            DEFAULT_PLOT_FORMATS,
+            "plot format",
+            allow_empty=True,
+        )
+        if "plots" in include_types
+        else ()
+    )
+    selected_window_formats = (
+        _normalize_requested(
+            window_formats,
+            _VALID_WINDOW_FORMATS,
+            DEFAULT_WINDOW_FORMATS,
+            "window format",
+            allow_empty=True,
+        )
+        if "window" in include_types
+        else ()
+    )
+    selected_window_resolutions = (
+        _normalize_requested(
+            window_resolutions,
+            _VALID_WINDOW_RESOLUTIONS,
+            DEFAULT_WINDOW_RESOLUTIONS,
+            "window resolution",
+            allow_empty=True,
+        )
+        if "window" in include_types
+        else ()
+    )
+    return ExportSelection(
+        include=include_types,
+        plot_formats=formats,
+        window_formats=selected_window_formats,
+        window_resolutions=selected_window_resolutions,
+    )
+
+
 def _normalize_requested(
     values: Sequence[str] | None,
     allowed: frozenset[str],
     defaults: Sequence[str],
     label: str,
+    *,
+    allow_empty: bool = False,
 ) -> tuple[str, ...]:
     if values is None:
         return tuple(defaults)
@@ -300,9 +638,260 @@ def _normalize_requested(
             raise ValueError(f"Unsupported {label}: {value}")
         if lowered not in normalized:
             normalized.append(lowered)
-    if not normalized:
+    if not normalized and not allow_empty:
         raise ValueError(f"At least one {label} must be requested.")
     return tuple(normalized)
+
+
+def _plan_export(snapshot: ExportSnapshotData, selection: ExportSelection) -> list[PlannedArtifact]:
+    artifacts: list[PlannedArtifact] = []
+
+    for include_key in selection.include:
+        if include_key == "json":
+            artifacts.append(
+                PlannedArtifact(
+                    key="science_json",
+                    label="Science JSON",
+                    kind="structured",
+                    content_type="application/json; charset=utf-8",
+                    status="ready",
+                    reason=None,
+                    filename_suffix="science.json",
+                    build_target="json",
+                    format="json",
+                )
+            )
+        elif include_key == "csv":
+            artifacts.append(
+                PlannedArtifact(
+                    key="catalog_csv",
+                    label="Catalog CSV",
+                    kind="catalog",
+                    content_type="text/csv; charset=utf-8",
+                    status="ready",
+                    reason=None,
+                    filename_suffix="catalog.csv",
+                    build_target="csv",
+                    format="csv",
+                )
+            )
+        elif include_key == "npz":
+            artifacts.append(
+                PlannedArtifact(
+                    key="diagnostics_npz",
+                    label="Diagnostics NPZ",
+                    kind="arrays",
+                    content_type="application/x-npz",
+                    status="ready",
+                    reason=None,
+                    filename_suffix="diagnostics.npz",
+                    build_target="npz",
+                    format="npz",
+                )
+            )
+        elif include_key == "plots":
+            for plot_plan in _plot_plan(snapshot):
+                for fmt in selection.plot_formats:
+                    artifacts.append(
+                        PlannedArtifact(
+                            key=f"{plot_plan.key}_{fmt}",
+                            label=f"{plot_plan.title} ({fmt.upper()})",
+                            kind="plot",
+                            content_type=_plot_content_type(fmt),
+                            status=plot_plan.status,
+                            reason=plot_plan.reason,
+                            filename_suffix=f"{plot_plan.key}.{fmt}",
+                            build_target="plot",
+                            format=fmt,
+                            plot_key=plot_plan.key,
+                        )
+                    )
+        elif include_key == "window":
+            for mode in selection.window_resolutions:
+                mode_label = _window_mode_label(mode)
+                artifacts.append(
+                    PlannedArtifact(
+                        key=f"window_{mode}_meta",
+                        label=f"Window Metadata ({mode_label})",
+                        kind="window",
+                        content_type="application/json; charset=utf-8",
+                        status="ready",
+                        reason=None,
+                        filename_suffix=f"window_{mode}.meta.json",
+                        build_target="window_meta",
+                        format="json",
+                        window_mode=mode,
+                    )
+                )
+                for fmt in selection.window_formats:
+                    artifacts.append(
+                        PlannedArtifact(
+                            key=f"window_{mode}_{fmt}",
+                            label=_window_artifact_label(fmt, mode),
+                            kind="window",
+                            content_type=_window_content_type(fmt),
+                            status="ready",
+                            reason=None,
+                            filename_suffix=f"window_{mode}.{fmt}",
+                            build_target=f"window_{fmt}",
+                            format=fmt,
+                            window_mode=mode,
+                        )
+                    )
+    return artifacts
+
+
+def _plot_plan(snapshot: ExportSnapshotData) -> list[PlotPlan]:
+    plots = [
+        PlotPlan(key="dynamic_spectrum", title="Dynamic Spectrum", status="ready", reason=None),
+        PlotPlan(key="profile_diagnostics", title="Profile Diagnostics", status="ready", reason=None),
+    ]
+
+    if snapshot.temporal_acf.size and snapshot.spectral_acf.size:
+        plots.append(PlotPlan(key="acf_panel", title="ACF Panel", status="ready", reason=None))
+    else:
+        plots.append(
+            PlotPlan(
+                key="acf_panel",
+                title="ACF Panel",
+                status="omitted",
+                reason="acf_diagnostics_unavailable",
+            )
+        )
+
+    if snapshot.dm_optimization is None:
+        plots.append(
+            PlotPlan(
+                key="dm_curve",
+                title="DM Curve",
+                status="omitted",
+                reason="dm_optimization_unavailable",
+            )
+        )
+        plots.append(
+            PlotPlan(
+                key="dm_residuals",
+                title="DM Residuals",
+                status="omitted",
+                reason="dm_optimization_unavailable",
+            )
+        )
+    else:
+        plots.append(PlotPlan(key="dm_curve", title="DM Curve", status="ready", reason=None))
+        if snapshot.dm_optimization.get("residual_status") == "ok":
+            plots.append(PlotPlan(key="dm_residuals", title="DM Residuals", status="ready", reason=None))
+        else:
+            plots.append(
+                PlotPlan(
+                    key="dm_residuals",
+                    title="DM Residuals",
+                    status="omitted",
+                    reason="residual_diagnostics_unavailable",
+                )
+            )
+    return plots
+
+
+def _build_plot_previews(snapshot: ExportSnapshotData, plan: Sequence[PlannedArtifact]) -> list[ExportPlotPreview]:
+    selected_keys: list[str] = []
+    for artifact in plan:
+        if artifact.kind == "plot" and artifact.plot_key and artifact.plot_key not in selected_keys:
+            selected_keys.append(artifact.plot_key)
+
+    plot_status = {item.key: item for item in _plot_plan(snapshot)}
+    figure_cache = _build_plot_figure_cache(snapshot, plan)
+    previews: list[ExportPlotPreview] = []
+    for plot_key in selected_keys:
+        plot_plan = plot_status[plot_key]
+        figure = figure_cache.get(plot_key)
+        svg = _figure_string(figure, "svg") if figure is not None else None
+        previews.append(
+            ExportPlotPreview(
+                plot_key=plot_key,
+                title=plot_plan.title,
+                status=plot_plan.status,
+                reason=plot_plan.reason,
+                svg=svg,
+            )
+        )
+
+    for figure in figure_cache.values():
+        plt.close(figure)
+    return previews
+
+
+def _build_plot_figure_cache(
+    snapshot: ExportSnapshotData,
+    plan: Sequence[PlannedArtifact],
+) -> dict[str, plt.Figure]:
+    plot_keys = {
+        artifact.plot_key
+        for artifact in plan
+        if artifact.kind == "plot" and artifact.status == "ready" and artifact.plot_key is not None
+    }
+    return {
+        str(plot_key): _plot_figure(snapshot, str(plot_key))
+        for plot_key in plot_keys
+    }
+
+
+def _materialize_artifact(
+    snapshot: ExportSnapshotData,
+    artifact: PlannedArtifact,
+    plot_figure_cache: dict[str, plt.Figure],
+    *,
+    window_exports: dict[str, WindowExportData],
+    window_metadata: dict[str, dict[str, Any]],
+) -> bytes:
+    if artifact.build_target == "csv":
+        return _build_catalog_csv(snapshot)
+    if artifact.build_target == "npz":
+        return _build_diagnostics_npz(snapshot)
+    if artifact.build_target == "window_meta":
+        if artifact.window_mode is None:
+            raise ValueError(f"Missing window mode for artifact: {artifact.key}")
+        return _build_window_metadata_json(window_metadata[artifact.window_mode])
+    if artifact.build_target == "window_npz":
+        if artifact.window_mode is None:
+            raise ValueError(f"Missing window mode for artifact: {artifact.key}")
+        return _build_window_npz(window_exports[artifact.window_mode], window_metadata[artifact.window_mode])
+    if artifact.build_target == "window_fil":
+        if artifact.window_mode is None:
+            raise ValueError(f"Missing window mode for artifact: {artifact.key}")
+        return _build_window_fil(snapshot, window_exports[artifact.window_mode])
+    if artifact.build_target == "plot":
+        if artifact.plot_key is None or artifact.format is None:
+            raise ValueError(f"Incomplete plot artifact plan: {artifact.key}")
+        figure = plot_figure_cache.get(artifact.plot_key)
+        if figure is None:
+            raise ValueError(f"Missing plot figure for artifact: {artifact.key}")
+        return _figure_bytes(figure, artifact.format)
+    raise ValueError(f"Unsupported artifact build target: {artifact.build_target}")
+
+
+def _plot_content_type(fmt: str) -> str:
+    return "image/png" if fmt == "png" else "image/svg+xml"
+
+
+def _window_content_type(fmt: str) -> str:
+    if fmt == "npz":
+        return "application/x-npz"
+    if fmt == "fil":
+        return "application/octet-stream"
+    raise ValueError(f"Unsupported window format: {fmt}")
+
+
+def _window_mode_label(mode: str) -> str:
+    return "Native" if mode == "native" else "View"
+
+
+def _window_artifact_label(fmt: str, mode: str) -> str:
+    mode_label = _window_mode_label(mode)
+    if fmt == "fil":
+        return f"Window Filterbank (FIL, {mode_label})"
+    if fmt == "npz":
+        return f"Window Data (NPZ, {mode_label})"
+    raise ValueError(f"Unsupported window format: {fmt}")
 
 
 def _slugify(value: str) -> str:
@@ -401,6 +990,7 @@ def _build_science_json(snapshot: ExportSnapshotData, manifest: ExportManifest) 
         "results": snapshot.results,
         "width_analysis": snapshot.width_analysis,
         "dm_optimization": snapshot.dm_optimization,
+        "temporal_structure": snapshot.temporal_structure,
         "artifacts": manifest.to_dict()["artifacts"],
     }
     return (json.dumps(payload, indent=2, allow_nan=False) + "\n").encode("utf-8")
@@ -411,6 +1001,7 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
     width_analysis = snapshot.width_analysis or {}
     accepted_width = width_analysis.get("accepted_width") or results.get("accepted_width") or {}
     dm = snapshot.dm_optimization or {}
+    temporal = snapshot.temporal_structure or {}
     row = {
         "bundle_name": snapshot.bundle_name,
         "exported_at_utc": snapshot.created_at_utc,
@@ -437,6 +1028,12 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         "peak_flux_jy": results.get("peak_flux_jy", ""),
         "fluence_jyms": results.get("fluence_jyms", ""),
         "iso_e_erg": results.get("iso_e", ""),
+        "min_structure_ms_primary": temporal.get("min_structure_ms_primary", ""),
+        "min_structure_ms_wavelet": temporal.get("min_structure_ms_wavelet", ""),
+        "fitburst_min_component_ms": temporal.get("fitburst_min_component_ms", ""),
+        "psd_alpha": temporal.get("power_law_alpha", ""),
+        "psd_alpha_err": temporal.get("power_law_alpha_err", ""),
+        "psd_fit_status": temporal.get("power_law_fit_status", ""),
         "event_window_start_ms": snapshot.state.get("event_ms", ["", ""])[0],
         "event_window_end_ms": snapshot.state.get("event_ms", ["", ""])[1],
         "spectral_extent_start_mhz": snapshot.state.get("spectral_extent_mhz", ["", ""])[0],
@@ -446,6 +1043,9 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         "mask_count": results.get("mask_count", len(snapshot.state.get("masked_channels", []))),
         "masked_channels": _join_list(snapshot.state.get("masked_channels", [])),
         "sefd_jy": snapshot.meta.get("sefd_jy", ""),
+        "npol": snapshot.meta.get("npol", ""),
+        "header_npol": snapshot.meta.get("header_npol", ""),
+        "npol_override": snapshot.meta.get("npol_override", ""),
         "distance_mpc": snapshot.meta.get("distance_mpc", ""),
         "redshift": snapshot.meta.get("redshift", ""),
         "dm_sweep_center": dm.get("center_dm", ""),
@@ -521,34 +1121,88 @@ def _build_diagnostics_npz(snapshot: ExportSnapshotData) -> bytes:
         ):
             payload[key] = np.asarray(snapshot.dm_optimization.get(key, []), dtype=float)
 
+    if snapshot.temporal_structure is not None:
+        for key in (
+            "raw_periodogram_freq_hz",
+            "raw_periodogram_power",
+            "averaged_psd_freq_hz",
+            "averaged_psd_power",
+            "matched_filter_scales_ms",
+            "matched_filter_boxcar_sigma",
+            "matched_filter_gaussian_sigma",
+            "wavelet_scales_ms",
+            "wavelet_sigma",
+        ):
+            payload[key] = np.asarray(snapshot.temporal_structure.get(key, []), dtype=float)
+
     buffer = io.BytesIO()
     np.savez_compressed(buffer, **payload)
     return buffer.getvalue()
 
 
-def _build_plot_figures(
-    snapshot: ExportSnapshotData,
-) -> list[tuple[str, plt.Figure | None, str | None]]:
-    figures: list[tuple[str, plt.Figure | None, str | None]] = [
-        ("dynamic_spectrum", _dynamic_spectrum_figure(snapshot), None),
-        ("profile_diagnostics", _profile_diagnostics_figure(snapshot), None),
-    ]
+def _build_window_metadata_json(payload: dict[str, Any]) -> bytes:
+    return (json.dumps(payload, indent=2, allow_nan=False) + "\n").encode("utf-8")
 
-    if snapshot.temporal_acf.size and snapshot.spectral_acf.size:
-        figures.append(("acf_panel", _acf_panel_figure(snapshot), None))
-    else:
-        figures.append(("acf_panel", None, "acf_diagnostics_unavailable"))
 
-    if snapshot.dm_optimization is None:
-        figures.append(("dm_curve", None, "dm_optimization_unavailable"))
-        figures.append(("dm_residuals", None, "dm_optimization_unavailable"))
-    else:
-        figures.append(("dm_curve", _dm_curve_figure(snapshot), None))
-        if snapshot.dm_optimization.get("residual_status") == "ok":
-            figures.append(("dm_residuals", _dm_residuals_figure(snapshot), None))
-        else:
-            figures.append(("dm_residuals", None, "residual_diagnostics_unavailable"))
-    return figures
+def _build_window_npz(window: WindowExportData, metadata_payload: dict[str, Any]) -> bytes:
+    payload: dict[str, Any] = {
+        "dynamic_spectrum": np.asarray(window.dynamic_spectrum, dtype=float),
+        "time_axis_ms": np.asarray(window.time_axis_ms, dtype=float),
+        "freq_axis_mhz": np.asarray(window.freq_axis_mhz, dtype=float),
+        "time_bins": np.asarray([window.time_start_bin, window.time_end_bin], dtype=int),
+        "crop_bins": np.asarray([window.crop_start_bin, window.crop_end_bin], dtype=int),
+        "event_window_bins": np.asarray([window.event_start_rel_bin, window.event_end_rel_bin], dtype=int),
+        "event_window_ms": np.asarray(metadata_payload["window"]["event_window_ms"], dtype=float),
+        "spectral_extent_channels": np.asarray(window.spectral_extent_channels, dtype=int),
+        "spectral_extent_mhz": np.asarray(window.spectral_extent_mhz, dtype=float),
+        "masked_channels": np.asarray(window.masked_channels, dtype=int),
+        "time_factor": np.asarray([window.time_factor], dtype=int),
+        "freq_factor": np.asarray([window.freq_factor], dtype=int),
+        "effective_tsamp_sec": np.asarray([window.effective_tsamp_sec], dtype=float),
+        "effective_freqres_mhz": np.asarray([window.effective_freqres_mhz], dtype=float),
+        "window_metadata_json": np.asarray(json.dumps(metadata_payload, sort_keys=True), dtype=np.str_),
+    }
+    buffer = io.BytesIO()
+    np.savez_compressed(buffer, **payload)
+    return buffer.getvalue()
+
+
+def _build_window_fil(snapshot: ExportSnapshotData, window: WindowExportData) -> bytes:
+    source_name = str(snapshot.meta.get("source_name") or snapshot.meta.get("burst_name") or snapshot.bundle_name)
+    file_label = f"{snapshot.bundle_name}_window_{window.mode}.fil"
+    tstart = float(
+        float(snapshot.meta.get("start_mjd", 0.0))
+        + ((float(snapshot.meta.get("read_start_sec", 0.0)) + (float(window.time_start_bin) * float(snapshot.meta.get("tsamp_us", 0.0)) / 1e6)) / 86400.0)
+    )
+    header = SigprocFilterbankHeader(
+        rawdatafile=file_label,
+        source_name=source_name,
+        nchans=int(window.dynamic_spectrum.shape[0]),
+        foff=float(window.frequency_step_mhz),
+        fch1=float(window.freq_axis_mhz[0]) if window.freq_axis_mhz.size else 0.0,
+        tsamp=float(window.effective_tsamp_sec),
+        tstart=tstart,
+        machine_id=int(snapshot.meta.get("machine_id") or 0),
+        telescope_id=int(snapshot.meta.get("telescope_id") or 0),
+        nbits=32,
+        nifs=1,
+    )
+    content = np.nan_to_num(np.asarray(window.dynamic_spectrum, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    return build_sigproc_filterbank_bytes(content, header)
+
+
+def _plot_figure(snapshot: ExportSnapshotData, plot_key: str) -> plt.Figure:
+    if plot_key == "dynamic_spectrum":
+        return _dynamic_spectrum_figure(snapshot)
+    if plot_key == "profile_diagnostics":
+        return _profile_diagnostics_figure(snapshot)
+    if plot_key == "acf_panel":
+        return _acf_panel_figure(snapshot)
+    if plot_key == "dm_curve":
+        return _dm_curve_figure(snapshot)
+    if plot_key == "dm_residuals":
+        return _dm_residuals_figure(snapshot)
+    raise ValueError(f"Unsupported export plot: {plot_key}")
 
 
 def _dynamic_spectrum_figure(snapshot: ExportSnapshotData) -> plt.Figure:
@@ -713,6 +1367,13 @@ def _figure_bytes(figure: plt.Figure, fmt: str) -> bytes:
     buffer = io.BytesIO()
     figure.savefig(buffer, format=fmt, dpi=200, bbox_inches="tight", facecolor="white")
     return buffer.getvalue()
+
+
+def _figure_string(figure: plt.Figure, fmt: str) -> str:
+    text = _figure_bytes(figure, fmt).decode("utf-8")
+    text = re.sub(r"<\?xml[^>]*>\s*", "", text)
+    text = re.sub(r"<!DOCTYPE[^>]*>\s*", "", text)
+    return text
 
 
 def _event_window_ms(

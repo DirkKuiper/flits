@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from flits.models import AutoMaskRunSummary, FilterbankMetadata, SpectralAnalysisResult
+from flits.models import AutoMaskRunSummary, FilterbankMetadata, SpectralAnalysisResult, TemporalStructureResult
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
 
@@ -138,6 +138,25 @@ class SessionSnapshotTest(unittest.TestCase):
                 freq_hz=np.array([125.0, 250.0, 375.0], dtype=float),
                 power=np.array([1.2, 0.8, 0.3], dtype=float),
             )
+            session.temporal_structure = TemporalStructureResult(
+                status="ok",
+                message=None,
+                segment_length_ms=8.0,
+                segment_bins=8,
+                segment_count=5,
+                normalization="none",
+                event_window_ms=[102.0, 142.0],
+                spectral_extent_mhz=[float(session.freqs[-2]), float(session.freqs[1])],
+                tsamp_ms=session.tsamp_ms,
+                frequency_resolution_hz=125.0,
+                nyquist_hz=500.0,
+                min_structure_ms_primary=2.0,
+                min_structure_ms_wavelet=2.0,
+                raw_periodogram_freq_hz=np.array([25.0, 50.0], dtype=float),
+                raw_periodogram_power=np.array([1.8, 1.1], dtype=float),
+                averaged_psd_freq_hz=np.array([125.0, 250.0, 375.0], dtype=float),
+                averaged_psd_power=np.array([1.2, 0.8, 0.3], dtype=float),
+            )
 
             snapshot = session.to_snapshot()
             restored = BurstSession.from_snapshot(snapshot, loader=_snapshot_loader)
@@ -163,6 +182,8 @@ class SessionSnapshotTest(unittest.TestCase):
             self.assertEqual(restored.spectral_analysis.status, "ok")
             self.assertEqual(restored.spectral_analysis.segment_bins, 8)
             self.assertTrue(np.allclose(restored.spectral_analysis.freq_hz, np.array([125.0, 250.0, 375.0])))
+            self.assertIsNotNone(restored.temporal_structure)
+            self.assertEqual(restored.temporal_structure.min_structure_ms_primary, 2.0)
 
     def test_snapshot_import_fails_when_source_file_is_missing(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -215,6 +236,25 @@ class SessionSnapshotTest(unittest.TestCase):
                 freq_hz=np.array([125.0, 250.0, 375.0], dtype=float),
                 power=np.array([1.2, 0.8, 0.3], dtype=float),
             )
+            session.temporal_structure = TemporalStructureResult(
+                status="ok",
+                message=None,
+                segment_length_ms=8.0,
+                segment_bins=8,
+                segment_count=5,
+                normalization="none",
+                event_window_ms=[102.0, 142.0],
+                spectral_extent_mhz=[float(session.freqs[-2]), float(session.freqs[1])],
+                tsamp_ms=session.tsamp_ms,
+                frequency_resolution_hz=125.0,
+                nyquist_hz=500.0,
+                min_structure_ms_primary=2.0,
+                min_structure_ms_wavelet=2.0,
+                raw_periodogram_freq_hz=np.array([25.0, 50.0], dtype=float),
+                raw_periodogram_power=np.array([1.8, 1.1], dtype=float),
+                averaged_psd_freq_hz=np.array([125.0, 250.0, 375.0], dtype=float),
+                averaged_psd_power=np.array([1.2, 0.8, 0.3], dtype=float),
+            )
 
             legacy_payload = session.snapshot_dict()
             legacy_payload["schema_version"] = "1.0"
@@ -226,6 +266,7 @@ class SessionSnapshotTest(unittest.TestCase):
             self.assertIsNone(restored.width_analysis)
             self.assertIsNone(restored.dm_optimization)
             self.assertIsNone(restored.spectral_analysis)
+            self.assertIsNone(restored.temporal_structure)
 
 
 if __name__ == "__main__":

@@ -14,13 +14,13 @@ from flits.settings import ObservationConfig, get_auto_mask_profile
 from flits.signal import normalize
 
 
-def _mock_reader(raw: np.ndarray, *, tsamp: float = 1e-3, fch1: float = 1000.0, foff: float = -1.0) -> SimpleNamespace:
+def _mock_reader(raw: np.ndarray, *, tsamp: float = 1e-3, fch1: float = 1000.0, foff: float = -1.0, npol: int = 1) -> SimpleNamespace:
     header = SimpleNamespace(
         tsamp=tsamp,
         foff=foff,
         tstart=60000.0,
         bw=abs(foff) * raw.shape[1],
-        npol=1,
+        npol=npol,
         fch1=fch1,
         nchans=raw.shape[1],
         nspectra=raw.shape[0],
@@ -73,6 +73,29 @@ class ViewerAndMaskingTest(unittest.TestCase):
         expected = normalize(stokes_i, stokes_i[:, offpulse_start:])
         self.assertEqual(data.dtype, np.float32)
         np.testing.assert_allclose(data, expected)
+
+    @patch("flits.io.filterbank.your.Your")
+    def test_load_filterbank_data_applies_npol_override_to_metadata(self, mock_your: object) -> None:
+        raw = np.array(
+            [
+                [[1.0, 2.0], [3.0, 4.0]],
+                [[2.0, 3.0], [4.0, 5.0]],
+                [[3.0, 4.0], [5.0, 6.0]],
+                [[4.0, 5.0], [6.0, 7.0]],
+            ],
+            dtype=float,
+        )
+        mock_your.return_value = _mock_reader(raw, npol=2)
+        config = ObservationConfig.from_preset(dm=0.0, preset_key="generic", sefd_jy=1.0, npol_override=1)
+
+        _, metadata = load_filterbank_data(
+            "synthetic-npol-override.fil",
+            config,
+            inspection=_synthetic_inspection("synthetic-npol-override.fil"),
+        )
+
+        self.assertEqual(metadata.header_npol, 2)
+        self.assertEqual(metadata.npol, 1)
 
     def test_view_flattens_static_channel_offsets_for_display(self) -> None:
         config = ObservationConfig.from_preset(dm=0.0, preset_key="generic")
