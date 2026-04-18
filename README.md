@@ -1,9 +1,10 @@
 # FLITS
 
+[![PyPI](https://img.shields.io/pypi/v/flits.svg)](https://pypi.org/project/flits/)
+[![Python](https://img.shields.io/pypi/pyversions/flits.svg)](https://pypi.org/project/flits/)
 [![Tests](https://github.com/DirkKuiper/flits/actions/workflows/tests.yml/badge.svg)](https://github.com/DirkKuiper/flits/actions/workflows/tests.yml)
 [![Install](https://img.shields.io/badge/pip%20install-flits-3775A9?logo=pypi&logoColor=white)](https://pypi.org/project/flits/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/DirkKuiper/flits/blob/main/LICENSE)
-
+[![License: GPLv3](https://img.shields.io/badge/license-GPLv3-blue.svg)](https://github.com/DirkKuiper/flits/blob/main/LICENSE)
 Fast-Look Interactive Transient Suite.
 
 Browser-based scientific software for interactive burst inspection, masking, and measurement on filterbank data.

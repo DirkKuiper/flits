@@ -8,8 +8,8 @@ authors:
 abstract: Browser-based scientific software for interactive FRB filterbank inspection, masking, and measurement.
 repository-code: https://github.com/DirkKuiper/flits
 url: https://github.com/DirkKuiper/flits
-license: MIT
-version: 0.1.0
+license: GPL-3.0-only
+version: 0.1.1
 date-released: 2026-04-18
 keywords:
   - fast radio bursts
