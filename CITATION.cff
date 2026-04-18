@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+title: FLITS
+message: If you use FLITS, please cite this software.
+type: software
+authors:
+  - family-names: Kuiper
+    given-names: Dirk
+abstract: Browser-based scientific software for interactive FRB filterbank inspection, masking, and measurement.
+repository-code: https://github.com/DirkKuiper/flits
+url: https://github.com/DirkKuiper/flits
+license: MIT
+version: 0.1.0
+date-released: 2026-04-18
+keywords:
+  - fast radio bursts
+  - FRB
+  - radio astronomy
+  - filterbank
+  - scientific software

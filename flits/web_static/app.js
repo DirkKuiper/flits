@@ -1902,7 +1902,7 @@ function renderSpectral(view) {
         </div>
         <div class="dm-fit-note" data-tone="neutral" style="margin-top: 1rem;">
           <strong>Minimum Structure Scale Scan</strong>
-          <span>The scale scan asks for the smallest statistically significant structure. If matched-filter significance rises at the largest scale, the burst has broad emission or no turnover in the tested range; it is not a duration measurement.</span>
+          <span>Scale Scan vs Duration: the scale scan asks for the smallest statistically significant structure. If matched-filter significance rises at the largest scale, the burst has broad emission or no turnover in the tested range; it is not a duration measurement.</span>
         </div>
         <div class="dm-fit-note" data-tone="neutral" style="margin-top: 1rem;">
           <strong>Power Spectrum</strong>

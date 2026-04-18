@@ -1,0 +1,2 @@
+-r requirements.txt
+fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3ec7bc21951ce1b4a26a0255096b69.tar.gz

@@ -1,5 +1,9 @@
 # FLITS
 
+[![Tests](https://github.com/DirkKuiper/flits/actions/workflows/tests.yml/badge.svg)](https://github.com/DirkKuiper/flits/actions/workflows/tests.yml)
+[![Install](https://img.shields.io/badge/pip%20install-flits-3775A9?logo=pypi&logoColor=white)](https://pypi.org/project/flits/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/DirkKuiper/flits/blob/main/LICENSE)
+
 Fast-Look Interactive Transient Suite.
 
 Browser-based scientific software for interactive burst inspection, masking, and measurement on filterbank data.
@@ -12,6 +16,21 @@ Known presets can supply a default SEFD when the observing setup is identifiable
 For data without a known default calibration, use the `Generic Filterbank` preset or provide an explicit `SEFD` override if you want calibrated flux and fluence values.
 
 ## Install With Python
+
+Install the published package:
+
+```bash
+pip install flits
+```
+
+Optional scattering fits are handled through `fitburst`, which is intentionally
+left out of the PyPI dependency metadata because public package indexes reject
+direct URL runtime dependencies. To enable the fitburst-backed fitting tab after
+installing FLITS, run:
+
+```bash
+pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3ec7bc21951ce1b4a26a0255096b69.tar.gz"
+```
 
 Install from a local checkout:
 
@@ -41,6 +60,8 @@ Notes:
 - Relative file paths in the UI are resolved against `FLITS_DATA_DIR` when set, otherwise against the current working directory.
 - The `--data-dir` flag is the easiest way to point FLITS at a specific directory without exporting environment variables.
 - The known-filterbanks dropdown lists `.fil` files recursively under that data directory.
+- Testing instructions: https://github.com/DirkKuiper/flits/blob/main/docs/TESTING.md
+- Release instructions: https://github.com/DirkKuiper/flits/blob/main/docs/PUBLISHING.md
 
 ## Run With Docker
 
@@ -125,7 +146,7 @@ ssh -L 8123:127.0.0.1:8123 user@remote-host
 Then open `http://127.0.0.1:8123` locally in your browser.
 
 - On many HPC clusters, Docker itself is not permitted. Apptainer is usually the right runtime there.
-- The GitHub Actions workflow in [.github/workflows/publish-image.yml](/Users/dirk/Desktop/PhD/Code/analyzer/.github/workflows/publish-image.yml) is the intended way to publish the canonical OCI image to GHCR.
+- The GitHub Actions workflow in [`publish-image.yml`](https://github.com/DirkKuiper/flits/blob/main/.github/workflows/publish-image.yml) publishes the canonical OCI image to GHCR.
 
 ## Code Structure
 

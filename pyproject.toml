@@ -1,30 +1,45 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "flits"
 dynamic = ["version", "dependencies"]
-description = "Fast-Look Interactive Transient Suite"
-license = { file = "LICENSE" }
+description = "Browser-based FRB filterbank analysis software"
+license = "MIT"
+license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
   { name = "Dirk Kuiper" },
 ]
+keywords = ["astronomy", "fast radio bursts", "FRB", "radio astronomy", "filterbank"]
 classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Astronomy",
 ]
 
 [project.scripts]
 flits = "flits.web.app:main"
 
+[project.optional-dependencies]
+dev = [
+  "build>=1.2.2",
+  "pytest>=8.3",
+  "twine>=6.1",
+]
+
 [project.urls]
 Homepage = "https://github.com/DirkKuiper/flits"
+Documentation = "https://github.com/DirkKuiper/flits#readme"
+Issues = "https://github.com/DirkKuiper/flits/issues"
+Releases = "https://github.com/DirkKuiper/flits/releases"
 Repository = "https://github.com/DirkKuiper/flits"
 
 [tool.setuptools]
@@ -44,3 +59,7 @@ flits = [
   "web_static/*.js",
   "web_static/vendor/*.js",
 ]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
