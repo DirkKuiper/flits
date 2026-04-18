@@ -3,6 +3,7 @@
 .vendor/
 build/
 dist/
+site/
 *.egg-info/
 __pycache__/
 *.pyc

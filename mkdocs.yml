@@ -1,0 +1,54 @@
+site_name: FLITS
+site_description: Browser-based FRB filterbank analysis software
+site_url: https://dirkkuiper.github.io/flits/
+repo_url: https://github.com/DirkKuiper/flits
+repo_name: DirkKuiper/flits
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+  palette:
+    - scheme: default
+      primary: blue
+      accent: cyan
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Quickstart: getting-started.md
+      - Installation and Deployment: installation.md
+  - User Guide:
+      - Session Workflow: user-guide/session-workflow.md
+      - Exports and Snapshots: user-guide/exports-and-snapshots.md
+  - Analysis:
+      - Measurements: analysis/measurements.md
+      - DM Optimization: analysis/dm-optimization.md
+      - Temporal and Spectral Analysis: analysis/temporal-spectral.md
+      - Scattering Fits: analysis/scattering-fits.md
+  - Developer:
+      - Testing: developer/testing.md
+      - Publishing: developer/publishing.md

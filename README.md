@@ -1,172 +1,67 @@
 # FLITS
 
+[![Docs](https://img.shields.io/badge/docs-online-0A66C2.svg)](https://dirkkuiper.github.io/flits/)
 [![PyPI](https://img.shields.io/pypi/v/flits.svg)](https://pypi.org/project/flits/)
 [![Python](https://img.shields.io/pypi/pyversions/flits.svg)](https://pypi.org/project/flits/)
 [![Tests](https://github.com/DirkKuiper/flits/actions/workflows/tests.yml/badge.svg)](https://github.com/DirkKuiper/flits/actions/workflows/tests.yml)
 [![Install](https://img.shields.io/badge/pip%20install-flits-3775A9?logo=pypi&logoColor=white)](https://pypi.org/project/flits/)
 [![License: GPLv3](https://img.shields.io/badge/license-GPLv3-blue.svg)](https://github.com/DirkKuiper/flits/blob/main/LICENSE)
+
 Fast-Look Interactive Transient Suite.
 
-Browser-based scientific software for interactive burst inspection, masking, and measurement on filterbank data.
+FLITS is browser-based FRB analysis software for interactive filterbank
+inspection, masking, measurement, DM optimization, temporal/spectral
+diagnostics, and export.
 
-Known presets can supply a default SEFD when the observing setup is identifiable from the file metadata and band coverage. Today that means:
-
-- `NRT` uses its preset SEFD
-- `GBT` auto-selects a default SEFD for common Gregorian bands (for example L-band files default to 10 Jy)
-
-For data without a known default calibration, use the `Generic Filterbank` preset or provide an explicit `SEFD` override if you want calibrated flux and fluence values.
-
-## Install With Python
+## Quick Start
 
 Install the published package:
 
 ```bash
 pip install flits
+flits --data-dir /path/to/filterbanks --host 127.0.0.1 --port 8123
 ```
 
-Optional scattering fits are handled through `fitburst`, which is intentionally
-left out of the PyPI dependency metadata because public package indexes reject
-direct URL runtime dependencies. To enable the fitburst-backed fitting tab after
-installing FLITS, run:
+Then open `http://127.0.0.1:8123`.
+
+Optional scattering fits use `fitburst`, which is intentionally left out of the
+PyPI dependency metadata because package indexes reject direct URL runtime
+dependencies. To enable the fitburst-backed fitting workflow after installing
+FLITS:
 
 ```bash
 pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3ec7bc21951ce1b4a26a0255096b69.tar.gz"
 ```
 
-Install from a local checkout:
+## Highlights
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install .
-```
+- Browser-based workflow for burst inspection on filterbank data.
+- Interactive crop, event, off-pulse, spectral-window, and masking controls.
+- Calibrated fluence and peak-flux outputs when an SEFD is available.
+- DM optimization using integrated-event S/N and DMphase.
+- Temporal-structure, PSD, ACF, and optional fitburst-backed scattering tools.
+- Export bundles and JSON session snapshots for reproducible analysis.
 
-You can also install directly from GitHub:
+## Documentation
 
-```bash
-pip install "git+https://github.com/DirkKuiper/flits.git"
-```
+- Full docs: [dirkkuiper.github.io/flits](https://dirkkuiper.github.io/flits/)
+- Getting started: [Quickstart](https://dirkkuiper.github.io/flits/getting-started/)
+- Installation and deployment: [Installation](https://dirkkuiper.github.io/flits/installation/)
+- Developer testing: [Testing](https://dirkkuiper.github.io/flits/developer/testing/)
+- Developer publishing: [Publishing](https://dirkkuiper.github.io/flits/developer/publishing/)
 
-Then run FLITS against a directory of filterbanks:
+The docs cover Python installs, Docker, Apptainer, remote/HPC use, interactive
+workflow guidance, measurements, DM optimization, temporal/spectral analysis,
+exports, and release procedures.
 
-```bash
-flits --data-dir /path/to/filterbanks --host 127.0.0.1 --port 8123
-```
+## Citation
 
-Open `http://127.0.0.1:8123`.
+If you use FLITS in research, cite the software and link to the repository:
 
-Notes:
+- PyPI package: `flits`
+- Repository: `https://github.com/DirkKuiper/flits`
+- Citation metadata: [CITATION.cff](./CITATION.cff)
 
-- Relative file paths in the UI are resolved against `FLITS_DATA_DIR` when set, otherwise against the current working directory.
-- The `--data-dir` flag is the easiest way to point FLITS at a specific directory without exporting environment variables.
-- The known-filterbanks dropdown lists `.fil` files recursively under that data directory.
-- Testing instructions: https://github.com/DirkKuiper/flits/blob/main/docs/TESTING.md
-- Release instructions: https://github.com/DirkKuiper/flits/blob/main/docs/PUBLISHING.md
+## License
 
-## Run With Docker
-
-The canonical container image is intended to live at `ghcr.io/dirkkuiper/flits`.
-
-If you have a published image available, run:
-
-```bash
-docker run --rm -p 8123:8123 \
-  -e FLITS_DATA_DIR=/data \
-  -v /path/to/filterbanks:/data \
-  ghcr.io/dirkkuiper/flits:latest
-```
-
-If you want to build locally instead:
-
-```bash
-docker build -t flits .
-docker run --rm -p 8123:8123 \
-  -e FLITS_DATA_DIR=/data \
-  -v /path/to/filterbanks:/data \
-  flits
-```
-
-Then open `http://127.0.0.1:8123`.
-
-Notes:
-
-- The container defaults `FLITS_DATA_DIR` to `/data`.
-- Relative file paths in the UI are resolved against `FLITS_DATA_DIR`.
-- The known-filterbanks dropdown lists `.fil` files recursively under `FLITS_DATA_DIR`.
-- Absolute paths inside the container still work if you prefer to type them manually.
-
-## Run With Apptainer
-
-Apptainer users should consume the same OCI image rather than maintain a separate container recipe.
-
-If the published GHCR image is available:
-
-```bash
-apptainer pull flits.sif docker://ghcr.io/dirkkuiper/flits:latest
-APPTAINERENV_FLITS_DATA_DIR=/data \
-  apptainer exec --bind /path/to/filterbanks:/data flits.sif \
-  flits --data-dir /data --host 127.0.0.1 --port 8123
-```
-
-If you are on an HPC system where pulling from GHCR is inconvenient, you can still build or export the Docker image elsewhere and convert it to `.sif` with Apptainer.
-
-## Run With Docker Compose
-
-If your filterbanks are in the current directory:
-
-```bash
-docker compose up --build
-```
-
-If your filterbanks live somewhere else, point `DATA_DIR` at that directory:
-
-```bash
-DATA_DIR=/absolute/path/to/filterbanks docker compose up --build
-```
-
-You can also choose a different host port:
-
-```bash
-DATA_DIR=/absolute/path/to/filterbanks FLITS_PORT=9000 docker compose up --build
-```
-
-Then open `http://127.0.0.1:8123` or `http://127.0.0.1:9000` respectively.
-
-## Remote And HPC Use
-
-FLITS is portable across local workstations, remote servers, and HPC systems:
-
-- On a normal workstation, `pip install .`, `docker run`, or `docker compose` are all fine.
-- On a remote Linux machine you access over SSH, start FLITS remotely and forward the port:
-
-```bash
-ssh -L 8123:127.0.0.1:8123 user@remote-host
-```
-
-Then open `http://127.0.0.1:8123` locally in your browser.
-
-- On many HPC clusters, Docker itself is not permitted. Apptainer is usually the right runtime there.
-- The GitHub Actions workflow in [`publish-image.yml`](https://github.com/DirkKuiper/flits/blob/main/.github/workflows/publish-image.yml) publishes the canonical OCI image to GHCR.
-
-## Code Structure
-
-- `flits/settings.py`: observation presets and explicit overrides
-- `flits/io/filterbank.py`: filterbank loading and Stokes-I extraction
-- `flits/signal.py`: shared numerical utilities
-- `flits/models.py`: typed metadata and measurement containers
-- `flits/session.py`: interactive burst state and measurements
-- `flits/web/app.py`: FastAPI server for the browser UI
-- `flits/web_static/`: packaged frontend assets served by the app
-- `tests/test_session_smoke.py`: smoke tests on a real local filterbank file
-
-## Measurements
-
-- Fluence (Jy ms), when an SEFD is provided
-- Peak flux density (Jy), when an SEFD is provided
-- Event duration (ms)
-- Spectral extent (MHz)
-- Peak MJD
-- 1D Gaussian fits to selected burst regions
-
-Flux and fluence are computed from the burst-only time series using the radiometer equation with the effective unmasked bandwidth inside the selected spectral extent.
+FLITS is released under the GNU GPLv3. See [LICENSE](./LICENSE).

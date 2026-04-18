@@ -1,4 +1,4 @@
-# Testing FLITS
+# Testing
 
 ## Full local environment
 
@@ -26,6 +26,15 @@ python -m pytest -q
 Using `python -m pytest` keeps the active interpreter and the editable checkout
 aligned, which is more reliable than relying on whichever `pytest` executable is
 first on `PATH`.
+
+## Docs build
+
+To build the documentation locally:
+
+```bash
+python -m pip install -e ".[docs]"
+mkdocs build --strict
+```
 
 ## Packaging checks
 

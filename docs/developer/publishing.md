@@ -1,23 +1,20 @@
-# Publishing FLITS
+# Publishing
 
-FLITS ships two release paths:
+FLITS currently has three automated publication paths:
 
-- `publish-package.yml` publishes Python distributions to TestPyPI or PyPI.
-- `publish-image.yml` publishes the container image to GHCR.
+- `publish-package.yml` for TestPyPI and PyPI
+- `publish-image.yml` for the GHCR container image
+- `docs.yml` for GitHub Pages documentation deployment
 
-The Python package workflow uses PyPI Trusted Publishing via GitHub Actions.
+## One-time package setup
 
-## One-time setup
-
-Create matching GitHub environments in the repository settings:
+For Python package publishing, create matching GitHub environments in the
+repository settings:
 
 - `testpypi`
 - `pypi`
 
-The `pypi` environment should require manual approval. `testpypi` can usually be
-left without reviewers.
-
-Then configure pending publishers on both indexes:
+Then configure pending publishers on both indexes with these values:
 
 ### TestPyPI pending publisher
 
@@ -38,7 +35,7 @@ Then configure pending publishers on both indexes:
 ## Release checklist
 
 1. Update `flits.__version__` in `flits/__init__.py`.
-2. Run the local verification steps from `docs/TESTING.md`.
+2. Run the verification steps from [Testing](testing.md).
 3. Commit the release changes and push them to GitHub.
 
 ## Publish to TestPyPI
@@ -49,7 +46,7 @@ Use the GitHub Actions workflow manually:
 2. Run the workflow with `repository=testpypi`.
 3. Wait for the `publish-testpypi` job to finish.
 
-Verify the uploaded package in a clean virtual environment:
+Verify the uploaded package in a clean environment:
 
 ```bash
 python -m venv /tmp/flits-testpypi
@@ -61,24 +58,28 @@ flits --help
 
 ## Publish to PyPI
 
-The normal production path is:
+The simplest path is:
 
-1. Create a Git tag such as `v0.1.0`.
+1. Create a Git tag such as `v0.1.1`.
 2. Publish the matching GitHub release.
 3. Let the `release` event trigger `publish-package.yml`.
 4. Approve the `pypi` environment when GitHub requests it.
 
-You can also dispatch the same workflow manually with `repository=pypi` if you
-need to republish from an existing commit after a failed release process.
+You can also dispatch the same workflow manually with `repository=pypi`.
+
+## Deploy docs for free
+
+The documentation site is built with MkDocs Material and deployed through
+GitHub Pages. That setup is free for public repositories.
+
+The `docs.yml` workflow builds the site on pull requests and deploys it from
+`main`.
 
 ## Optional fitburst support
 
 The PyPI package intentionally omits `fitburst` from its published dependency
-metadata. `fitburst` is currently installed from a direct URL, and public Python
-package indexes do not accept direct URL runtime dependencies in uploaded
-package metadata.
-
-Users who want the fitburst-backed scattering fit can install it after FLITS:
+metadata. Users who want the fitburst-backed scattering workflow can install it
+after FLITS:
 
 ```bash
 pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3ec7bc21951ce1b4a26a0255096b69.tar.gz"
