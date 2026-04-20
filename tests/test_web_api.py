@@ -8,6 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+import h5py
 import numpy as np
 from fastapi import HTTPException
 
@@ -110,6 +111,9 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(payload["detected_preset_label"], "GBT")
         self.assertEqual(payload["telescope_id"], 6)
         self.assertEqual(payload["detection_basis"], "matched telescope_id=6")
+        self.assertIsNone(payload["coherent_dm"])
+        self.assertIsNone(payload["suggested_dm"])
+        self.assertIsNone(payload["dm_guidance"])
 
     @unittest.skipUnless(SAMPLE.exists() and your.Your is not None, "Sample filterbank reader is not available")
     @patch("flits.web.app.inspect_filterbank")
@@ -135,6 +139,29 @@ class WebApiTest(unittest.TestCase):
 
         self.assertEqual(context.exception.status_code, 404)
         self.assertIn("Filterbank file not found", context.exception.detail)
+
+    @patch("flits.web.app.inspect_filterbank")
+    @patch("flits.web.app.resolve_burst_path")
+    def test_detect_endpoint_reports_bbdata_dm_guidance(self, mock_resolve_path: object, mock_inspect: object) -> None:
+        burst_path = Path("/tmp/beamformed.h5")
+        mock_resolve_path.return_value = burst_path
+        mock_inspect.return_value = FilterbankInspection(
+            source_path=burst_path,
+            source_name="FRB20181231C",
+            telescope_id=None,
+            machine_id=None,
+            detected_preset_key="chime",
+            detection_basis="matched format signature 'chime_bbdata_beamformed_v1'",
+            telescope_name="CHIME/FRB",
+            schema_version="chime_bbdata_beamformed_v1",
+            coherent_dm=556.1811152206744,
+        )
+
+        payload = detect_filterbank(DetectFilterbankRequest(bfile=str(burst_path)))
+
+        self.assertEqual(payload["coherent_dm"], 556.1811152206744)
+        self.assertEqual(payload["suggested_dm"], 556.1811152206744)
+        self.assertIn("residual DM", payload["dm_guidance"])
 
     def test_data_dir_env_controls_relative_lookup_and_listing(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -205,6 +232,31 @@ class WebApiTest(unittest.TestCase):
                 )
                 self.assertEqual(resolve_burst_path("nested/example.fil"), filterbank.resolve())
                 self.assertEqual(resolve_burst_path("nested/deeper/deep_example.fil"), deeper_filterbank.resolve())
+
+    def test_listing_filters_unsupported_container_formats(self) -> None:
+        from astropy.io import fits
+
+        with TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            supported_h5 = tmp_path / "supported.h5"
+            unsupported_h5 = tmp_path / "unsupported.h5"
+            unsupported_fits = tmp_path / "unsupported.fits"
+
+            with h5py.File(supported_h5, "w") as fh:
+                fh.attrs["schema_version"] = "flits_chime_v1"
+                fh.attrs["tsamp_s"] = 1e-3
+                fh.attrs["fch1_mhz"] = 1500.0
+                fh.attrs["foff_mhz"] = -1.0
+                fh.attrs["tstart_mjd"] = 60000.0
+                fh.create_dataset("wfall", data=np.zeros((4, 16), dtype=np.float32))
+
+            with h5py.File(unsupported_h5, "w") as fh:
+                fh.create_dataset("data", data=np.zeros((4, 4), dtype=np.float32))
+
+            fits.PrimaryHDU(data=np.zeros((4, 4), dtype=np.float32)).writeto(unsupported_fits)
+
+            with patch.dict("os.environ", {"FLITS_DATA_DIR": str(tmp_path)}):
+                self.assertEqual(list_filterbank_files(), ["supported.h5"])
 
     def test_data_dir_defaults_to_current_working_directory(self) -> None:
         with TemporaryDirectory() as tmpdir:

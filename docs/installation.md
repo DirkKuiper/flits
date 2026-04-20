@@ -115,5 +115,10 @@ On clusters where Docker is unavailable, Apptainer is usually the right runtime.
 
 - Relative paths in the UI are resolved against `FLITS_DATA_DIR` when it is set.
 - Otherwise, relative paths are resolved against the current working directory.
-- The known-filterbank browser lists `.fil` files recursively under that base
-  directory.
+- The file browser lists every recognized input file recursively under
+  that base directory. Extensions owned by any registered reader are
+  picked up automatically — out of the box this covers `.fil` (SIGPROC),
+  `.fits` / `.sf` (PSRFITS), and `.h5` / `.hdf5` (CHIME/FRB HDF5). See
+  [Supported Formats](user-guide/supported-formats.md) for the full
+  matrix and [Custom Readers](developer/custom-readers.md) for adding
+  new formats via entry points.

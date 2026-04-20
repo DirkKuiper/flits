@@ -28,7 +28,7 @@ class TelescopeDetectionTest(unittest.TestCase):
         preset_key, detection_basis = detect_preset(None, None)
 
         self.assertEqual(preset_key, "generic")
-        self.assertEqual(detection_basis, "no telescope_id or machine_id found")
+        self.assertEqual(detection_basis, "no matching telescope hints")
 
     def test_resolves_default_gbt_l_band_sefd_from_observed_frequency_range(self) -> None:
         sefd_jy = resolve_default_sefd_jy("gbt", 1125.0, 1875.0)

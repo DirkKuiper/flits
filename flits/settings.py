@@ -30,6 +30,9 @@ class TelescopePreset:
     read_start_sec: float = 0.0
     read_end_sec: float | None = None
     normalization_tail_fraction: float = 0.25
+    telescope_name_aliases: tuple[str, ...] = ()
+    format_signatures: tuple[str, ...] = ()
+    freq_bands_mhz: tuple[tuple[float, float], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -41,6 +44,9 @@ class TelescopePreset:
             "read_start_sec": self.read_start_sec,
             "read_end_sec": self.read_end_sec,
             "normalization_tail_fraction": self.normalization_tail_fraction,
+            "telescope_name_aliases": list(self.telescope_name_aliases),
+            "format_signatures": list(self.format_signatures),
+            "freq_bands_mhz": [list(band) for band in self.freq_bands_mhz],
         }
 
 
@@ -98,6 +104,23 @@ PRESETS: dict[str, TelescopePreset] = {
         read_start_sec=0.0,
         read_end_sec=None,
         normalization_tail_fraction=0.25,
+    ),
+    "chime": TelescopePreset(
+        key="chime",
+        label="CHIME/FRB",
+        telescope_ids=(),
+        machine_ids=(),
+        sefd_jy=None,
+        read_start_sec=0.0,
+        read_end_sec=None,
+        normalization_tail_fraction=0.25,
+        telescope_name_aliases=("chime", "chimefrb"),
+        format_signatures=(
+            "chime_frb_catalog_v1",
+            "flits_chime_v1",
+            "chime_bbdata_beamformed_v1",
+        ),
+        freq_bands_mhz=((400.0, 800.0),),
     ),
 }
 
@@ -157,22 +180,61 @@ def get_auto_mask_profile(profile_key: str | None = None) -> AutoMaskProfile:
     return profile
 
 
-def detect_preset(telescope_id: int | None, machine_id: int | None) -> tuple[str, str]:
+def _normalize_name(name: str) -> str:
+    return "".join(ch for ch in name.lower() if ch.isalnum())
+
+
+def detect_preset(
+    telescope_id: int | None,
+    machine_id: int | None,
+    *,
+    telescope_name: str | None = None,
+    schema_version: str | None = None,
+    freq_lo_mhz: float | None = None,
+    freq_hi_mhz: float | None = None,
+) -> tuple[str, str]:
+    presets = available_presets()
+
+    # 1. SIGPROC telescope_id exact match (strongest canonical signal).
     if telescope_id is not None:
-        for preset in available_presets():
+        for preset in presets:
             if telescope_id in preset.telescope_ids:
                 return preset.key, f"matched telescope_id={telescope_id}"
-        return "generic", f"unrecognized telescope_id={telescope_id}"
 
+    # 2. Schema/format signature (unambiguous file-type proof).
+    if schema_version:
+        token = schema_version.strip()
+        if token:
+            for preset in presets:
+                if token in preset.format_signatures:
+                    return preset.key, f"matched format signature '{token}'"
+
+    # 3. Telescope-name alias.
+    if telescope_name:
+        normalized = _normalize_name(telescope_name)
+        if normalized:
+            name_matches = [
+                preset.key
+                for preset in presets
+                if any(_normalize_name(alias) == normalized for alias in preset.telescope_name_aliases)
+            ]
+            if len(name_matches) == 1:
+                return name_matches[0], f"matched telescope name '{telescope_name}'"
+
+    # 4. SIGPROC machine_id (historically weakest SIGPROC signal, unique only).
     if machine_id is not None:
-        matches = [preset.key for preset in available_presets() if machine_id in preset.machine_ids]
-        if len(matches) == 1:
-            return matches[0], f"matched machine_id={machine_id}"
-        if len(matches) > 1:
+        machine_matches = [preset.key for preset in presets if machine_id in preset.machine_ids]
+        if len(machine_matches) == 1:
+            return machine_matches[0], f"matched machine_id={machine_id}"
+        if len(machine_matches) > 1:
             return "generic", f"ambiguous machine_id={machine_id}"
-        return "generic", f"unrecognized machine_id={machine_id}"
 
-    return "generic", "no telescope_id or machine_id found"
+    # 5. Fallback: report the strongest hint we did see.
+    if telescope_id is not None:
+        return "generic", f"unrecognized telescope_id={telescope_id}"
+    if machine_id is not None:
+        return "generic", f"unrecognized machine_id={machine_id}"
+    return "generic", "no matching telescope hints"
 
 
 def _resolve_band_calibration(

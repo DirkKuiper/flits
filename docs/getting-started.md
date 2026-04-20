@@ -25,12 +25,19 @@ flits --data-dir /path/to/filterbanks --host 127.0.0.1 --port 8123
 
 Open `http://127.0.0.1:8123`.
 
-## 3. Load a filterbank
+## 3. Load a burst file
+
+FLITS reads SIGPROC filterbank (`.fil`), search-mode PSRFITS (`.fits`,
+`.sf`), and CHIME/FRB HDF5 (`.h5`, `.hdf5`) files, including CHIME public
+catalog waterfalls and beamformed `BBData` power files. See
+[Supported Formats](user-guide/supported-formats.md) for the full matrix.
 
 Inside the UI:
 
-1. Pick a known `.fil` file from the directory list or type a path manually.
+1. Pick a file from the directory list or type a path manually.
 2. Enter the burst DM.
+   For CHIME catalog waterfalls FLITS will suggest `0`, and for CHIME
+   beamformed `BBData` files it will suggest the file's `DM_coherent`.
 3. Adjust telescope/preset settings if the detected preset is not what you want.
 4. Load the session.
 

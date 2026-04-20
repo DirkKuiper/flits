@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "flits"
 dynamic = ["version", "dependencies"]
-description = "Browser-based FRB filterbank analysis software"
+description = "Browser-based FRB burst analysis software (SIGPROC, PSRFITS, CHIME/FRB HDF5)"
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 readme = "README.md"
@@ -13,7 +13,7 @@ requires-python = ">=3.11"
 authors = [
   { name = "Dirk Kuiper" },
 ]
-keywords = ["astronomy", "fast radio bursts", "FRB", "radio astronomy", "filterbank"]
+keywords = ["astronomy", "fast radio bursts", "FRB", "radio astronomy", "filterbank", "SIGPROC", "PSRFITS", "HDF5", "CHIME"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
@@ -27,6 +27,11 @@ classifiers = [
 
 [project.scripts]
 flits = "flits.web.app:main"
+
+[project.entry-points."flits.readers"]
+sigproc = "flits.io.your_reader:YourFilterbankReader"
+psrfits = "flits.io.your_reader:YourFilterbankReader"
+chime_hdf5 = "flits.io.chime_hdf5_reader:ChimeHdf5Reader"
 
 [project.optional-dependencies]
 dev = [

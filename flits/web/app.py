@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from flits.io import inspect_filterbank
+from flits.io import inspect_filterbank, list_readers
 from flits.session import BurstSession
 from flits.settings import available_auto_mask_profiles, available_presets, get_preset
 
@@ -22,6 +22,11 @@ from flits.settings import available_auto_mask_profiles, available_presets, get_
 PACKAGE_DIR = Path(__file__).resolve().parents[1]
 STATIC_DIR = PACKAGE_DIR / "web_static"
 SESSIONS: dict[str, BurstSession] = {}
+
+_SKIP_DIRS: frozenset[str] = frozenset(
+    {"site-packages", "node_modules", "__pycache__", "dist", "build"}
+)
+_TRUSTED_LISTING_SUFFIXES: frozenset[str] = frozenset({".fil"})
 
 
 class CreateSessionRequest(BaseModel):
@@ -91,9 +96,48 @@ def drop_session(session_id: str) -> BurstSession:
     return session
 
 
+def _inspection_suggested_dm(inspection: object) -> float | None:
+    schema_version = getattr(inspection, "schema_version", None)
+    coherent_dm = getattr(inspection, "coherent_dm", None)
+    if schema_version == "chime_frb_catalog_v1":
+        return 0.0
+    if schema_version == "chime_bbdata_beamformed_v1" and coherent_dm is not None:
+        return float(coherent_dm)
+    return None
+
+
+def _inspection_dm_guidance(inspection: object) -> str | None:
+    schema_version = getattr(inspection, "schema_version", None)
+    coherent_dm = getattr(inspection, "coherent_dm", None)
+    if schema_version == "chime_frb_catalog_v1":
+        return "already dedispersed; use DM 0"
+    if schema_version == "chime_bbdata_beamformed_v1" and coherent_dm is not None:
+        return (
+            f"coherently dedispersed at {float(coherent_dm):.6f}; "
+            "FLITS applies residual DM relative to that value"
+        )
+    return None
+
+
 def list_filterbank_files() -> list[str]:
     base = data_dir()
-    return sorted(path.relative_to(base).as_posix() for path in base.rglob("*.fil"))
+    suffixes = {ext.lower() for reader in list_readers() for ext in reader.extensions}
+    found: set[str] = set()
+    for path in base.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in suffixes:
+            continue
+        rel = path.relative_to(base)
+        # Skip hidden directories (.venv, .vendor, .git, etc.) and caches
+        # that happen to live under the data dir when it points at a repo root.
+        if any(part.startswith(".") or part in _SKIP_DIRS for part in rel.parts):
+            continue
+        if path.suffix.lower() not in _TRUSTED_LISTING_SUFFIXES:
+            try:
+                inspect_filterbank(str(path))
+            except Exception:
+                continue
+        found.add(rel.as_posix())
+    return sorted(found)
 
 
 def list_filterbank_directories() -> list[dict[str, Any]]:
@@ -156,11 +200,18 @@ def detect_filterbank(request: DetectFilterbankRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     detected_preset = get_preset(inspection.detected_preset_key)
+    suggested_dm = _inspection_suggested_dm(inspection)
+    dm_guidance = _inspection_dm_guidance(inspection)
     return {
         "bfile": str(burst_path),
         "source_name": inspection.source_name,
         "telescope_id": inspection.telescope_id,
         "machine_id": inspection.machine_id,
+        "telescope_name": inspection.telescope_name,
+        "schema_version": inspection.schema_version,
+        "coherent_dm": inspection.coherent_dm,
+        "suggested_dm": suggested_dm,
+        "dm_guidance": dm_guidance,
         "detected_preset_key": inspection.detected_preset_key,
         "detected_preset_label": detected_preset.label,
         "detection_basis": inspection.detection_basis,

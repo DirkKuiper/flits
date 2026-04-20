@@ -17,6 +17,7 @@ const state = {
   pending: null,
   detection: null,
   userSelectedPreset: false,
+  dmUserEditedForPath: null,
   busyAction: null,
   knownFileDirectories: [],
 }
@@ -137,6 +138,7 @@ const freqUpButton = document.getElementById("freqUpButton")
 const toastStack = document.getElementById("toastStack")
 const presetDefaults = new Map()
 let syncingPresetSelection = false
+let syncingDmInput = false
 let exportPreviewTimer = null
 let exportPreviewRequestId = 0
 const ROOT_DIRECTORY_VALUE = "__flits_root__"
@@ -270,6 +272,7 @@ function bindControls() {
     renderFileOptions(directoryPathFromValue(directorySelect.value), { resetSelection: true })
     fileInput.value = ""
     state.detection = null
+    state.dmUserEditedForPath = null
     renderDetectionHint()
     updateControlStates()
   })
@@ -278,6 +281,7 @@ function bindControls() {
     fileInput.value = fileSelect.value
     syncKnownFileSelection(fileSelect.value)
     state.userSelectedPreset = false
+    state.dmUserEditedForPath = null
     await detectSelectedFile()
     updateControlStates()
   })
@@ -285,8 +289,19 @@ function bindControls() {
   fileInput.addEventListener("change", async () => {
     syncKnownFileSelection(fileInput.value.trim())
     state.userSelectedPreset = false
+    state.dmUserEditedForPath = null
     await detectSelectedFile()
     updateControlStates()
+  })
+
+  dmInput.addEventListener("input", () => {
+    if (syncingDmInput) {
+      return
+    }
+    const path = selectedBurstPath()
+    if (path) {
+      state.dmUserEditedForPath = path
+    }
   })
 
   telescopeInput.addEventListener("change", () => {
@@ -324,7 +339,7 @@ function bindControls() {
     if (!Number.isFinite(Number(bestDm))) {
       return
     }
-    dmInput.value = String(bestDm)
+    setDmInputValue(bestDm)
     postAction("set_dm", { dm: Number(bestDm) })
   })
   fitScatteringButton.addEventListener("click", () => {
@@ -769,6 +784,27 @@ function normalizeKnownFilePath(path) {
   return normalized.replace(/^\.\//, "")
 }
 
+function selectedBurstPath() {
+  return normalizeKnownFilePath(fileInput.value.trim() || fileSelect.value)
+}
+
+function setDmInputValue(value) {
+  syncingDmInput = true
+  dmInput.value = String(value)
+  syncingDmInput = false
+}
+
+function maybeApplySuggestedDm(payload, bfile) {
+  if (payload?.suggested_dm === null || payload?.suggested_dm === undefined) {
+    return
+  }
+  const normalizedPath = normalizeKnownFilePath(bfile)
+  if (!normalizedPath || state.dmUserEditedForPath === normalizedPath) {
+    return
+  }
+  setDmInputValue(payload.suggested_dm)
+}
+
 function directoryOptionValue(path) {
   return path === "" ? ROOT_DIRECTORY_VALUE : path
 }
@@ -817,7 +853,7 @@ function renderDirectoryOptions(selectedPath = null) {
   placeholder.disabled = state.knownFileDirectories.length > 0
   placeholder.textContent = state.knownFileDirectories.length > 0
     ? "Choose a folder..."
-    : "No mounted filterbanks found"
+    : "No mounted burst files found"
   directorySelect.appendChild(placeholder)
 
   for (const directory of state.knownFileDirectories) {
@@ -842,8 +878,8 @@ function renderFileOptions(directoryPath, options = {}) {
   placeholder.selected = true
   placeholder.disabled = true
   placeholder.textContent = directory == null
-    ? (state.knownFileDirectories.length > 0 ? "Choose a folder first" : "No mounted filterbanks found")
-    : "Choose a filterbank..."
+    ? (state.knownFileDirectories.length > 0 ? "Choose a folder first" : "No mounted burst files found")
+    : "Choose a file..."
   fileSelect.appendChild(placeholder)
 
   for (const file of files) {
@@ -895,6 +931,7 @@ async function detectSelectedFile() {
     if (!state.userSelectedPreset) {
       setPresetSelection(payload.detected_preset_key)
     }
+    maybeApplySuggestedDm(payload, bfile)
     renderDetectionHint()
     updateControlStates()
     return payload
@@ -930,9 +967,9 @@ async function loadSession(options = {}) {
   const bfile = fileInput.value.trim() || fileSelect.value
   const previousSessionId = state.sessionId
   if (!bfile) {
-    setStatus("Pick a filterbank first", "error")
+    setStatus("Pick a file first", "error")
     if (!silent) {
-      showToast("Pick a filterbank first", "error")
+      showToast("Pick a file first", "error")
     }
     return
   }
@@ -1040,7 +1077,7 @@ function applyView(view) {
     setPresetSelection(view.meta.preset_key)
   }
   syncDmMetricOptions(view)
-  dmInput.value = String(view.meta.dm)
+  setDmInputValue(view.meta.dm)
   sefdInput.value = view.meta.sefd_jy === null || view.meta.sefd_jy === undefined ? "" : String(view.meta.sefd_jy)
   npolInput.value = view.meta.npol_override === null || view.meta.npol_override === undefined ? "" : String(view.meta.npol_override)
   distanceInput.value = view.meta.distance_mpc === null || view.meta.distance_mpc === undefined ? "" : String(view.meta.distance_mpc)
@@ -4070,7 +4107,7 @@ function renderDetectionHint(errorMessage = null) {
       <div class="badge-row">
         ${infoChip("Detection", "Waiting", "neutral")}
       </div>
-      <div class="detection-copy">Select or enter a filterbank path to inspect its telescope metadata.</div>
+      <div class="detection-copy">Select or enter a file path to inspect its telescope metadata.</div>
     `
     return
   }
@@ -4080,12 +4117,15 @@ function renderDetectionHint(errorMessage = null) {
   const overrideActive = state.userSelectedPreset && telescopeInput.value !== state.detection.detected_preset_key
   const detectedTone = state.detection.detected_preset_key === "generic" ? "warning" : "success"
   const selectedTone = overrideActive ? "warning" : "success"
-  let copy = `${escapeHtml(state.detection.detection_basis)}. ${overrideActive ? "Manual override active." : "You can override this before loading."}`
+  const dmGuidance = state.detection.dm_guidance
+    ? ` ${escapeHtml(state.detection.dm_guidance)}.`
+    : ""
+  let copy = `${escapeHtml(state.detection.detection_basis)}. ${overrideActive ? "Manual override active." : "You can override this before loading."}${dmGuidance}`
 
   if (state.detection.detected_preset_key === "generic") {
     copy =
       `No known telescope match (${escapeHtml(state.detection.detection_basis)}). ` +
-      `${overrideActive ? `Manual preset selected: ${escapeHtml(selectedLabel)}.` : "Generic Filterbank will be used by default."}`
+      `${overrideActive ? `Manual preset selected: ${escapeHtml(selectedLabel)}.` : "Generic Filterbank will be used by default."}${dmGuidance}`
   }
 
   detectionHint.innerHTML = `

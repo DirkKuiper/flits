@@ -9,9 +9,13 @@
 
 Fast-Look Interactive Transient Suite.
 
-FLITS is browser-based FRB analysis software for interactive filterbank
+FLITS is browser-based FRB analysis software for interactive burst
 inspection, masking, measurement, DM optimization, temporal/spectral
-diagnostics, and export.
+diagnostics, and export. It reads SIGPROC filterbank (`.fil`),
+search-mode PSRFITS (`.fits`, `.sf`), and CHIME/FRB HDF5 (`.h5`, `.hdf5`)
+including public catalog waterfalls and beamformed `BBData`
+`tiedbeam_power` files. The I/O layer is pluggable — third parties can
+register custom formats via `importlib` entry points without forking.
 
 ## Quick Start
 
@@ -35,7 +39,8 @@ pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3
 
 ## Highlights
 
-- Browser-based workflow for burst inspection on filterbank data.
+- Browser-based workflow for burst inspection on SIGPROC, PSRFITS, and CHIME/FRB HDF5 data.
+- CHIME support includes public catalog waterfalls and beamformed `BBData` power products.
 - Interactive crop, event, off-pulse, spectral-window, and masking controls.
 - Calibrated fluence and peak-flux outputs when an SEFD is available.
 - DM optimization using integrated-event S/N and DMphase.

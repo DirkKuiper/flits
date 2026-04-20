@@ -47,7 +47,7 @@ def _synthetic_inspection(path: str) -> FilterbankInspection:
 
 
 class ViewerAndMaskingTest(unittest.TestCase):
-    @patch("flits.io.filterbank.your.Your")
+    @patch("flits.io.your_reader.your.Your")
     def test_legacy_mode_matches_existing_fixed_tail_normalization(self, mock_your: object) -> None:
         raw = np.array(
             [
@@ -74,7 +74,7 @@ class ViewerAndMaskingTest(unittest.TestCase):
         self.assertEqual(data.dtype, np.float32)
         np.testing.assert_allclose(data, expected)
 
-    @patch("flits.io.filterbank.your.Your")
+    @patch("flits.io.your_reader.your.Your")
     def test_load_filterbank_data_applies_npol_override_to_metadata(self, mock_your: object) -> None:
         raw = np.array(
             [

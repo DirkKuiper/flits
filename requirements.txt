@@ -8,3 +8,4 @@ your==0.6.7
 jess==0.3.1
 matplotlib==3.10.1
 stingray==2.3.2
+h5py>=3.11

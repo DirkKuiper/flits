@@ -12,6 +12,7 @@ __pycache__/
 *.npz
 burst_properties.csv
 tools/
-
+data/
+.claude/
 # Agent Rules
 .agentrules

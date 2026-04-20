@@ -71,7 +71,7 @@ def _descending_frequency_session() -> BurstSession:
 
 
 class FilterbankFrequencyOrderTest(unittest.TestCase):
-    @patch("flits.io.filterbank.your.Your")
+    @patch("flits.io.your_reader.your.Your")
     def test_load_filterbank_preserves_native_order_for_negative_foff(self, mock_your: object) -> None:
         header = SimpleNamespace(
             tsamp=0.01,

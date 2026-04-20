@@ -33,7 +33,7 @@
             <select id="directorySelect"></select>
           </label>
           <label class="field">
-            <span>Known filterbanks</span>
+            <span>Known files</span>
             <select id="fileSelect" required></select>
           </label>
           <p class="field-note">Browse by folder first, or type a relative or absolute path directly below.</p>
@@ -43,7 +43,7 @@
           </label>
           <div class="field-row">
             <label class="field">
-              <span>DM <span class="tooltip-icon" data-tooltip="Dispersion Measure (pc/cm³) used to de-disperse the filterbank data.">?</span></span>
+              <span>DM <span class="tooltip-icon" data-tooltip="Dispersion Measure (pc/cm³) used to de-disperse the burst data. Pass 0 for files that are already dedispersed (e.g. CHIME/FRB catalog waterfalls). For CHIME beamformed BBData files, use the suggested DM_coherent unless you want a residual DM offset.">?</span></span>
               <input id="dmInput" type="number" step="0.001" value="527.851">
             </label>
             <label class="field">
@@ -80,7 +80,7 @@
             </label>
           </div>
           <div class="detection-panel" id="detectionHint">
-            <div class="detection-copy">Detection: waiting for a filterbank.</div>
+            <div class="detection-copy">Detection: waiting for a file.</div>
           </div>
           <button class="primary-button" id="loadButton">Load Session</button>
         </section>
@@ -174,7 +174,7 @@
         <section class="hero card">
           <div class="hero-copy">
             <div class="eyebrow">Interactive Workspace</div>
-            <h2 id="burstTitle">Load a filterbank to begin</h2>
+            <h2 id="burstTitle">Load a burst file to begin</h2>
             <div class="hero-tags" id="heroTags"></div>
             <p class="muted" id="burstSubtitle">
               Use the aligned viewer: top time profile for time edits, center dynamic spectrum for

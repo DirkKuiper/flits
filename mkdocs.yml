@@ -44,6 +44,7 @@ nav:
   - User Guide:
       - Session Workflow: user-guide/session-workflow.md
       - Exports and Snapshots: user-guide/exports-and-snapshots.md
+      - Supported Formats: user-guide/supported-formats.md
   - Analysis:
       - Measurements: analysis/measurements.md
       - DM Optimization: analysis/dm-optimization.md
@@ -52,3 +53,4 @@ nav:
   - Developer:
       - Testing: developer/testing.md
       - Publishing: developer/publishing.md
+      - Custom Readers: developer/custom-readers.md
