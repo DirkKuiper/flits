@@ -59,6 +59,12 @@ The docs cover Python installs, Docker, Apptainer, remote/HPC use, interactive
 workflow guidance, measurements, DM optimization, temporal/spectral analysis,
 exports, and release procedures.
 
+## Release Channels
+
+- PyPI and `ghcr.io/dirkkuiper/flits:latest` track stable releases.
+- `ghcr.io/dirkkuiper/flits:<version>` pins an exact release.
+- `ghcr.io/dirkkuiper/flits:edge` tracks the current `main` branch for snapshot testing.
+
 ## Citation
 
 If you use FLITS in research, cite the software and link to the repository:

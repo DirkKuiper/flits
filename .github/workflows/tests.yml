@@ -5,6 +5,8 @@ on:
     branches:
       - main
   pull_request:
+  schedule:
+    - cron: "11 4 * * 1"
   workflow_dispatch:
 
 concurrency:
@@ -69,3 +71,18 @@ jobs:
           python -m pip install build twine
           python -m build
           python -m twine check dist/*
+
+  container:
+    runs-on: ubuntu-latest
+    needs:
+      - test
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build container image
+        run: docker build -t flits-ci .
+
+      - name: Smoke test container image
+        run: docker run --rm flits-ci flits --help

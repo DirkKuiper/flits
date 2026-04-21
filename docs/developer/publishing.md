@@ -1,9 +1,10 @@
 # Publishing
 
-FLITS currently has three automated publication paths:
+FLITS now publishes through four automated paths:
 
-- `publish-package.yml` for TestPyPI and PyPI
-- `publish-image.yml` for the GHCR container image
+- `release.yml` for release PRs, GitHub releases, PyPI, and stable GHCR images
+- `publish-image.yml` for the rolling `edge` GHCR image
+- `publish-package.yml` for manual TestPyPI or PyPI fallback publishing
 - `docs.yml` for GitHub Pages documentation deployment
 
 ## One-time package setup
@@ -29,22 +30,70 @@ Then configure pending publishers on both indexes with these values:
 - Project name: `flits`
 - Owner: `DirkKuiper`
 - Repository name: `flits`
-- Workflow name: `publish-package.yml`
+- Workflow name: `release.yml`
 - Environment name: `pypi`
 
-## Release checklist
+Also check the repository Actions settings:
 
-1. Update `flits.__version__` in `flits/__init__.py`.
+- Workflow permissions: `Read and write permissions`
+- Allow GitHub Actions to create and approve pull requests: enabled
+
+If you want the manual PyPI fallback workflow to keep working with trusted
+publishing, add a second PyPI publisher entry that points at
+`publish-package.yml`.
+
+## Normal development workflow
+
+During normal development:
+
+1. Make code changes.
 2. Run the verification steps from [Testing](testing.md).
-3. Commit the release changes and push them to GitHub.
+3. Commit using Conventional Commit prefixes where possible:
+   - `fix:` for bug fixes
+   - `feat:` for user-visible features
+   - `docs:` for docs changes you want included in release notes
+   - `refactor!:` or `feat!:` plus a `BREAKING CHANGE:` footer for breaking changes
+4. Push to `main` through your normal PR flow.
 
-## Publish to TestPyPI
+You do not manually edit `flits.__version__` for routine development anymore.
+Release Please updates it in the release PR.
 
-Use the GitHub Actions workflow manually:
+## How releases work
+
+`release.yml` runs on every push to `main`:
+
+1. It updates or opens a release PR when there are releasable commits since the
+   last release.
+2. Merging that release PR updates `CHANGELOG.md`, bumps
+   `flits.__version__`, creates the Git tag, and creates the GitHub release.
+3. The same workflow then builds and publishes the PyPI package, publishes the
+   stable GHCR image, and runs smoke tests against both artifacts.
+
+While FLITS is still in the `0.x` series, breaking changes bump the minor
+version instead of jumping to `1.0.0` automatically.
+
+If you need to force a specific version, add a `Release-As: X.Y.Z` trailer to a
+commit body.
+
+## Edge container maintenance
+
+`publish-image.yml` continuously publishes:
+
+- `ghcr.io/dirkkuiper/flits:edge`
+- `ghcr.io/dirkkuiper/flits:sha-<commit>`
+
+It runs on pushes to `main`, on a weekly schedule, and manually. Use `edge`
+only for testing snapshots; use `latest` or an exact release tag for actual
+analysis environments.
+
+## Publish to TestPyPI manually
+
+Use the manual workflow when you want to verify packaging before cutting a real
+release:
 
 1. Open `Publish Python Package`.
 2. Run the workflow with `repository=testpypi`.
-3. Wait for the `publish-testpypi` job to finish.
+3. Wait for the publish and smoke-test jobs to finish.
 
 Verify the uploaded package in a clean environment:
 
@@ -56,16 +105,10 @@ python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-ur
 flits --help
 ```
 
-## Publish to PyPI
+## Manual PyPI fallback
 
-The simplest path is:
-
-1. Create a Git tag such as `v0.1.1`.
-2. Publish the matching GitHub release.
-3. Let the `release` event trigger `publish-package.yml`.
-4. Approve the `pypi` environment when GitHub requests it.
-
-You can also dispatch the same workflow manually with `repository=pypi`.
+If the automated release workflow is unavailable, you can still dispatch
+`publish-package.yml` manually with `repository=pypi`.
 
 ## Deploy docs for free
 
@@ -74,6 +117,14 @@ GitHub Pages. That setup is free for public repositories.
 
 The `docs.yml` workflow builds the site on pull requests and deploys it from
 `main`.
+
+## Dependency and security automation
+
+The repository also includes:
+
+- `dependabot.yml` for weekly Python, Docker, and GitHub Actions updates
+- a weekly scheduled `tests.yml` run to catch dependency drift
+- `security.yml` for `pip-audit` and Trivy scanning
 
 ## Optional fitburst support
 

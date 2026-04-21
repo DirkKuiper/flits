@@ -11,9 +11,6 @@ on:
         options:
           - testpypi
           - pypi
-  release:
-    types:
-      - published
 
 concurrency:
   group: publish-package-${{ github.ref }}
@@ -56,7 +53,7 @@ jobs:
   publish-testpypi:
     needs:
       - build
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.repository == 'testpypi'
+    if: github.event.inputs.repository == 'testpypi'
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -76,10 +73,36 @@ jobs:
         with:
           repository-url: https://test.pypi.org/legacy/
 
+  smoke-test-testpypi:
+    needs:
+      - publish-testpypi
+    if: github.event.inputs.repository == 'testpypi'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install from TestPyPI
+        run: |
+          python -m venv /tmp/flits-testpypi
+          . /tmp/flits-testpypi/bin/activate
+          python -m pip install --upgrade pip
+          for attempt in 1 2 3 4 5; do
+            python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple flits && break
+            if [ "$attempt" -eq 5 ]; then
+              exit 1
+            fi
+            sleep 30
+          done
+          flits --help
+
   publish-pypi:
     needs:
       - build
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.repository == 'pypi')
+    if: github.event.inputs.repository == 'pypi'
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -96,3 +119,29 @@ jobs:
 
       - name: Publish distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  smoke-test-pypi:
+    needs:
+      - publish-pypi
+    if: github.event.inputs.repository == 'pypi'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install from PyPI
+        run: |
+          python -m venv /tmp/flits-pypi
+          . /tmp/flits-pypi/bin/activate
+          python -m pip install --upgrade pip
+          for attempt in 1 2 3 4 5; do
+            python -m pip install flits && break
+            if [ "$attempt" -eq 5 ]; then
+              exit 1
+            fi
+            sleep 30
+          done
+          flits --help

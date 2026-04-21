@@ -1,10 +1,19 @@
 .git
 .venv_test
 __pycache__/
+.pytest_cache/
 *.pyc
 *.pyo
 *.pyd
 *.fil
 .DS_Store
+data/
+dist/
+site/
+tests/
+flits.egg-info/
+.github/
+.claude/
+.vendor/
 
 .agentrules

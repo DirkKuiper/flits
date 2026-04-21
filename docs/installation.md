@@ -48,6 +48,12 @@ pip install "git+https://github.com/DirkKuiper/flits.git"
 
 The canonical image is intended to live at `ghcr.io/dirkkuiper/flits`.
 
+Recommended tags:
+
+- `latest` for the newest stable release
+- an exact tag such as `0.2.0` when you want a reproducible deployment
+- `edge` for snapshots built from `main`
+
 If an image is already published:
 
 ```bash
@@ -55,6 +61,15 @@ docker run --rm -p 8123:8123 \
   -e FLITS_DATA_DIR=/data \
   -v /path/to/filterbanks:/data \
   ghcr.io/dirkkuiper/flits:latest
+```
+
+To pin a specific stable release instead:
+
+```bash
+docker run --rm -p 8123:8123 \
+  -e FLITS_DATA_DIR=/data \
+  -v /path/to/filterbanks:/data \
+  ghcr.io/dirkkuiper/flits:0.1.1
 ```
 
 To build locally instead:
@@ -98,6 +113,9 @@ APPTAINERENV_FLITS_DATA_DIR=/data \
   apptainer exec --bind /path/to/filterbanks:/data flits.sif \
   flits --data-dir /data --host 127.0.0.1 --port 8123
 ```
+
+For a reproducible Apptainer build, prefer an exact container tag over
+`latest`.
 
 ## Remote and HPC use
 

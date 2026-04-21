@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "23b338c1635e77069d60d7c58267136ec73953c7",
+  "packages": {
+    ".": {
+      "release-type": "python",
+      "package-name": "flits",
+      "changelog-path": "CHANGELOG.md",
+      "include-v-in-tag": true,
+      "bump-minor-pre-major": true
+    }
+  }
+}

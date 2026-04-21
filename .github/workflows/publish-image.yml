@@ -1,15 +1,15 @@
-name: Publish Container Image
+name: Publish Edge Container Image
 
 on:
   push:
     branches:
       - main
-    tags:
-      - "v*"
+  schedule:
+    - cron: "29 4 * * 1"
   workflow_dispatch:
 
 concurrency:
-  group: publish-image-${{ github.ref }}
+  group: publish-edge-image-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -50,12 +50,8 @@ jobs:
         with:
           images: ${{ steps.image.outputs.name }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=tag
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=edge
             type=sha,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and publish image
         uses: docker/build-push-action@v6
