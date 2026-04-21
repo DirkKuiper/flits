@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77", "wheel"]
+requires = ["setuptools>=82.0.1", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -35,12 +35,12 @@ chime_hdf5 = "flits.io.chime_hdf5_reader:ChimeHdf5Reader"
 
 [project.optional-dependencies]
 dev = [
-  "build>=1.2.2",
-  "pytest>=8.3",
-  "twine>=6.1",
+  "build>=1.4.3",
+  "pytest>=9.0.3",
+  "twine>=6.2.0",
 ]
 docs = [
-  "mkdocs-material>=9.6",
+  "mkdocs-material>=9.7.6",
 ]
 
 [project.urls]
