@@ -1,0 +1,100 @@
+name: Merge Dependabot With Coauthor
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Dependabot pull request number to squash-merge"
+        required: true
+        type: number
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Merge Dependabot PR with co-author trailer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr }}
+          CO_AUTHOR_TRAILER: "Co-authored-by: Dirk Kuiper <90256312+DirkKuiper@users.noreply.github.com>"
+        run: |
+          set -euo pipefail
+
+          pr_json="$(gh pr view "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json author,baseRefName,body,headRefOid,isDraft,state,title)"
+
+          author="$(jq -r '.author.login' <<<"$pr_json")"
+          if [ "$author" != "app/dependabot" ] && [ "$author" != "dependabot[bot]" ]; then
+            echo "PR #$PR_NUMBER is not authored by Dependabot: $author" >&2
+            exit 1
+          fi
+
+          state="$(jq -r '.state' <<<"$pr_json")"
+          if [ "$state" != "OPEN" ]; then
+            echo "PR #$PR_NUMBER is not open: $state" >&2
+            exit 1
+          fi
+
+          is_draft="$(jq -r '.isDraft' <<<"$pr_json")"
+          if [ "$is_draft" = "true" ]; then
+            echo "PR #$PR_NUMBER is still a draft." >&2
+            exit 1
+          fi
+
+          base_ref="$(jq -r '.baseRefName' <<<"$pr_json")"
+          if [ "$base_ref" != "main" ]; then
+            echo "PR #$PR_NUMBER targets $base_ref, not main." >&2
+            exit 1
+          fi
+
+          checks_json="$(gh pr checks "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json bucket,name || true)"
+
+          failed_checks="$(jq '[.[] | select(.bucket == "fail" or .bucket == "cancel")] | length' <<<"$checks_json")"
+          pending_checks="$(jq '[.[] | select(.bucket == "pending")] | length' <<<"$checks_json")"
+          passing_checks="$(jq '[.[] | select(.bucket == "pass")] | length' <<<"$checks_json")"
+
+          if [ "$failed_checks" -gt 0 ]; then
+            echo "PR #$PR_NUMBER has failing checks." >&2
+            jq -r '.[] | select(.bucket == "fail" or .bucket == "cancel") | "- " + .name' <<<"$checks_json" >&2
+            exit 1
+          fi
+
+          if [ "$pending_checks" -gt 0 ]; then
+            echo "PR #$PR_NUMBER still has pending checks." >&2
+            jq -r '.[] | select(.bucket == "pending") | "- " + .name' <<<"$checks_json" >&2
+            exit 1
+          fi
+
+          if [ "$passing_checks" -eq 0 ]; then
+            echo "PR #$PR_NUMBER has no passing checks; refusing to merge automatically." >&2
+            exit 1
+          fi
+
+          body_file="$(mktemp)"
+          jq -r '.body // ""' <<<"$pr_json" > "$body_file"
+          if ! grep -Fxq "$CO_AUTHOR_TRAILER" "$body_file"; then
+            printf '\n\n%s\n' "$CO_AUTHOR_TRAILER" >> "$body_file"
+          fi
+
+          title="$(jq -r '.title' <<<"$pr_json")"
+          head_sha="$(jq -r '.headRefOid' <<<"$pr_json")"
+
+          gh pr merge "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --squash \
+            --delete-branch \
+            --match-head-commit "$head_sha" \
+            --subject "$title" \
+            --body-file "$body_file"
