@@ -42,6 +42,11 @@ If you want the manual PyPI fallback workflow to keep working with trusted
 publishing, add a second PyPI publisher entry that points at
 `publish-package.yml`.
 
+Optional but recommended: add a repository secret named
+`RELEASE_PLEASE_TOKEN` containing a fine-scoped token that can create pull
+requests. Without it, Release Please still works with `GITHUB_TOKEN`, but
+GitHub may not run follow-up workflows on release PRs created by automation.
+
 ## Normal development workflow
 
 During normal development:

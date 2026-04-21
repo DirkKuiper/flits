@@ -7,6 +7,10 @@ updates:
       day: "monday"
       time: "05:00"
       timezone: "Europe/Amsterdam"
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
     open-pull-requests-limit: 8
 
   - package-ecosystem: "docker"
@@ -16,6 +20,15 @@ updates:
       day: "monday"
       time: "05:15"
       timezone: "Europe/Amsterdam"
+    groups:
+      docker-base-images:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
     open-pull-requests-limit: 4
 
   - package-ecosystem: "github-actions"
@@ -25,4 +38,8 @@ updates:
       day: "monday"
       time: "05:30"
       timezone: "Europe/Amsterdam"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
     open-pull-requests-limit: 6
