@@ -36,7 +36,7 @@ chime_hdf5 = "flits.io.chime_hdf5_reader:ChimeHdf5Reader"
 [project.optional-dependencies]
 dev = [
   "build>=1.2.2",
-  "pytest>=8.3",
+  "pytest>=9.0.3",
   "twine>=6.1",
 ]
 docs = [
