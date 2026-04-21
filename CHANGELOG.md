@@ -4,6 +4,13 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [0.2.0](https://github.com/DirkKuiper/flits/compare/flits-v0.1.1...flits-v0.2.0) (2026-04-21)
+
+
+### Features
+
+* add I/O support for CHIME data cat1 and basecat1 ([1cc32b6](https://github.com/DirkKuiper/flits/commit/1cc32b6b3fd79fa4b49fe4786a76baf635ac97be))
+
 ## [0.1.1] - 2026-04-18
 
 - Published the first PyPI release workflow and packaging metadata cleanup.
