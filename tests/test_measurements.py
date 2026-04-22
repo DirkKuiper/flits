@@ -7,6 +7,7 @@ from astropy import units as u
 
 from flits.measurements import build_measurement_context, compute_burst_measurements
 from flits.models import NoiseEstimateSettings
+from flits.timing import ObservatoryLocation, TimingContext
 
 
 def _synthetic_burst(
@@ -60,8 +61,11 @@ class MeasurementEngineTest(unittest.TestCase):
         )
 
         expected_toa = 60000.0 + ((1.25 + peak_bin * 1e-3) / 86400.0)
+        self.assertAlmostEqual(measurements.toa_peak_topo_mjd or 0.0, expected_toa, places=10)
         self.assertAlmostEqual(measurements.toa_topo_mjd or 0.0, expected_toa, places=10)
         self.assertEqual(measurements.mjd_at_peak, measurements.toa_topo_mjd)
+        self.assertEqual(measurements.toa_peak_topo_mjd, measurements.toa_topo_mjd)
+        self.assertEqual(measurements.toa_status, "peak_topo_only")
         self.assertGreater(measurements.snr_peak or 0.0, 1.0)
         self.assertGreater(measurements.snr_integrated or 0.0, 1.0)
         self.assertIsNotNone(measurements.width_ms_acf)
@@ -93,6 +97,7 @@ class MeasurementEngineTest(unittest.TestCase):
         self.assertIsNone(measurements.uncertainties.snr_peak)
         self.assertIsNone(measurements.uncertainties.snr_integrated)
         self.assertEqual(measurements.uncertainty_details["toa_topo_mjd"].classification, "resolution_limit")
+        self.assertEqual(measurements.uncertainty_details["toa_peak_topo_mjd"].classification, "resolution_limit")
         self.assertEqual(measurements.uncertainty_details["width_ms_acf"].classification, "resolution_limit")
         self.assertEqual(measurements.uncertainty_details["spectral_width_mhz_acf"].classification, "resolution_limit")
         self.assertEqual(measurements.uncertainty_details["peak_flux_jy"].classification, "formal_1sigma")
@@ -197,6 +202,168 @@ class MeasurementEngineTest(unittest.TestCase):
             float(median_mad.selected_profile_sn[11]),
             places=6,
         )
+
+    def test_automatic_toa_uses_event_window_peak_not_crop_wide_maximum(self) -> None:
+        masked = np.zeros((4, 32), dtype=float)
+        masked[:, 5] = 100.0
+        masked[:, 20] = 10.0
+        freqs = np.linspace(1100.0, 1000.0, 4)
+
+        measurements = compute_burst_measurements(
+            burst_name="event_peak",
+            dm=0.0,
+            start_mjd=60000.0,
+            read_start_sec=0.0,
+            crop_start_bin=0,
+            tsamp_ms=1.0,
+            freqres_mhz=abs(freqs[1] - freqs[0]),
+            freqs_mhz=freqs,
+            masked=masked,
+            event_rel_start=16,
+            event_rel_end=24,
+            spec_lo=0,
+            spec_hi=3,
+            peak_bins_abs=[],
+            burst_regions_abs=(),
+            manual_selection=False,
+            manual_peak_selection=False,
+            sefd_jy=None,
+            npol=1,
+            distance_mpc=None,
+            redshift=None,
+            sefd_fractional_uncertainty=None,
+            distance_fractional_uncertainty=None,
+            masked_channels=[],
+        )
+
+        expected_toa = 60000.0 + (20.0e-3 / 86400.0)
+        self.assertAlmostEqual(measurements.toa_peak_topo_mjd or 0.0, expected_toa, places=10)
+        self.assertEqual(measurements.provenance.toa_peak_selection, "automatic_event_peak")
+
+    def test_manual_peak_inside_event_window_defines_primary_toa(self) -> None:
+        masked, freqs = _synthetic_burst(peak_bin=20)
+
+        measurements = compute_burst_measurements(
+            burst_name="manual_event_peak",
+            dm=0.0,
+            start_mjd=60000.0,
+            read_start_sec=0.0,
+            crop_start_bin=0,
+            tsamp_ms=1.0,
+            freqres_mhz=abs(freqs[1] - freqs[0]),
+            freqs_mhz=freqs,
+            masked=masked,
+            event_rel_start=16,
+            event_rel_end=28,
+            spec_lo=0,
+            spec_hi=7,
+            peak_bins_abs=[18],
+            burst_regions_abs=(),
+            manual_selection=True,
+            manual_peak_selection=True,
+            sefd_jy=None,
+            npol=1,
+            distance_mpc=None,
+            redshift=None,
+            sefd_fractional_uncertainty=None,
+            distance_fractional_uncertainty=None,
+            masked_channels=[],
+        )
+
+        expected_toa = 60000.0 + (18.0e-3 / 86400.0)
+        self.assertAlmostEqual(measurements.toa_peak_topo_mjd or 0.0, expected_toa, places=10)
+        self.assertEqual(measurements.provenance.toa_peak_selection, "manual_event_peak")
+
+    def test_manual_peak_outside_event_window_falls_back_to_automatic_event_peak(self) -> None:
+        masked = np.zeros((4, 32), dtype=float)
+        masked[:, 5] = 100.0
+        masked[:, 20] = 10.0
+        freqs = np.linspace(1100.0, 1000.0, 4)
+
+        measurements = compute_burst_measurements(
+            burst_name="manual_outside_event",
+            dm=0.0,
+            start_mjd=60000.0,
+            read_start_sec=0.0,
+            crop_start_bin=0,
+            tsamp_ms=1.0,
+            freqres_mhz=abs(freqs[1] - freqs[0]),
+            freqs_mhz=freqs,
+            masked=masked,
+            event_rel_start=16,
+            event_rel_end=24,
+            spec_lo=0,
+            spec_hi=3,
+            peak_bins_abs=[5],
+            burst_regions_abs=(),
+            manual_selection=True,
+            manual_peak_selection=True,
+            sefd_jy=None,
+            npol=1,
+            distance_mpc=None,
+            redshift=None,
+            sefd_fractional_uncertainty=None,
+            distance_fractional_uncertainty=None,
+            masked_channels=[],
+        )
+
+        expected_toa = 60000.0 + (20.0e-3 / 86400.0)
+        self.assertAlmostEqual(measurements.toa_peak_topo_mjd or 0.0, expected_toa, places=10)
+        self.assertEqual(measurements.provenance.toa_peak_selection, "automatic_event_peak")
+
+    def test_complete_timing_metadata_reports_infinite_frequency_and_barycentric_fields(self) -> None:
+        masked, freqs = _synthetic_burst(peak_bin=20)
+        context = TimingContext(
+            dm=100.0,
+            reference_frequency_mhz=float(np.max(freqs)),
+            reference_frequency_basis="test",
+            source_ra_deg=180.0,
+            source_dec_deg=30.0,
+            observatory=ObservatoryLocation(
+                name="test",
+                longitude_deg=-79.839722,
+                latitude_deg=38.433056,
+                height_m=807.0,
+                basis="test",
+            ),
+        )
+
+        measurements = compute_burst_measurements(
+            burst_name="timed",
+            dm=100.0,
+            start_mjd=60000.0,
+            read_start_sec=0.0,
+            crop_start_bin=0,
+            tsamp_ms=1.0,
+            freqres_mhz=abs(freqs[1] - freqs[0]),
+            freqs_mhz=freqs,
+            masked=masked,
+            event_rel_start=16,
+            event_rel_end=28,
+            spec_lo=0,
+            spec_hi=7,
+            peak_bins_abs=[],
+            burst_regions_abs=(),
+            manual_selection=False,
+            manual_peak_selection=False,
+            sefd_jy=None,
+            npol=1,
+            distance_mpc=None,
+            redshift=None,
+            sefd_fractional_uncertainty=None,
+            distance_fractional_uncertainty=None,
+            masked_channels=[],
+            timing_context=context,
+        )
+
+        self.assertEqual(measurements.toa_status, "barycentric_tdb")
+        self.assertIsNotNone(measurements.toa_inf_topo_mjd)
+        self.assertIsNotNone(measurements.toa_inf_bary_mjd_tdb)
+        self.assertIsNotNone(measurements.dispersion_to_infinite_frequency_ms)
+        self.assertIsNotNone(measurements.barycentric_correction_ms)
+        self.assertEqual(measurements.toa_reference_frequency_mhz, float(np.max(freqs)))
+        self.assertIn("toa_inf_topo_mjd", measurements.uncertainty_details)
+        self.assertIn("toa_inf_bary_mjd_tdb", measurements.uncertainty_details)
 
 
 if __name__ == "__main__":

@@ -48,6 +48,7 @@ from flits.models import (
 )
 from flits.settings import ObservationConfig, get_auto_mask_profile, get_preset
 from flits.signal import block_reduce_mean, dedisperse
+from flits.timing import ObservatoryLocation, TimingContext
 
 try:
     import jess.channel_masks as _jess_channel_masks
@@ -195,6 +196,12 @@ class BurstSession:
         redshift: float | None = None,
         sefd_fractional_uncertainty: float | None = None,
         distance_fractional_uncertainty: float | None = None,
+        source_ra_deg: float | None = None,
+        source_dec_deg: float | None = None,
+        time_scale: str | None = None,
+        observatory_longitude_deg: float | None = None,
+        observatory_latitude_deg: float | None = None,
+        observatory_height_m: float | None = None,
     ) -> "BurstSession":
         from flits.io import inspect_filterbank, load_filterbank_data
 
@@ -212,6 +219,12 @@ class BurstSession:
             redshift=redshift,
             sefd_fractional_uncertainty=sefd_fractional_uncertainty,
             distance_fractional_uncertainty=distance_fractional_uncertainty,
+            source_ra_deg=source_ra_deg,
+            source_dec_deg=source_dec_deg,
+            time_scale=time_scale,
+            observatory_longitude_deg=observatory_longitude_deg,
+            observatory_latitude_deg=observatory_latitude_deg,
+            observatory_height_m=observatory_height_m,
         )
         data, metadata = load_filterbank_data(bfile, config, inspection=inspection)
         num_time_bins = data.shape[1]
@@ -252,6 +265,12 @@ class BurstSession:
             redshift=snapshot.redshift,
             sefd_fractional_uncertainty=snapshot.sefd_fractional_uncertainty,
             distance_fractional_uncertainty=snapshot.distance_fractional_uncertainty,
+            source_ra_deg=snapshot.source_ra_deg,
+            source_dec_deg=snapshot.source_dec_deg,
+            time_scale=snapshot.time_scale,
+            observatory_longitude_deg=snapshot.observatory_longitude_deg,
+            observatory_latitude_deg=snapshot.observatory_latitude_deg,
+            observatory_height_m=snapshot.observatory_height_m,
         )
         session._validate_snapshot_source(snapshot.source)
 
@@ -352,6 +371,58 @@ class BurstSession:
     @property
     def freqs(self) -> np.ndarray:
         return self.metadata.freqs_mhz
+
+    def _source_position(self) -> tuple[float | None, float | None, str | None]:
+        if self.config.source_ra_deg is not None and self.config.source_dec_deg is not None:
+            return float(self.config.source_ra_deg), float(self.config.source_dec_deg), "user_override"
+        if self.metadata.source_ra_deg is not None and self.metadata.source_dec_deg is not None:
+            return (
+                float(self.metadata.source_ra_deg),
+                float(self.metadata.source_dec_deg),
+                self.metadata.source_position_basis or "reader_metadata",
+            )
+        return None, None, None
+
+    def _observatory_location(self) -> ObservatoryLocation | None:
+        if (
+            self.config.observatory_longitude_deg is not None
+            and self.config.observatory_latitude_deg is not None
+            and self.config.observatory_height_m is not None
+        ):
+            return ObservatoryLocation(
+                name="User override",
+                longitude_deg=float(self.config.observatory_longitude_deg),
+                latitude_deg=float(self.config.observatory_latitude_deg),
+                height_m=float(self.config.observatory_height_m),
+                basis="user_override",
+            )
+        preset = get_preset(self.config.preset_key)
+        if preset.longitude_deg is None or preset.latitude_deg is None or preset.height_m is None:
+            return None
+        return ObservatoryLocation(
+            name=preset.observatory_name,
+            longitude_deg=preset.longitude_deg,
+            latitude_deg=preset.latitude_deg,
+            height_m=preset.height_m,
+            basis=preset.observatory_location_basis,
+        )
+
+    def _timing_context(self) -> TimingContext:
+        source_ra_deg, source_dec_deg, source_basis = self._source_position()
+        return TimingContext(
+            dm=float(self.dm),
+            reference_frequency_mhz=self.metadata.dedispersion_reference_frequency_mhz,
+            reference_frequency_basis=self.metadata.dedispersion_reference_basis,
+            source_ra_deg=source_ra_deg,
+            source_dec_deg=source_dec_deg,
+            source_position_frame=self.metadata.source_position_frame,
+            source_position_basis=source_basis,
+            time_scale=str(self.config.time_scale or self.metadata.time_scale or "utc").lower(),
+            time_reference_frame=self.metadata.time_reference_frame,
+            barycentric_header_flag=self.metadata.barycentric_header_flag,
+            pulsarcentric_header_flag=self.metadata.pulsarcentric_header_flag,
+            observatory=self._observatory_location(),
+        )
 
     @property
     def total_time_bins(self) -> int:
@@ -597,7 +668,10 @@ class BurstSession:
             peak_bins = []
             if reduced_display.size:
                 profile = np.nansum(reduced_display, axis=0)
-                if np.isfinite(profile).any():
+                event_profile = np.asarray(profile[event_rel_start:event_rel_end], dtype=float)
+                if event_profile.size and np.isfinite(event_profile).any():
+                    peak_bins = [int(event_rel_start + int(np.nanargmax(event_profile)))]
+                elif np.isfinite(profile).any():
                     peak_bins = [int(np.nanargmax(profile))]
 
         return ReducedAnalysisGrid(
@@ -1085,6 +1159,8 @@ class BurstSession:
             if 0 <= int(peak) < grid.time_axis_ms.size
         ]
         zmin, zmax = robust_color_limits(grid.display)
+        source_ra_deg, source_dec_deg, source_position_basis = self._source_position()
+        observatory = self._observatory_location()
 
         return {
             "meta": {
@@ -1111,6 +1187,21 @@ class BurstSession:
                 "redshift": self.config.redshift,
                 "sefd_fractional_uncertainty": self.config.sefd_fractional_uncertainty,
                 "distance_fractional_uncertainty": self.config.distance_fractional_uncertainty,
+                "source_ra_deg": source_ra_deg,
+                "source_dec_deg": source_dec_deg,
+                "source_position_frame": self.metadata.source_position_frame,
+                "source_position_basis": source_position_basis,
+                "time_scale": str(self.config.time_scale or self.metadata.time_scale or "utc").lower(),
+                "time_reference_frame": self.metadata.time_reference_frame,
+                "barycentric_header_flag": self.metadata.barycentric_header_flag,
+                "pulsarcentric_header_flag": self.metadata.pulsarcentric_header_flag,
+                "dedispersion_reference_frequency_mhz": self.metadata.dedispersion_reference_frequency_mhz,
+                "dedispersion_reference_basis": self.metadata.dedispersion_reference_basis,
+                "observatory_name": None if observatory is None else observatory.name,
+                "observatory_longitude_deg": None if observatory is None else observatory.longitude_deg,
+                "observatory_latitude_deg": None if observatory is None else observatory.latitude_deg,
+                "observatory_height_m": None if observatory is None else observatory.height_m,
+                "observatory_location_basis": None if observatory is None else observatory.basis,
                 "shape": [self.total_channels, self.total_time_bins],
                 "view_shape": [int(grid.display.shape[0]), int(grid.display.shape[1])],
                 "freq_range_mhz": [freq_lo_mhz, freq_hi_mhz],
@@ -1313,6 +1404,31 @@ class BurstSession:
         text = None if notes is None else str(notes).strip()
         self.notes = text or None
 
+    def set_timing_metadata(
+        self,
+        *,
+        source_ra_deg: float | None = None,
+        source_dec_deg: float | None = None,
+        time_scale: str | None = None,
+        observatory_longitude_deg: float | None = None,
+        observatory_latitude_deg: float | None = None,
+        observatory_height_m: float | None = None,
+    ) -> None:
+        self.config = replace(
+            self.config,
+            source_ra_deg=None if source_ra_deg is None else float(source_ra_deg),
+            source_dec_deg=None if source_dec_deg is None else float(source_dec_deg),
+            time_scale=None if time_scale is None else str(time_scale).lower(),
+            observatory_longitude_deg=(
+                None if observatory_longitude_deg is None else float(observatory_longitude_deg)
+            ),
+            observatory_latitude_deg=(
+                None if observatory_latitude_deg is None else float(observatory_latitude_deg)
+            ),
+            observatory_height_m=None if observatory_height_m is None else float(observatory_height_m),
+        )
+        self.invalidate_results()
+
     def _current_event_window_ms(
         self,
         context: MeasurementContext | None = None,
@@ -1457,6 +1573,13 @@ class BurstSession:
         delta_dm = new_dm - self.dm
         self.data = dedisperse(self.data, delta_dm, self.freqs, self.tsamp)
         self.config = replace(self.config, dm=new_dm)
+        self.metadata = replace(
+            self.metadata,
+            dedispersion_reference_frequency_mhz=float(np.max(self.freqs)) if abs(new_dm) > 0.0 else None,
+            dedispersion_reference_basis=(
+                "flits_integer_bin_dedispersion_max_frequency" if abs(new_dm) > 0.0 else None
+            ),
+        )
         self.invalidate_analysis_state()
 
     def _dm_provenance(
@@ -1697,6 +1820,7 @@ class BurstSession:
             width_results=[] if self.width_analysis is None else list(self.width_analysis.results),
             accepted_width=None if self.width_analysis is None else self.width_analysis.accepted_width,
             time_axis_ms=grid.time_axis_ms,
+            timing_context=self._timing_context(),
         )
         if previous_results is not None and previous_results.diagnostics.scattering_fit is not None:
             fit_uncertainty_details = {
@@ -1960,6 +2084,12 @@ class BurstSession:
             dm_optimization=self.dm_optimization,
             spectral_analysis=self.spectral_analysis,
             temporal_structure=self.temporal_structure,
+            source_ra_deg=self.config.source_ra_deg,
+            source_dec_deg=self.config.source_dec_deg,
+            time_scale=self.config.time_scale,
+            observatory_longitude_deg=self.config.observatory_longitude_deg,
+            observatory_latitude_deg=self.config.observatory_latitude_deg,
+            observatory_height_m=self.config.observatory_height_m,
         )
 
     def snapshot_dict(self) -> dict[str, Any]:

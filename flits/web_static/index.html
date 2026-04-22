@@ -87,10 +87,46 @@
             <span>Distance Frac. Uncertainty <span class="tooltip-icon" data-tooltip="Optional fractional systematic uncertainty on luminosity distance, expressed as a decimal (for example 0.2 for 20%). It is only used when isotropic energy is computed.">?</span></span>
             <input id="distanceFractionalUncertaintyInput" type="number" step="0.001" min="0" placeholder="optional">
           </label>
+          <div class="field-row">
+            <label class="field">
+              <span>Source RA (deg) <span class="tooltip-icon" data-tooltip="ICRS right ascension in decimal degrees. Required, with Dec and observatory location, for barycentric TOA.">?</span></span>
+              <input id="sourceRaInput" type="number" step="0.000001" placeholder="header/default">
+            </label>
+            <label class="field">
+              <span>Source Dec (deg) <span class="tooltip-icon" data-tooltip="ICRS declination in decimal degrees. Required, with RA and observatory location, for barycentric TOA.">?</span></span>
+              <input id="sourceDecInput" type="number" step="0.000001" placeholder="header/default">
+            </label>
+          </div>
+          <div class="field-row">
+            <label class="field">
+              <span>Time Scale <span class="tooltip-icon" data-tooltip="Time scale for the input MJD. UTC is the default for filterbank headers unless stronger metadata are present.">?</span></span>
+              <select id="timeScaleInput">
+                <option value="utc">UTC</option>
+                <option value="tdb">TDB</option>
+                <option value="tt">TT</option>
+                <option value="tai">TAI</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Obs. Height (m) <span class="tooltip-icon" data-tooltip="Optional observatory height override in meters. Leave blank to use the telescope preset location when available.">?</span></span>
+              <input id="observatoryHeightInput" type="number" step="0.001" placeholder="preset/default">
+            </label>
+          </div>
+          <div class="field-row">
+            <label class="field">
+              <span>Obs. Lon (deg) <span class="tooltip-icon" data-tooltip="Optional geodetic longitude override in degrees east. Leave blank to use the telescope preset location when available.">?</span></span>
+              <input id="observatoryLongitudeInput" type="number" step="0.000001" placeholder="preset/default">
+            </label>
+            <label class="field">
+              <span>Obs. Lat (deg) <span class="tooltip-icon" data-tooltip="Optional geodetic latitude override in degrees. Leave blank to use the telescope preset location when available.">?</span></span>
+              <input id="observatoryLatitudeInput" type="number" step="0.000001" placeholder="preset/default">
+            </label>
+          </div>
           <div class="detection-panel" id="detectionHint">
             <div class="detection-copy">Detection: waiting for a file.</div>
           </div>
           <button class="primary-button" id="loadButton">Load Session</button>
+          <button class="ghost-button" id="updateTimingButton">Update Timing</button>
         </section>
 
         <section class="panel">

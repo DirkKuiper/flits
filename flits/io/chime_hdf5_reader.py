@@ -181,6 +181,41 @@ def _read_attr(group: "_h5py.Group", *names: str) -> object | None:
     return None
 
 
+def _read_source_position_attrs(root: "_h5py.Group", path: Path) -> tuple[float | None, float | None, str | None]:
+    ra = _coerce_optional_float(
+        _read_attr(root, "source_ra_deg", "ra_deg", "ra", "RA"),
+        field="source_ra_deg",
+        path=path,
+    )
+    dec = _coerce_optional_float(
+        _read_attr(root, "source_dec_deg", "dec_deg", "dec", "DEC"),
+        field="source_dec_deg",
+        path=path,
+    )
+    basis = "hdf5_attrs" if ra is not None and dec is not None else None
+    return ra, dec, basis
+
+
+def _read_bbdata_source_position(root: "_h5py.Group", path: Path) -> tuple[float | None, float | None, str | None]:
+    locations = _safe_lookup(root, "tiedbeam_locations")
+    if not isinstance(locations, _h5py.Dataset):  # type: ignore[arg-type]
+        return None, None, None
+    values = locations[:]
+    fields = getattr(values.dtype, "fields", None) or {}
+    if "ra" not in fields or "dec" not in fields or values.size == 0:
+        return None, None, None
+    try:
+        ra_values = np.asarray(values["ra"], dtype=float)
+        dec_values = np.asarray(values["dec"], dtype=float)
+    except Exception as exc:
+        raise CorruptedDataError("Unable to parse tiedbeam_locations ra/dec.", path=path) from exc
+    if not (np.isfinite(ra_values).all() and np.isfinite(dec_values).all()):
+        return None, None, None
+    if not (np.allclose(ra_values, float(ra_values[0])) and np.allclose(dec_values, float(dec_values[0]))):
+        return None, None, None
+    return float(ra_values[0]), float(dec_values[0]), "bbdata_tiedbeam_locations"
+
+
 def _resolve_waterfall_dataset(root: "_h5py.Group") -> "_h5py.Dataset":
     for candidate in _WATERFALL_PATHS:
         obj = _safe_lookup(root, candidate)
@@ -458,6 +493,12 @@ class ChimeHdf5Reader:
             if schema == _CHIME_BBDATA_BEAMFORMED_SCHEMA:
                 coherent_dm = _read_bbdata_coherent_dm(root, path, required=False)
 
+            source_ra_deg, source_dec_deg, source_position_basis = _read_source_position_attrs(root, path)
+            if schema == _CHIME_BBDATA_BEAMFORMED_SCHEMA:
+                bb_ra, bb_dec, bb_basis = _read_bbdata_source_position(root, path)
+                if bb_ra is not None and bb_dec is not None:
+                    source_ra_deg, source_dec_deg, source_position_basis = bb_ra, bb_dec, bb_basis
+
             freq_lo, freq_hi = self._peek_freq_range(root, schema, path)
 
             attrs: dict[str, object] = {
@@ -469,6 +510,9 @@ class ChimeHdf5Reader:
                 "freq_lo_mhz": freq_lo,
                 "freq_hi_mhz": freq_hi,
                 "coherent_dm": coherent_dm,
+                "source_ra_deg": source_ra_deg,
+                "source_dec_deg": source_dec_deg,
+                "source_position_basis": source_position_basis,
             }
 
         schema_hint = schema if schema and schema != "unknown" else None
@@ -493,6 +537,11 @@ class ChimeHdf5Reader:
             freq_lo_mhz=freq_lo,
             freq_hi_mhz=freq_hi,
             coherent_dm=attrs["coherent_dm"],  # type: ignore[arg-type]
+            source_ra_deg=attrs["source_ra_deg"],  # type: ignore[arg-type]
+            source_dec_deg=attrs["source_dec_deg"],  # type: ignore[arg-type]
+            source_position_basis=attrs["source_position_basis"],  # type: ignore[arg-type]
+            time_scale="utc",
+            time_reference_frame="topocentric",
         )
         return inspection, attrs
 
@@ -664,6 +713,19 @@ class ChimeHdf5Reader:
             machine_id=filterbank_inspection.machine_id,
             detected_preset_key=filterbank_inspection.detected_preset_key,
             detection_basis=filterbank_inspection.detection_basis,
+            source_ra_deg=filterbank_inspection.source_ra_deg,
+            source_dec_deg=filterbank_inspection.source_dec_deg,
+            source_position_basis=filterbank_inspection.source_position_basis,
+            time_scale=filterbank_inspection.time_scale or "utc",
+            time_reference_frame=filterbank_inspection.time_reference_frame or "topocentric",
+            barycentric_header_flag=filterbank_inspection.barycentric_header_flag,
+            pulsarcentric_header_flag=filterbank_inspection.pulsarcentric_header_flag,
+            dedispersion_reference_frequency_mhz=(
+                float(np.max(freqs_mhz)) if abs(float(config.dm)) > 0.0 else None
+            ),
+            dedispersion_reference_basis=(
+                "flits_integer_bin_dedispersion_max_frequency" if abs(float(config.dm)) > 0.0 else None
+            ),
         )
         return stokes_i, validate_metadata(metadata)
 
@@ -777,6 +839,15 @@ class ChimeHdf5Reader:
             machine_id=filterbank_inspection.machine_id,
             detected_preset_key=filterbank_inspection.detected_preset_key,
             detection_basis=filterbank_inspection.detection_basis,
+            source_ra_deg=filterbank_inspection.source_ra_deg,
+            source_dec_deg=filterbank_inspection.source_dec_deg,
+            source_position_basis=filterbank_inspection.source_position_basis,
+            time_scale=filterbank_inspection.time_scale or "utc",
+            time_reference_frame=filterbank_inspection.time_reference_frame or "topocentric",
+            barycentric_header_flag=filterbank_inspection.barycentric_header_flag,
+            pulsarcentric_header_flag=filterbank_inspection.pulsarcentric_header_flag,
+            dedispersion_reference_frequency_mhz=None,
+            dedispersion_reference_basis="unknown_public_chime_catalog_reference",
         )
         return stokes_i, validate_metadata(metadata)
 
@@ -951,6 +1022,21 @@ class ChimeHdf5Reader:
             machine_id=filterbank_inspection.machine_id,
             detected_preset_key=filterbank_inspection.detected_preset_key,
             detection_basis=filterbank_inspection.detection_basis,
+            source_ra_deg=filterbank_inspection.source_ra_deg,
+            source_dec_deg=filterbank_inspection.source_dec_deg,
+            source_position_basis=filterbank_inspection.source_position_basis,
+            time_scale=filterbank_inspection.time_scale or "utc",
+            time_reference_frame=filterbank_inspection.time_reference_frame or "topocentric",
+            barycentric_header_flag=filterbank_inspection.barycentric_header_flag,
+            pulsarcentric_header_flag=filterbank_inspection.pulsarcentric_header_flag,
+            dedispersion_reference_frequency_mhz=(
+                float(np.max(freqs_mhz)) if abs(float(config.dm) - float(coherent_dm)) > 0.0 else None
+            ),
+            dedispersion_reference_basis=(
+                "flits_residual_integer_bin_dedispersion_max_frequency"
+                if abs(float(config.dm) - float(coherent_dm)) > 0.0
+                else "unknown_chime_coherent_reference"
+            ),
         )
         return stokes_i, validate_metadata(metadata)
 

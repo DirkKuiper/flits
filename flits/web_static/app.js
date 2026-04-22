@@ -51,6 +51,7 @@ const modeChip = document.getElementById("modeChip")
 const modeHelpEl = document.getElementById("modeHelp")
 const pendingBox = document.getElementById("pendingBox")
 const loadButton = document.getElementById("loadButton")
+const updateTimingButton = document.getElementById("updateTimingButton")
 const directorySelect = document.getElementById("directorySelect")
 const fileSelect = document.getElementById("fileSelect")
 const fileInput = document.getElementById("fileInput")
@@ -64,6 +65,12 @@ const readEndInput = document.getElementById("readEndInput")
 const distanceInput = document.getElementById("distanceInput")
 const distanceFractionalUncertaintyInput = document.getElementById("distanceFractionalUncertaintyInput")
 const redshiftInput = document.getElementById("redshiftInput")
+const sourceRaInput = document.getElementById("sourceRaInput")
+const sourceDecInput = document.getElementById("sourceDecInput")
+const timeScaleInput = document.getElementById("timeScaleInput")
+const observatoryLongitudeInput = document.getElementById("observatoryLongitudeInput")
+const observatoryLatitudeInput = document.getElementById("observatoryLatitudeInput")
+const observatoryHeightInput = document.getElementById("observatoryHeightInput")
 const autoMaskProfileInput = document.getElementById("autoMaskProfileInput")
 const dmMetricInput = document.getElementById("dmMetricInput")
 const dmHalfRangeInput = document.getElementById("dmHalfRangeInput")
@@ -211,6 +218,7 @@ const sessionControls = [
   exportSessionButton,
   saveNotesButton,
   resetViewButton,
+  updateTimingButton,
   clearRegionsButton,
   clearOffpulseButton,
   computeButton,
@@ -238,6 +246,12 @@ const busyLockControls = [
   distanceInput,
   distanceFractionalUncertaintyInput,
   redshiftInput,
+  sourceRaInput,
+  sourceDecInput,
+  timeScaleInput,
+  observatoryLongitudeInput,
+  observatoryLatitudeInput,
+  observatoryHeightInput,
   autoMaskProfileInput,
   dmMetricInput,
   notesInput,
@@ -317,6 +331,9 @@ function bindControls() {
   })
 
   loadButton.addEventListener("click", () => loadSession())
+  updateTimingButton.addEventListener("click", () => {
+    postAction("set_timing_metadata", timingMetadataPayload())
+  })
   exportSessionButton.addEventListener("click", () => downloadSessionSnapshot())
   importSessionInput.addEventListener("change", (event) => importSessionSnapshot(event))
   dmMetricInput.addEventListener("change", () => {
@@ -935,6 +952,15 @@ async function detectSelectedFile() {
     if (!state.userSelectedPreset) {
       setPresetSelection(payload.detected_preset_key)
     }
+    if (sourceRaInput.value.trim() === "" && payload.source_ra_deg !== null && payload.source_ra_deg !== undefined) {
+      sourceRaInput.value = String(payload.source_ra_deg)
+    }
+    if (sourceDecInput.value.trim() === "" && payload.source_dec_deg !== null && payload.source_dec_deg !== undefined) {
+      sourceDecInput.value = String(payload.source_dec_deg)
+    }
+    if (payload.time_scale) {
+      timeScaleInput.value = payload.time_scale
+    }
     maybeApplySuggestedDm(payload, bfile)
     renderDetectionHint()
     updateControlStates()
@@ -997,6 +1023,7 @@ async function loadSession(options = {}) {
         distance_mpc: parseOptionalNumber(distanceInput.value),
         distance_fractional_uncertainty: parseOptionalNumber(distanceFractionalUncertaintyInput.value),
         redshift: parseOptionalNumber(redshiftInput.value),
+        ...timingMetadataPayload(),
         auto_mask_profile: autoMaskProfileInput.value || "auto",
       }),
     })
@@ -1022,6 +1049,17 @@ async function loadSession(options = {}) {
     }
   } finally {
     setBusy(null)
+  }
+}
+
+function timingMetadataPayload() {
+  return {
+    source_ra_deg: parseOptionalNumber(sourceRaInput.value),
+    source_dec_deg: parseOptionalNumber(sourceDecInput.value),
+    time_scale: timeScaleInput.value || "utc",
+    observatory_longitude_deg: parseOptionalNumber(observatoryLongitudeInput.value),
+    observatory_latitude_deg: parseOptionalNumber(observatoryLatitudeInput.value),
+    observatory_height_m: parseOptionalNumber(observatoryHeightInput.value),
   }
 }
 
@@ -1090,6 +1128,12 @@ function applyView(view) {
   distanceInput.value = view.meta.distance_mpc === null || view.meta.distance_mpc === undefined ? "" : String(view.meta.distance_mpc)
   distanceFractionalUncertaintyInput.value = view.meta.distance_fractional_uncertainty === null || view.meta.distance_fractional_uncertainty === undefined ? "" : String(view.meta.distance_fractional_uncertainty)
   redshiftInput.value = view.meta.redshift === null || view.meta.redshift === undefined ? "" : String(view.meta.redshift)
+  sourceRaInput.value = view.meta.source_ra_deg === null || view.meta.source_ra_deg === undefined ? "" : String(view.meta.source_ra_deg)
+  sourceDecInput.value = view.meta.source_dec_deg === null || view.meta.source_dec_deg === undefined ? "" : String(view.meta.source_dec_deg)
+  timeScaleInput.value = view.meta.time_scale || "utc"
+  observatoryLongitudeInput.value = view.meta.observatory_longitude_deg === null || view.meta.observatory_longitude_deg === undefined ? "" : String(view.meta.observatory_longitude_deg)
+  observatoryLatitudeInput.value = view.meta.observatory_latitude_deg === null || view.meta.observatory_latitude_deg === undefined ? "" : String(view.meta.observatory_latitude_deg)
+  observatoryHeightInput.value = view.meta.observatory_height_m === null || view.meta.observatory_height_m === undefined ? "" : String(view.meta.observatory_height_m)
   notesInput.value = view.state.notes || ""
   syncSpectralSegmentInput(view)
   resolutionLabel.textContent = `t x${view.state.time_factor} / f x${view.state.freq_factor}`
@@ -1243,6 +1287,12 @@ function renderSessionFacts(view) {
     ["Distance", view.meta.distance_mpc === null ? "not set" : `${fmt(view.meta.distance_mpc, 3)} Mpc`],
     ["Distance frac. uncertainty", view.meta.distance_fractional_uncertainty === null || view.meta.distance_fractional_uncertainty === undefined ? "not set" : fmt(view.meta.distance_fractional_uncertainty, 4)],
     ["Redshift", view.meta.redshift === null ? "not set" : fmt(view.meta.redshift, 5)],
+    ["Source position", view.meta.source_ra_deg === null || view.meta.source_dec_deg === null || view.meta.source_ra_deg === undefined || view.meta.source_dec_deg === undefined ? "not set" : `${fmt(view.meta.source_ra_deg, 6)}, ${fmt(view.meta.source_dec_deg, 6)} deg`],
+    ["Position basis", view.meta.source_position_basis || "not set"],
+    ["Time scale", (view.meta.time_scale || "utc").toUpperCase()],
+    ["Reference frequency", view.meta.dedispersion_reference_frequency_mhz === null || view.meta.dedispersion_reference_frequency_mhz === undefined ? "unknown" : `${fmt(view.meta.dedispersion_reference_frequency_mhz, 3)} MHz`],
+    ["Observatory", view.meta.observatory_name || "not set"],
+    ["Observatory basis", view.meta.observatory_location_basis || "not set"],
     ["Crop", `${fmt(view.state.crop_ms[0], 2)} to ${fmt(view.state.crop_ms[1], 2)} ms`],
     ["Event", `${fmt(view.state.event_ms[0], 2)} to ${fmt(view.state.event_ms[1], 2)} ms`],
     ["Off-pulse", Array.isArray(view.state.offpulse_ms) && view.state.offpulse_ms.length ? view.state.offpulse_ms.map((window) => `${fmt(window[0], 2)} to ${fmt(window[1], 2)} ms`).join(", ") : "implicit event complement"],
@@ -1285,7 +1335,10 @@ function renderPrepare(view) {
     ? `${fmt(acceptedWidth.value, 3)} ${acceptedWidth.units || "ms"}`
     : (hasAcfFallback ? `${fmt(results.width_ms_acf, 3)} ms` : "n/a")
   const acceptedWidthDetail = findAcceptedWidthDetail(acceptedWidth, widthAnalysis, results, hasAcfFallback)
-  const toaDetail = resultUncertaintyDetail(results, "toa_topo_mjd", "MJD")
+  const toaDetail = resultUncertaintyDetail(results, "toa_peak_topo_mjd", "MJD")
+    || resultUncertaintyDetail(results, "toa_topo_mjd", "MJD")
+  const toaInfDetail = resultUncertaintyDetail(results, "toa_inf_topo_mjd", "MJD")
+  const toaBaryDetail = resultUncertaintyDetail(results, "toa_inf_bary_mjd_tdb", "MJD")
   const fluenceDetail = resultUncertaintyDetail(results, "fluence_jyms", "Jy ms")
   const peakFluxDetail = resultUncertaintyDetail(results, "peak_flux_jy", "Jy")
   const spectralWidthDetail = resultUncertaintyDetail(results, "spectral_width_mhz_acf", "MHz")
@@ -1301,13 +1354,27 @@ function renderPrepare(view) {
     )
 
   const cards = [
-    renderMeasurementCard("TOA (Topo MJD)", results?.toa_topo_mjd === null || results?.toa_topo_mjd === undefined ? "n/a" : fmt(results.toa_topo_mjd, 8), {
+    renderMeasurementCard("Peak-bin TOA (Topo MJD)", results?.toa_peak_topo_mjd === null || results?.toa_peak_topo_mjd === undefined ? (results?.toa_topo_mjd === null || results?.toa_topo_mjd === undefined ? "n/a" : fmt(results.toa_topo_mjd, 8)) : fmt(results.toa_peak_topo_mjd, 8), {
       uncertainty: formatDetailUncertainty(toaDetail, { formatter: formatToaUncertainty })
-        || (results?.uncertainties?.toa_topo_mjd ? formatToaUncertainty(results.uncertainties.toa_topo_mjd) : null),
+        || (results?.uncertainties?.toa_peak_topo_mjd ? formatToaUncertainty(results.uncertainties.toa_peak_topo_mjd) : null),
       method: "peak bin",
       flags: results?.measurement_flags || [],
       tooltip: measurementTooltip("toa"),
       detail: toaDetail,
+    }),
+    renderMeasurementCard("Infinite-freq TOA (Topo MJD)", results?.toa_inf_topo_mjd === null || results?.toa_inf_topo_mjd === undefined ? "n/a" : fmt(results.toa_inf_topo_mjd, 8), {
+      uncertainty: formatDetailUncertainty(toaInfDetail, { formatter: formatToaUncertainty }),
+      method: "DM reference correction",
+      flags: results?.measurement_flags || [],
+      tooltip: measurementTooltip("toaInf"),
+      detail: toaInfDetail,
+    }),
+    renderMeasurementCard("Infinite-freq TOA (Bary TDB)", results?.toa_inf_bary_mjd_tdb === null || results?.toa_inf_bary_mjd_tdb === undefined ? "n/a" : fmt(results.toa_inf_bary_mjd_tdb, 8), {
+      uncertainty: formatDetailUncertainty(toaBaryDetail, { formatter: formatToaUncertainty }),
+      method: results?.toa_status || "timing metadata",
+      flags: results?.measurement_flags || [],
+      tooltip: measurementTooltip("toaBary"),
+      detail: toaBaryDetail,
     }),
     renderMeasurementCard("Peak Bin S/N", results?.snr_peak === null || results?.snr_peak === undefined ? "n/a" : fmt(results.snr_peak, 3), {
       method: "event peak",
@@ -1354,6 +1421,9 @@ function renderPrepare(view) {
     resultTile("Isotropic Energy", formatIsoEnergy(results?.iso_e, results?.provenance?.energy_unit), "secondary", {
       detail: energyDetail,
     }),
+    resultTile("TOA Status", results?.toa_status || "n/a", "secondary", results?.toa_status_reason || ""),
+    resultTile("Dispersion Correction", results?.dispersion_to_infinite_frequency_ms === null || results?.dispersion_to_infinite_frequency_ms === undefined ? "n/a" : `${fmt(results.dispersion_to_infinite_frequency_ms, 6)} ms`, "secondary"),
+    resultTile("Barycentric Correction", results?.barycentric_correction_ms === null || results?.barycentric_correction_ms === undefined ? "n/a" : `${fmt(results.barycentric_correction_ms, 6)} ms`, "secondary"),
     resultTile("Mask Count", results ? String(results.mask_count) : String(view.state.masked_channels.length), "secondary"),
     resultTile("Peak Positions", results?.peak_positions_ms?.length ? results.peak_positions_ms.map((value) => `${fmt(value, 2)} ms`).join(", ") : "n/a", "secondary"),
   ]
@@ -1418,7 +1488,14 @@ function renderPrepareDiagnostics(results, widthAnalysis) {
       ),
     )
   }
-  addUncertaintyTile("TOA", resultUncertaintyDetail(results, "toa_topo_mjd", "MJD"), { formatter: formatToaUncertainty })
+  addUncertaintyTile(
+    "Peak TOA",
+    resultUncertaintyDetail(results, "toa_peak_topo_mjd", "MJD")
+      || resultUncertaintyDetail(results, "toa_topo_mjd", "MJD"),
+    { formatter: formatToaUncertainty },
+  )
+  addUncertaintyTile("Inf TOA", resultUncertaintyDetail(results, "toa_inf_topo_mjd", "MJD"), { formatter: formatToaUncertainty })
+  addUncertaintyTile("Bary TOA", resultUncertaintyDetail(results, "toa_inf_bary_mjd_tdb", "MJD"), { formatter: formatToaUncertainty })
   addUncertaintyTile("Width", resultUncertaintyDetail(results, "width_ms_acf", "ms"), { digits: 3, units: "ms" })
   addUncertaintyTile("Spectral Width", resultUncertaintyDetail(results, "spectral_width_mhz_acf", "MHz"), { digits: 3, units: "MHz" })
   addUncertaintyTile("Peak Flux", resultUncertaintyDetail(results, "peak_flux_jy", "Jy"), { digits: 3, units: "Jy" })
@@ -2961,7 +3038,9 @@ function renderMeasurementCard(label, value, { uncertainty = null, method = null
 
 function measurementTooltip(metric) {
   const tooltips = {
-    toa: "Computed as start MJD plus the selected peak-bin time. Manual peak selections are used first; otherwise the strongest event/profile bin is used.",
+    toa: "Computed as start MJD plus the selected event-window peak-bin time. This is topocentric/source-header timing and remains resolution-limited.",
+    toaInf: "Peak-bin TOA corrected from the finite dedispersion reference frequency to infinite frequency using the applied DM.",
+    toaBary: "Infinite-frequency TOA corrected to the Solar-System barycenter in TDB when source position, observatory location, and time metadata are available.",
     peakSn: "Maximum off-pulse-normalized S/N inside the selected event window.",
     integratedSn: "Sum of the off-pulse-normalized event profile divided by sqrt(number of finite event bins).",
     fluence: "Sum of finite event-window S/N values times sampling time and the radiometer flux scale.",
@@ -4216,6 +4295,7 @@ function busyButtonForAction(action) {
   if (action === "run_spectral_analysis") return runSpectralButton
   if (action === "export_results") return buildExportButton
   if (action === "set_notes") return saveNotesButton
+  if (action === "set_timing_metadata") return updateTimingButton
   if (action === "set_dm") return setDmButton
   if (action === "reset_view") return resetViewButton
   return null
@@ -4233,6 +4313,7 @@ function busyButtonText(action) {
   if (action === "run_spectral_analysis") return "Running..."
   if (action === "export_results") return "Building..."
   if (action === "set_notes") return "Saving..."
+  if (action === "set_timing_metadata") return "Updating..."
   if (action === "set_dm") return "Applying DM..."
   if (action === "reset_view") return "Resetting..."
   return actionBusyText(action)
@@ -4265,6 +4346,7 @@ function actionBusyText(action) {
     run_spectral_analysis: "Running power spectrum",
     export_results: "Building export bundle",
     set_notes: "Saving notes",
+    set_timing_metadata: "Updating timing metadata",
     set_dm: "Applying DM",
     compute_properties: "Computing",
   }
@@ -4286,6 +4368,7 @@ function actionSuccessText(action) {
     run_spectral_analysis: "Power spectrum updated",
     export_results: "Export bundle built",
     set_notes: "Notes saved",
+    set_timing_metadata: "Timing metadata updated",
     set_dm: "Dispersion measure updated",
     compute_properties: "Derived properties updated",
   }
@@ -4417,6 +4500,9 @@ function syncPresetDefaults() {
     readEndInput.value = ""
     readEndInput.placeholder = "full file"
   }
+  observatoryLongitudeInput.placeholder = preset.longitude_deg === null || preset.longitude_deg === undefined ? "optional" : String(preset.longitude_deg)
+  observatoryLatitudeInput.placeholder = preset.latitude_deg === null || preset.latitude_deg === undefined ? "optional" : String(preset.latitude_deg)
+  observatoryHeightInput.placeholder = preset.height_m === null || preset.height_m === undefined ? "optional" : String(preset.height_m)
 }
 
 function parseOptionalNumber(value) {
@@ -4822,6 +4908,19 @@ function formatScaleTickLabelMs(value) {
 function renderProvenanceItems(provenance) {
   const items = [
     ["Peak selection", provenance.peak_selection || "n/a"],
+    ["TOA method", provenance.toa_method || "n/a"],
+    ["TOA peak selection", provenance.toa_peak_selection || "n/a"],
+    ["TOA frame", provenance.toa_reference_frame || "n/a"],
+    ["TOA time scale", provenance.toa_time_scale ? String(provenance.toa_time_scale).toUpperCase() : "n/a"],
+    ["TOA reference frequency", provenance.toa_reference_frequency_mhz === null || provenance.toa_reference_frequency_mhz === undefined ? "n/a" : `${fmt(provenance.toa_reference_frequency_mhz, 6)} MHz`],
+    ["TOA reference basis", provenance.toa_reference_frequency_basis || "n/a"],
+    ["TOA status", provenance.toa_status || "n/a"],
+    ["TOA status reason", provenance.toa_status_reason || "n/a"],
+    ["Source position", provenance.source_ra_deg === null || provenance.source_ra_deg === undefined || provenance.source_dec_deg === null || provenance.source_dec_deg === undefined ? "n/a" : `${fmt(provenance.source_ra_deg, 6)}, ${fmt(provenance.source_dec_deg, 6)} deg`],
+    ["Source position basis", provenance.source_position_basis || "n/a"],
+    ["Observatory", provenance.observatory_name || "n/a"],
+    ["Observatory position", provenance.observatory_longitude_deg === null || provenance.observatory_longitude_deg === undefined || provenance.observatory_latitude_deg === null || provenance.observatory_latitude_deg === undefined || provenance.observatory_height_m === null || provenance.observatory_height_m === undefined ? "n/a" : `${fmt(provenance.observatory_longitude_deg, 6)}, ${fmt(provenance.observatory_latitude_deg, 6)}, ${fmt(provenance.observatory_height_m, 3)} m`],
+    ["Observatory basis", provenance.observatory_location_basis || "n/a"],
     ["Width method", provenance.width_method || "n/a"],
     ["Spectral width method", provenance.spectral_width_method || "n/a"],
     ["Calibration", provenance.calibration_method || "n/a"],

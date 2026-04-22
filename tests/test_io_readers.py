@@ -55,6 +55,16 @@ def test_round_trip_metadata(synthetic_waterfall):
     assert metadata.bandwidth_mhz == pytest.approx(
         abs(synthetic_waterfall.foff_mhz) * synthetic_waterfall.data.shape[0], rel=1e-6
     )
+    if synthetic_waterfall.format_id == "sigproc":
+        assert metadata.source_ra_deg == pytest.approx(188.73658333333333)
+        assert metadata.source_dec_deg == pytest.approx(-12.58243888888889)
+        assert metadata.source_position_basis == "reader_header"
+        assert metadata.barycentric_header_flag is False
+        assert metadata.pulsarcentric_header_flag is False
+    if synthetic_waterfall.format_id == "chime_bbdata_beamformed":
+        assert metadata.source_ra_deg == pytest.approx(123.4)
+        assert metadata.source_dec_deg == pytest.approx(56.7)
+        assert metadata.source_position_basis == "bbdata_tiedbeam_locations"
     assert data.shape[0] == synthetic_waterfall.data.shape[0]
     # The burst peak should survive dedispersion + normalization in the middle of the time axis.
     collapsed = data.mean(axis=0)
@@ -364,11 +374,19 @@ def test_chime_catalog_load_does_not_rededisperse(tmp_path):
     with h5py.File(path, "w") as fh:
         frb = fh.create_group("frb")
         frb.attrs["tns_name"] = "FRB20180729A"
+        frb.attrs["ra"] = 12.3
+        frb.attrs["dec"] = 45.6
         frb.create_dataset("extent", data=np.array([0.0, 0.064, 400.0, 800.0]))
         frb.create_dataset("plot_freq", data=np.linspace(400.0, 800.0, nchan))
         frb.create_dataset("calibrated_wfall", data=waterfall)
 
     inspection = inspect_filterbank(path)
     config = ObservationConfig.from_preset(dm=400.0, preset_key="generic", sefd_jy=1.0)
-    data, _ = load_filterbank_data(path, config, inspection=inspection)
+    data, metadata = load_filterbank_data(path, config, inspection=inspection)
     assert int(np.argmax(data.mean(axis=0))) == 32
+    assert inspection.source_ra_deg == pytest.approx(12.3)
+    assert inspection.source_dec_deg == pytest.approx(45.6)
+    assert metadata.source_ra_deg == pytest.approx(12.3)
+    assert metadata.source_dec_deg == pytest.approx(45.6)
+    assert metadata.dedispersion_reference_frequency_mhz is None
+    assert metadata.dedispersion_reference_basis == "unknown_public_chime_catalog_reference"

@@ -48,6 +48,12 @@ def _int_or_none(value: Any) -> int | None:
     return int(value)
 
 
+def _bool_or_none(value: Any) -> bool | None:
+    if value is None:
+        return None
+    return bool(value)
+
+
 def _array_1d(values: Any, *, dtype: np.dtype[Any] | type[np.floating[Any]] | type[np.integer[Any]] = float) -> np.ndarray:
     if values is None:
         return np.array([], dtype=dtype)
@@ -601,6 +607,16 @@ class FilterbankMetadata:
     machine_id: int | None
     detected_preset_key: str
     detection_basis: str
+    source_ra_deg: float | None = None
+    source_dec_deg: float | None = None
+    source_position_frame: str = "icrs"
+    source_position_basis: str | None = None
+    time_scale: str = "utc"
+    time_reference_frame: str = "topocentric"
+    barycentric_header_flag: bool | None = None
+    pulsarcentric_header_flag: bool | None = None
+    dedispersion_reference_frequency_mhz: float | None = None
+    dedispersion_reference_basis: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -619,6 +635,16 @@ class FilterbankMetadata:
             "detected_preset_key": self.detected_preset_key,
             "detection_basis": self.detection_basis,
             "freqs_mhz": _jsonable_1d(self.freqs_mhz),
+            "source_ra_deg": _float_or_none(self.source_ra_deg),
+            "source_dec_deg": _float_or_none(self.source_dec_deg),
+            "source_position_frame": self.source_position_frame,
+            "source_position_basis": self.source_position_basis,
+            "time_scale": self.time_scale,
+            "time_reference_frame": self.time_reference_frame,
+            "barycentric_header_flag": _bool_or_none(self.barycentric_header_flag),
+            "pulsarcentric_header_flag": _bool_or_none(self.pulsarcentric_header_flag),
+            "dedispersion_reference_frequency_mhz": _float_or_none(self.dedispersion_reference_frequency_mhz),
+            "dedispersion_reference_basis": self.dedispersion_reference_basis,
         }
 
     @classmethod
@@ -639,6 +665,18 @@ class FilterbankMetadata:
             machine_id=_int_or_none(payload.get("machine_id")),
             detected_preset_key=str(payload["detected_preset_key"]),
             detection_basis=str(payload["detection_basis"]),
+            source_ra_deg=_float_or_none(payload.get("source_ra_deg")),
+            source_dec_deg=_float_or_none(payload.get("source_dec_deg")),
+            source_position_frame=str(payload.get("source_position_frame", "icrs")),
+            source_position_basis=payload.get("source_position_basis"),
+            time_scale=str(payload.get("time_scale", "utc")),
+            time_reference_frame=str(payload.get("time_reference_frame", "topocentric")),
+            barycentric_header_flag=_bool_or_none(payload.get("barycentric_header_flag")),
+            pulsarcentric_header_flag=_bool_or_none(payload.get("pulsarcentric_header_flag")),
+            dedispersion_reference_frequency_mhz=_float_or_none(
+                payload.get("dedispersion_reference_frequency_mhz")
+            ),
+            dedispersion_reference_basis=payload.get("dedispersion_reference_basis"),
         )
 
 
@@ -1059,7 +1097,10 @@ class TemporalStructureResult:
 
 @dataclass(frozen=True)
 class MeasurementUncertainties:
+    toa_peak_topo_mjd: float | None = None
     toa_topo_mjd: float | None = None
+    toa_inf_topo_mjd: float | None = None
+    toa_inf_bary_mjd_tdb: float | None = None
     snr_peak: float | None = None
     snr_integrated: float | None = None
     width_ms_acf: float | None = None
@@ -1072,7 +1113,10 @@ class MeasurementUncertainties:
 
     def to_dict(self) -> dict[str, float | None]:
         return {
+            "toa_peak_topo_mjd": self.toa_peak_topo_mjd,
             "toa_topo_mjd": self.toa_topo_mjd,
+            "toa_inf_topo_mjd": self.toa_inf_topo_mjd,
+            "toa_inf_bary_mjd_tdb": self.toa_inf_bary_mjd_tdb,
             "snr_peak": self.snr_peak,
             "snr_integrated": self.snr_integrated,
             "width_ms_acf": self.width_ms_acf,
@@ -1089,7 +1133,12 @@ class MeasurementUncertainties:
         if payload is None:
             return cls()
         return cls(
+            toa_peak_topo_mjd=_float_or_none(
+                payload.get("toa_peak_topo_mjd", payload.get("toa_topo_mjd"))
+            ),
             toa_topo_mjd=_float_or_none(payload.get("toa_topo_mjd")),
+            toa_inf_topo_mjd=_float_or_none(payload.get("toa_inf_topo_mjd")),
+            toa_inf_bary_mjd_tdb=_float_or_none(payload.get("toa_inf_bary_mjd_tdb")),
             snr_peak=_float_or_none(payload.get("snr_peak")),
             snr_integrated=_float_or_none(payload.get("snr_integrated")),
             width_ms_acf=_float_or_none(payload.get("width_ms_acf")),
@@ -1133,6 +1182,22 @@ class MeasurementProvenance:
     warning_flags: list[str]
     low_sn_threshold: float
     heavily_masked_threshold: float
+    toa_method: str = "peak_bin"
+    toa_peak_selection: str = "automatic_event_peak"
+    toa_reference_frame: str = "topocentric_source_header"
+    toa_time_scale: str = "utc"
+    toa_reference_frequency_mhz: float | None = None
+    toa_reference_frequency_basis: str | None = None
+    toa_status: str = "peak_topo_only"
+    toa_status_reason: str = ""
+    source_ra_deg: float | None = None
+    source_dec_deg: float | None = None
+    source_position_basis: str | None = None
+    observatory_name: str | None = None
+    observatory_longitude_deg: float | None = None
+    observatory_latitude_deg: float | None = None
+    observatory_height_m: float | None = None
+    observatory_location_basis: str | None = None
     deprecated_fields: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -1166,6 +1231,22 @@ class MeasurementProvenance:
             "warning_flags": self.warning_flags,
             "low_sn_threshold": self.low_sn_threshold,
             "heavily_masked_threshold": self.heavily_masked_threshold,
+            "toa_method": self.toa_method,
+            "toa_peak_selection": self.toa_peak_selection,
+            "toa_reference_frame": self.toa_reference_frame,
+            "toa_time_scale": self.toa_time_scale,
+            "toa_reference_frequency_mhz": _float_or_none(self.toa_reference_frequency_mhz),
+            "toa_reference_frequency_basis": self.toa_reference_frequency_basis,
+            "toa_status": self.toa_status,
+            "toa_status_reason": self.toa_status_reason,
+            "source_ra_deg": _float_or_none(self.source_ra_deg),
+            "source_dec_deg": _float_or_none(self.source_dec_deg),
+            "source_position_basis": self.source_position_basis,
+            "observatory_name": self.observatory_name,
+            "observatory_longitude_deg": _float_or_none(self.observatory_longitude_deg),
+            "observatory_latitude_deg": _float_or_none(self.observatory_latitude_deg),
+            "observatory_height_m": _float_or_none(self.observatory_height_m),
+            "observatory_location_basis": self.observatory_location_basis,
             "deprecated_fields": self.deprecated_fields,
         }
 
@@ -1203,6 +1284,22 @@ class MeasurementProvenance:
             warning_flags=[str(value) for value in payload.get("warning_flags", [])],
             low_sn_threshold=float(payload.get("low_sn_threshold", 0.0)),
             heavily_masked_threshold=float(payload.get("heavily_masked_threshold", 0.0)),
+            toa_method=str(payload.get("toa_method", "peak_bin")),
+            toa_peak_selection=str(payload.get("toa_peak_selection", "automatic_event_peak")),
+            toa_reference_frame=str(payload.get("toa_reference_frame", "topocentric_source_header")),
+            toa_time_scale=str(payload.get("toa_time_scale", "utc")),
+            toa_reference_frequency_mhz=_float_or_none(payload.get("toa_reference_frequency_mhz")),
+            toa_reference_frequency_basis=payload.get("toa_reference_frequency_basis"),
+            toa_status=str(payload.get("toa_status", "peak_topo_only")),
+            toa_status_reason=str(payload.get("toa_status_reason", "")),
+            source_ra_deg=_float_or_none(payload.get("source_ra_deg")),
+            source_dec_deg=_float_or_none(payload.get("source_dec_deg")),
+            source_position_basis=payload.get("source_position_basis"),
+            observatory_name=payload.get("observatory_name"),
+            observatory_longitude_deg=_float_or_none(payload.get("observatory_longitude_deg")),
+            observatory_latitude_deg=_float_or_none(payload.get("observatory_latitude_deg")),
+            observatory_height_m=_float_or_none(payload.get("observatory_height_m")),
+            observatory_location_basis=payload.get("observatory_location_basis"),
             deprecated_fields=[str(value) for value in payload.get("deprecated_fields", [])],
         )
 
@@ -1355,8 +1452,16 @@ class MeasurementDiagnostics:
 class BurstMeasurements:
     burst_name: str
     dm: float
+    toa_peak_topo_mjd: float | None
     toa_topo_mjd: float | None
     mjd_at_peak: float | None
+    toa_inf_topo_mjd: float | None
+    toa_inf_bary_mjd_tdb: float | None
+    dispersion_to_infinite_frequency_ms: float | None
+    barycentric_correction_ms: float | None
+    toa_reference_frequency_mhz: float | None
+    toa_status: str
+    toa_status_reason: str
     peak_positions_ms: list[float]
     snr_peak: float | None
     snr_integrated: float | None
@@ -1383,8 +1488,16 @@ class BurstMeasurements:
         return {
             "burst_name": self.burst_name,
             "dm": self.dm,
+            "toa_peak_topo_mjd": self.toa_peak_topo_mjd,
             "toa_topo_mjd": self.toa_topo_mjd,
             "mjd_at_peak": self.mjd_at_peak,
+            "toa_inf_topo_mjd": self.toa_inf_topo_mjd,
+            "toa_inf_bary_mjd_tdb": self.toa_inf_bary_mjd_tdb,
+            "dispersion_to_infinite_frequency_ms": self.dispersion_to_infinite_frequency_ms,
+            "barycentric_correction_ms": self.barycentric_correction_ms,
+            "toa_reference_frequency_mhz": self.toa_reference_frequency_mhz,
+            "toa_status": self.toa_status,
+            "toa_status_reason": self.toa_status_reason,
             "peak_positions_ms": self.peak_positions_ms,
             "snr_peak": self.snr_peak,
             "snr_integrated": self.snr_integrated,
@@ -1413,8 +1526,20 @@ class BurstMeasurements:
         return cls(
             burst_name=str(payload["burst_name"]),
             dm=float(payload["dm"]),
+            toa_peak_topo_mjd=_float_or_none(
+                payload.get("toa_peak_topo_mjd", payload.get("toa_topo_mjd"))
+            ),
             toa_topo_mjd=_float_or_none(payload.get("toa_topo_mjd")),
             mjd_at_peak=_float_or_none(payload.get("mjd_at_peak")),
+            toa_inf_topo_mjd=_float_or_none(payload.get("toa_inf_topo_mjd")),
+            toa_inf_bary_mjd_tdb=_float_or_none(payload.get("toa_inf_bary_mjd_tdb")),
+            dispersion_to_infinite_frequency_ms=_float_or_none(
+                payload.get("dispersion_to_infinite_frequency_ms")
+            ),
+            barycentric_correction_ms=_float_or_none(payload.get("barycentric_correction_ms")),
+            toa_reference_frequency_mhz=_float_or_none(payload.get("toa_reference_frequency_mhz")),
+            toa_status=str(payload.get("toa_status", "peak_topo_only")),
+            toa_status_reason=str(payload.get("toa_status_reason", "")),
             peak_positions_ms=[float(value) for value in payload.get("peak_positions_ms", [])],
             snr_peak=_float_or_none(payload.get("snr_peak")),
             snr_integrated=_float_or_none(payload.get("snr_integrated")),
@@ -1477,6 +1602,12 @@ class AnalysisSessionSnapshot:
     dm_optimization: DmOptimizationResult | None
     spectral_analysis: SpectralAnalysisResult | None
     temporal_structure: TemporalStructureResult | None
+    source_ra_deg: float | None = None
+    source_dec_deg: float | None = None
+    time_scale: str | None = None
+    observatory_longitude_deg: float | None = None
+    observatory_latitude_deg: float | None = None
+    observatory_height_m: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1512,6 +1643,12 @@ class AnalysisSessionSnapshot:
             "dm_optimization": None if self.dm_optimization is None else self.dm_optimization.to_dict(),
             "spectral_analysis": None if self.spectral_analysis is None else self.spectral_analysis.to_dict(),
             "temporal_structure": None if self.temporal_structure is None else self.temporal_structure.to_dict(),
+            "source_ra_deg": _float_or_none(self.source_ra_deg),
+            "source_dec_deg": _float_or_none(self.source_dec_deg),
+            "time_scale": self.time_scale,
+            "observatory_longitude_deg": _float_or_none(self.observatory_longitude_deg),
+            "observatory_latitude_deg": _float_or_none(self.observatory_latitude_deg),
+            "observatory_height_m": _float_or_none(self.observatory_height_m),
         }
 
     @classmethod
@@ -1561,6 +1698,12 @@ class AnalysisSessionSnapshot:
             ),
             spectral_analysis=SpectralAnalysisResult.from_dict(payload.get("spectral_analysis")),
             temporal_structure=TemporalStructureResult.from_dict(payload.get("temporal_structure")),
+            source_ra_deg=_float_or_none(payload.get("source_ra_deg")),
+            source_dec_deg=_float_or_none(payload.get("source_dec_deg")),
+            time_scale=None if payload.get("time_scale") is None else str(payload.get("time_scale")),
+            observatory_longitude_deg=_float_or_none(payload.get("observatory_longitude_deg")),
+            observatory_latitude_deg=_float_or_none(payload.get("observatory_latitude_deg")),
+            observatory_height_m=_float_or_none(payload.get("observatory_height_m")),
         )
 
 

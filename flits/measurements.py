@@ -22,6 +22,7 @@ from flits.models import (
     compatible_scalar_uncertainty,
 )
 from flits.signal import acf_1d, gaussian_1d, radiometer
+from flits.timing import TimingContext, compute_toa_timing_chain
 
 
 LOW_SN_THRESHOLD = 6.0
@@ -286,7 +287,14 @@ def _primary_peak_bin(
     event_rel_start: int,
     event_rel_end: int,
 ) -> int | None:
-    candidates = [int(bin_abs) for bin_abs in peak_bins_abs if crop_start_bin <= int(bin_abs) < crop_start_bin + profile_sn.size]
+    event_abs_start = int(crop_start_bin) + int(event_rel_start)
+    event_abs_end = int(crop_start_bin) + int(event_rel_end)
+    candidates = [
+        int(bin_abs)
+        for bin_abs in peak_bins_abs
+        if event_abs_start <= int(bin_abs) < event_abs_end
+        and crop_start_bin <= int(bin_abs) < crop_start_bin + profile_sn.size
+    ]
     if candidates:
         return max(
             candidates,
@@ -617,6 +625,7 @@ def compute_burst_measurements(
     width_results: Sequence[WidthResult] | None = None,
     accepted_width: AcceptedWidthSelection | None = None,
     time_axis_ms: np.ndarray | None = None,
+    timing_context: TimingContext | None = None,
 ) -> BurstMeasurements:
     if time_axis_ms is None:
         time_axis_ms = (
@@ -645,6 +654,18 @@ def compute_burst_measurements(
         event_rel_start,
         event_rel_end,
     )
+    event_abs_start = int(crop_start_bin) + int(event_rel_start)
+    event_abs_end = int(crop_start_bin) + int(event_rel_end)
+    manual_event_peak_bins = {
+        int(peak)
+        for peak in peak_bins_abs
+        if event_abs_start <= int(peak) < event_abs_end
+    }
+    toa_peak_selection = (
+        "manual_event_peak"
+        if manual_peak_selection and peak_bin_abs is not None and int(peak_bin_abs) in manual_event_peak_bins
+        else "automatic_event_peak"
+    )
     peak_positions_ms = [
         float(time_axis_ms[int(peak_bin) - int(crop_start_bin)])
         for peak_bin in peak_bins_abs
@@ -653,10 +674,11 @@ def compute_burst_measurements(
     if not peak_positions_ms and peak_bin_abs is not None and 0 <= int(peak_bin_abs) - int(crop_start_bin) < time_axis_ms.size:
         peak_positions_ms = [float(time_axis_ms[int(peak_bin_abs) - int(crop_start_bin)])]
 
-    toa_topo_mjd = None
+    toa_peak_topo_mjd = None
     if peak_bin_abs is not None and 0 <= int(peak_bin_abs) - int(crop_start_bin) < time_axis_ms.size:
         peak_time_ms = float(time_axis_ms[int(peak_bin_abs) - int(crop_start_bin)])
-        toa_topo_mjd = float(start_mjd + ((peak_time_ms / 1e3) / 86400.0))
+        toa_peak_topo_mjd = float(start_mjd + ((peak_time_ms / 1e3) / 86400.0))
+    timing_chain = compute_toa_timing_chain(toa_peak_topo_mjd, timing_context)
 
     snr_peak = None
     if context.event_profile_sn.size and np.isfinite(context.event_profile_sn).any():
@@ -723,8 +745,8 @@ def compute_burst_measurements(
     noise_publishable = _noise_uncertainty_publishable(context.noise_summary)
     resolution_warning_flags = list(context.noise_summary.warning_flags)
 
-    if toa_topo_mjd is not None:
-        uncertainty_details["toa_topo_mjd"] = _uncertainty_detail(
+    if toa_peak_topo_mjd is not None:
+        toa_resolution_detail = _uncertainty_detail(
             value=float((tsamp_ms / 1e3) / (2 * 86400.0)),
             units="MJD",
             classification="resolution_limit",
@@ -733,6 +755,12 @@ def compute_burst_measurements(
             publishable=False,
             warning_flags=resolution_warning_flags,
         )
+        uncertainty_details["toa_peak_topo_mjd"] = toa_resolution_detail
+        uncertainty_details["toa_topo_mjd"] = toa_resolution_detail
+        if timing_chain.toa_inf_topo_mjd is not None:
+            uncertainty_details["toa_inf_topo_mjd"] = toa_resolution_detail
+        if timing_chain.toa_inf_bary_mjd_tdb is not None:
+            uncertainty_details["toa_inf_bary_mjd_tdb"] = toa_resolution_detail
     if width_ms_acf is not None:
         uncertainty_details["width_ms_acf"] = _uncertainty_detail(
             value=float(tsamp_ms * 0.5),
@@ -859,7 +887,12 @@ def compute_burst_measurements(
         )
 
     uncertainties = MeasurementUncertainties(
+        toa_peak_topo_mjd=compatible_scalar_uncertainty(uncertainty_details.get("toa_peak_topo_mjd")),
         toa_topo_mjd=compatible_scalar_uncertainty(uncertainty_details.get("toa_topo_mjd")),
+        toa_inf_topo_mjd=compatible_scalar_uncertainty(uncertainty_details.get("toa_inf_topo_mjd")),
+        toa_inf_bary_mjd_tdb=compatible_scalar_uncertainty(
+            uncertainty_details.get("toa_inf_bary_mjd_tdb")
+        ),
         snr_peak=None,
         snr_integrated=None,
         width_ms_acf=compatible_scalar_uncertainty(uncertainty_details.get("width_ms_acf")),
@@ -921,6 +954,42 @@ def compute_burst_measurements(
         warning_flags=sorted(set(measurement_flags)),
         low_sn_threshold=float(LOW_SN_THRESHOLD),
         heavily_masked_threshold=float(HEAVILY_MASKED_FRACTION),
+        toa_method="peak_bin",
+        toa_peak_selection=toa_peak_selection,
+        toa_reference_frame=(
+            "topocentric_source_header"
+            if timing_context is None
+            else str(timing_context.time_reference_frame or "topocentric")
+        ),
+        toa_time_scale="utc" if timing_context is None else str(timing_context.time_scale or "utc"),
+        toa_reference_frequency_mhz=None if timing_context is None else timing_context.reference_frequency_mhz,
+        toa_reference_frequency_basis=None if timing_context is None else timing_context.reference_frequency_basis,
+        toa_status=timing_chain.status,
+        toa_status_reason=timing_chain.status_reason,
+        source_ra_deg=None if timing_context is None else timing_context.source_ra_deg,
+        source_dec_deg=None if timing_context is None else timing_context.source_dec_deg,
+        source_position_basis=None if timing_context is None else timing_context.source_position_basis,
+        observatory_name=(
+            None if timing_context is None or timing_context.observatory is None else timing_context.observatory.name
+        ),
+        observatory_longitude_deg=(
+            None
+            if timing_context is None or timing_context.observatory is None
+            else timing_context.observatory.longitude_deg
+        ),
+        observatory_latitude_deg=(
+            None
+            if timing_context is None or timing_context.observatory is None
+            else timing_context.observatory.latitude_deg
+        ),
+        observatory_height_m=(
+            None
+            if timing_context is None or timing_context.observatory is None
+            else timing_context.observatory.height_m
+        ),
+        observatory_location_basis=(
+            None if timing_context is None or timing_context.observatory is None else timing_context.observatory.basis
+        ),
         deprecated_fields=["mjd_at_peak"],
     )
 
@@ -946,8 +1015,16 @@ def compute_burst_measurements(
     return BurstMeasurements(
         burst_name=burst_name,
         dm=float(dm),
-        toa_topo_mjd=toa_topo_mjd,
-        mjd_at_peak=toa_topo_mjd,
+        toa_peak_topo_mjd=toa_peak_topo_mjd,
+        toa_topo_mjd=toa_peak_topo_mjd,
+        mjd_at_peak=toa_peak_topo_mjd,
+        toa_inf_topo_mjd=timing_chain.toa_inf_topo_mjd,
+        toa_inf_bary_mjd_tdb=timing_chain.toa_inf_bary_mjd_tdb,
+        dispersion_to_infinite_frequency_ms=timing_chain.dispersion_to_infinite_frequency_ms,
+        barycentric_correction_ms=timing_chain.barycentric_correction_ms,
+        toa_reference_frequency_mhz=None if timing_context is None else timing_context.reference_frequency_mhz,
+        toa_status=timing_chain.status,
+        toa_status_reason=timing_chain.status_reason,
         peak_positions_ms=[float(value) for value in peak_positions_ms],
         snr_peak=snr_peak,
         snr_integrated=snr_integrated,

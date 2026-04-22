@@ -33,6 +33,11 @@ class TelescopePreset:
     telescope_name_aliases: tuple[str, ...] = ()
     format_signatures: tuple[str, ...] = ()
     freq_bands_mhz: tuple[tuple[float, float], ...] = ()
+    observatory_name: str | None = None
+    longitude_deg: float | None = None
+    latitude_deg: float | None = None
+    height_m: float | None = None
+    observatory_location_basis: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -47,6 +52,11 @@ class TelescopePreset:
             "telescope_name_aliases": list(self.telescope_name_aliases),
             "format_signatures": list(self.format_signatures),
             "freq_bands_mhz": [list(band) for band in self.freq_bands_mhz],
+            "observatory_name": self.observatory_name,
+            "longitude_deg": self.longitude_deg,
+            "latitude_deg": self.latitude_deg,
+            "height_m": self.height_m,
+            "observatory_location_basis": self.observatory_location_basis,
         }
 
 
@@ -84,6 +94,11 @@ PRESETS: dict[str, TelescopePreset] = {
         read_start_sec=0.05,
         read_end_sec=0.201,
         normalization_tail_fraction=0.25,
+        observatory_name="Nancay Radio Telescope",
+        longitude_deg=2.1974784506622265,
+        latitude_deg=47.37360170826312,
+        height_m=190.94343144576627,
+        observatory_location_basis="astropy_site_registry_nancay",
     ),
     "gbt": TelescopePreset(
         key="gbt",
@@ -94,6 +109,11 @@ PRESETS: dict[str, TelescopePreset] = {
         read_start_sec=0.0,
         read_end_sec=None,
         normalization_tail_fraction=0.25,
+        observatory_name="Green Bank Telescope",
+        longitude_deg=-79.839722,
+        latitude_deg=38.433056,
+        height_m=807.00000000084,
+        observatory_location_basis="astropy_site_registry_green_bank_telescope",
     ),
     "lofar": TelescopePreset(
         key="lofar",
@@ -104,6 +124,11 @@ PRESETS: dict[str, TelescopePreset] = {
         read_start_sec=0.0,
         read_end_sec=None,
         normalization_tail_fraction=0.25,
+        observatory_name="LOFAR default/core location",
+        longitude_deg=6.869832836200029,
+        latitude_deg=52.915118967984164,
+        height_m=49.350029547169015,
+        observatory_location_basis="astropy_site_registry_lofar_default_user_override_recommended",
     ),
     "chime": TelescopePreset(
         key="chime",
@@ -121,6 +146,11 @@ PRESETS: dict[str, TelescopePreset] = {
             "chime_bbdata_beamformed_v1",
         ),
         freq_bands_mhz=((400.0, 800.0),),
+        observatory_name="CHIME",
+        longitude_deg=-119.62367743000001,
+        latitude_deg=49.32070922,
+        height_m=555.3723807695745,
+        observatory_location_basis="astropy_site_registry_chime",
     ),
 }
 
@@ -292,6 +322,12 @@ class ObservationConfig:
     redshift: float | None = None
     sefd_fractional_uncertainty: float | None = None
     distance_fractional_uncertainty: float | None = None
+    source_ra_deg: float | None = None
+    source_dec_deg: float | None = None
+    time_scale: str | None = None
+    observatory_longitude_deg: float | None = None
+    observatory_latitude_deg: float | None = None
+    observatory_height_m: float | None = None
 
     @classmethod
     def from_preset(
@@ -308,6 +344,12 @@ class ObservationConfig:
         redshift: float | None = None,
         sefd_fractional_uncertainty: float | None = None,
         distance_fractional_uncertainty: float | None = None,
+        source_ra_deg: float | None = None,
+        source_dec_deg: float | None = None,
+        time_scale: str | None = None,
+        observatory_longitude_deg: float | None = None,
+        observatory_latitude_deg: float | None = None,
+        observatory_height_m: float | None = None,
     ) -> "ObservationConfig":
         preset = get_preset(preset_key)
         mask_profile = get_auto_mask_profile(auto_mask_profile)
@@ -332,6 +374,16 @@ class ObservationConfig:
                 if distance_fractional_uncertainty is None
                 else max(0.0, float(distance_fractional_uncertainty))
             ),
+            source_ra_deg=None if source_ra_deg is None else float(source_ra_deg),
+            source_dec_deg=None if source_dec_deg is None else float(source_dec_deg),
+            time_scale=None if time_scale is None else str(time_scale).lower(),
+            observatory_longitude_deg=(
+                None if observatory_longitude_deg is None else float(observatory_longitude_deg)
+            ),
+            observatory_latitude_deg=(
+                None if observatory_latitude_deg is None else float(observatory_latitude_deg)
+            ),
+            observatory_height_m=None if observatory_height_m is None else float(observatory_height_m),
         )
 
     def read_start_for_file(self, filename: str) -> float:
