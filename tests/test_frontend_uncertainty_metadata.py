@@ -40,6 +40,13 @@ class FrontendUncertaintyMetadataTest(unittest.TestCase):
         self.assertIn("Timing Metadata", html)
         self.assertIn("Apply Timing Metadata", html)
 
+    def test_dm_input_starts_blank_and_explains_manual_entry(self) -> None:
+        html = INDEX_HTML.read_text(encoding="utf-8")
+
+        self.assertIn('id="dmInput" type="number" step="0.001" placeholder="enter DM or 0 if already dedispersed"', html)
+        self.assertNotIn('value="527.851"', html)
+        self.assertIn("Some formats provide an automatic suggestion.", html)
+
     def test_prepare_view_uses_reference_toa_headline_card(self) -> None:
         source = APP_JS.read_text(encoding="utf-8")
 
@@ -59,6 +66,31 @@ class FrontendUncertaintyMetadataTest(unittest.TestCase):
                 re.S,
             ),
         )
+
+    def test_dm_suggestion_helper_clears_unsuggested_values(self) -> None:
+        source = APP_JS.read_text(encoding="utf-8")
+
+        self.assertRegex(
+            source,
+            re.compile(
+                r"function maybeApplySuggestedDm\(payload, bfile\).*const suggestedDm = parseOptionalNumber\(payload\?\.suggested_dm\).*setDmInputValue\(\"\"\).*setDmInputValue\(suggestedDm\)",
+                re.S,
+            ),
+        )
+
+    def test_detection_hint_and_actions_require_explicit_dm(self) -> None:
+        source = APP_JS.read_text(encoding="utf-8")
+
+        self.assertIn("FLITS did not detect a DM from the file metadata.", source)
+        self.assertIn("use 0 for already-dedispersed input", source)
+        self.assertIn("function requireDmValue(actionLabel, options = {})", source)
+        self.assertIn("Enter a DM value or explicit 0 before", source)
+        self.assertIn("const hasRequiredDm = hasRequiredDmValue()", source)
+        self.assertIn("loadButton.disabled = isBusy || !hasBurstPath || !hasRequiredDm", source)
+        self.assertIn("setDmButton.disabled = !hasSession || isBusy || !hasRequiredDm", source)
+        self.assertIn("optimizeDmButton.disabled = !hasSession || isBusy || !hasRequiredDm", source)
+        self.assertNotIn("dm: Number(dmInput.value)", source)
+        self.assertNotIn("center_dm: Number(dmInput.value)", source)
 
 
 if __name__ == "__main__":

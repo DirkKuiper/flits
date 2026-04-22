@@ -320,6 +320,7 @@ function bindControls() {
     if (path) {
       state.dmUserEditedForPath = path
     }
+    updateControlStates()
   })
 
   telescopeInput.addEventListener("change", () => {
@@ -345,11 +346,19 @@ function bindControls() {
     postAction("set_notes", { notes: notesInput.value })
   })
   setDmButton.addEventListener("click", () => {
-    postAction("set_dm", { dm: Number(dmInput.value) })
+    const dm = requireDmValue("applying DM")
+    if (dm === null) {
+      return
+    }
+    postAction("set_dm", { dm })
   })
   optimizeDmButton.addEventListener("click", () => {
+    const centerDm = requireDmValue("running a DM sweep")
+    if (centerDm === null) {
+      return
+    }
     postAction("optimize_dm", {
-      center_dm: Number(dmInput.value),
+      center_dm: centerDm,
       half_range: Number(dmHalfRangeInput.value),
       step: Number(dmStepInput.value),
       metric: dmMetricInput.value || "integrated_event_snr",
@@ -811,19 +820,44 @@ function selectedBurstPath() {
 
 function setDmInputValue(value) {
   syncingDmInput = true
-  dmInput.value = String(value)
+  dmInput.value = value === null || value === undefined ? "" : String(value)
   syncingDmInput = false
 }
 
 function maybeApplySuggestedDm(payload, bfile) {
-  if (payload?.suggested_dm === null || payload?.suggested_dm === undefined) {
-    return
-  }
   const normalizedPath = normalizeKnownFilePath(bfile)
   if (!normalizedPath || state.dmUserEditedForPath === normalizedPath) {
     return
   }
-  setDmInputValue(payload.suggested_dm)
+  const suggestedDm = parseOptionalNumber(payload?.suggested_dm)
+  if (suggestedDm === null) {
+    setDmInputValue("")
+    return
+  }
+  setDmInputValue(suggestedDm)
+}
+
+function parsedDmValue() {
+  const dm = parseOptionalNumber(dmInput.value)
+  return dm === null || !Number.isFinite(dm) ? null : dm
+}
+
+function hasRequiredDmValue() {
+  return parsedDmValue() !== null
+}
+
+function requireDmValue(actionLabel, options = {}) {
+  const { toast = true } = options
+  const dm = parsedDmValue()
+  if (dm !== null) {
+    return dm
+  }
+  const message = `Enter a DM value or explicit 0 before ${actionLabel}.`
+  setStatus(message, "error")
+  if (toast) {
+    showToast(message, "error")
+  }
+  return null
 }
 
 function directoryOptionValue(path) {
@@ -1009,11 +1043,15 @@ async function loadSession(options = {}) {
   clearPending()
   try {
     await detectSelectedFile()
+    const dm = requireDmValue("loading the session", { toast: !silent })
+    if (dm === null) {
+      return
+    }
     const payload = await api("/api/sessions", {
       method: "POST",
       body: JSON.stringify({
         bfile,
-        dm: Number(dmInput.value),
+        dm,
         telescope: telescopeInput.value,
         sefd_jy: parseOptionalNumber(sefdInput.value),
         sefd_fractional_uncertainty: parseOptionalNumber(sefdFractionalUncertaintyInput.value),
@@ -4276,6 +4314,7 @@ function updateControlStates() {
   const isBusy = Boolean(state.busyAction)
   const hasBurstPath = Boolean(fileInput.value.trim() || fileSelect.value)
   const hasBestDm = Number.isFinite(Number(state.view?.dm_optimization?.best_dm))
+  const hasRequiredDm = hasRequiredDmValue()
 
   for (const control of sessionControls) {
     control.disabled = !hasSession || isBusy
@@ -4298,7 +4337,9 @@ function updateControlStates() {
   exportWindowView.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("window")
   buildExportButton.disabled = !hasSession || isBusy || exportSelectionCount() === 0
 
-  loadButton.disabled = isBusy || !hasBurstPath
+  loadButton.disabled = isBusy || !hasBurstPath || !hasRequiredDm
+  setDmButton.disabled = !hasSession || isBusy || !hasRequiredDm
+  optimizeDmButton.disabled = !hasSession || isBusy || !hasRequiredDm
   applyBestDmButton.disabled = !hasSession || isBusy || !hasBestDm
   hero.classList.toggle("is-loaded", hasSession)
 
@@ -4513,9 +4554,12 @@ function renderDetectionHint(errorMessage = null) {
   const overrideActive = state.userSelectedPreset && telescopeInput.value !== state.detection.detected_preset_key
   const detectedTone = state.detection.detected_preset_key === "generic" ? "warning" : "success"
   const selectedTone = overrideActive ? "warning" : "success"
+  const hasSuggestedDm = parseOptionalNumber(state.detection.suggested_dm) !== null
   const dmGuidance = state.detection.dm_guidance
     ? ` ${escapeHtml(state.detection.dm_guidance)}.`
-    : ""
+    : (!hasSuggestedDm
+        ? " FLITS did not detect a DM from the file metadata. Enter one manually, or use 0 for already-dedispersed input."
+        : "")
   let copy = `${escapeHtml(state.detection.detection_basis)}. ${overrideActive ? "Manual override active." : "You can override this before loading."}${dmGuidance}`
 
   if (state.detection.detected_preset_key === "generic") {

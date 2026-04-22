@@ -43,8 +43,8 @@
           </label>
           <div class="field-row">
             <label class="field">
-              <span>DM <span class="tooltip-icon" data-tooltip="Dispersion Measure (pc/cm³) used to de-disperse the burst data. Pass 0 for files that are already dedispersed (e.g. CHIME/FRB catalog waterfalls). For CHIME beamformed BBData files, use the suggested DM_coherent unless you want a residual DM offset.">?</span></span>
-              <input id="dmInput" type="number" step="0.001" value="527.851">
+              <span>DM <span class="tooltip-icon" data-tooltip="Dispersion Measure (pc/cm³) used to de-disperse the burst data. Some formats provide an automatic suggestion. Enter 0 for files that are already dedispersed (e.g. CHIME/FRB catalog waterfalls). For CHIME beamformed BBData files, use the suggested DM_coherent unless you want a residual DM offset.">?</span></span>
+              <input id="dmInput" type="number" step="0.001" placeholder="enter DM or 0 if already dedispersed">
             </label>
             <label class="field">
               <span>Preset</span>

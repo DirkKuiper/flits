@@ -142,6 +142,28 @@ class WebApiTest(unittest.TestCase):
 
     @patch("flits.web.app.inspect_filterbank")
     @patch("flits.web.app.resolve_burst_path")
+    def test_detect_endpoint_reports_chime_catalog_dm_guidance(self, mock_resolve_path: object, mock_inspect: object) -> None:
+        burst_path = Path("/tmp/catalog.h5")
+        mock_resolve_path.return_value = burst_path
+        mock_inspect.return_value = FilterbankInspection(
+            source_path=burst_path,
+            source_name="FRB20180729A",
+            telescope_id=None,
+            machine_id=None,
+            detected_preset_key="chime",
+            detection_basis="matched format signature 'chime_frb_catalog_v1'",
+            telescope_name="CHIME/FRB",
+            schema_version="chime_frb_catalog_v1",
+        )
+
+        payload = detect_filterbank(DetectFilterbankRequest(bfile=str(burst_path)))
+
+        self.assertIsNone(payload["coherent_dm"])
+        self.assertEqual(payload["suggested_dm"], 0.0)
+        self.assertIn("already dedispersed", payload["dm_guidance"])
+
+    @patch("flits.web.app.inspect_filterbank")
+    @patch("flits.web.app.resolve_burst_path")
     def test_detect_endpoint_reports_bbdata_dm_guidance(self, mock_resolve_path: object, mock_inspect: object) -> None:
         burst_path = Path("/tmp/beamformed.h5")
         mock_resolve_path.return_value = burst_path
@@ -335,13 +357,19 @@ class WebApiTest(unittest.TestCase):
         self.assertIn('id="sourceContextDetails"', index_html)
         self.assertIn('id="timingMetadataDetails"', index_html)
         self.assertIn('id="updateTimingButton"', index_html)
+        self.assertIn('id="dmInput" type="number" step="0.001" placeholder="enter DM or 0 if already dedispersed"', index_html)
+        self.assertNotIn('value="527.851"', index_html)
         self.assertIn("Acquisition Overrides", index_html)
         self.assertIn("Source Context", index_html)
         self.assertIn("Timing Metadata", index_html)
         self.assertIn("Apply Timing Metadata", index_html)
+        self.assertIn("Some formats provide an automatic suggestion.", index_html)
         self.assertIn("Component Region", index_html)
         self.assertNotIn("Why this value?", app_js)
         self.assertIn("function measurementTooltip", app_js)
+        self.assertIn("function requireDmValue(actionLabel, options = {})", app_js)
+        self.assertIn("FLITS did not detect a DM from the file metadata.", app_js)
+        self.assertIn('setDmInputValue("")', app_js)
         self.assertIn("Reference TOA", app_js)
         self.assertIn("Peak-bin TOA (Topo MJD)", app_js)
         self.assertIn("Infinite-freq TOA (Bary TDB)", app_js)
