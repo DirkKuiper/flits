@@ -365,6 +365,59 @@ class MeasurementEngineTest(unittest.TestCase):
         self.assertIn("toa_inf_topo_mjd", measurements.uncertainty_details)
         self.assertIn("toa_inf_bary_mjd_tdb", measurements.uncertainty_details)
 
+    def test_dm_zero_timing_context_still_reports_infinite_frequency_and_barycentric_toas(self) -> None:
+        masked, freqs = _synthetic_burst(peak_bin=20)
+        context = TimingContext(
+            dm=0.0,
+            reference_frequency_mhz=None,
+            source_ra_deg=180.0,
+            source_dec_deg=30.0,
+            observatory=ObservatoryLocation(
+                name="test",
+                longitude_deg=-79.839722,
+                latitude_deg=38.433056,
+                height_m=807.0,
+                basis="test",
+            ),
+        )
+
+        measurements = compute_burst_measurements(
+            burst_name="timed_dm_zero",
+            dm=0.0,
+            start_mjd=60000.0,
+            read_start_sec=0.0,
+            crop_start_bin=0,
+            tsamp_ms=1.0,
+            freqres_mhz=abs(freqs[1] - freqs[0]),
+            freqs_mhz=freqs,
+            masked=masked,
+            event_rel_start=16,
+            event_rel_end=28,
+            spec_lo=0,
+            spec_hi=7,
+            peak_bins_abs=[],
+            burst_regions_abs=(),
+            manual_selection=False,
+            manual_peak_selection=False,
+            sefd_jy=None,
+            npol=1,
+            distance_mpc=None,
+            redshift=None,
+            sefd_fractional_uncertainty=None,
+            distance_fractional_uncertainty=None,
+            masked_channels=[],
+            timing_context=context,
+        )
+
+        self.assertEqual(measurements.toa_status, "barycentric_tdb")
+        self.assertIsNotNone(measurements.toa_peak_topo_mjd)
+        self.assertEqual(measurements.toa_inf_topo_mjd, measurements.toa_peak_topo_mjd)
+        self.assertIsNotNone(measurements.toa_inf_bary_mjd_tdb)
+        self.assertEqual(measurements.dispersion_to_infinite_frequency_ms, 0.0)
+        self.assertIn("toa_inf_topo_mjd", measurements.uncertainty_details)
+        self.assertIn("toa_inf_bary_mjd_tdb", measurements.uncertainty_details)
+        self.assertIn("Assuming DM 0 input is already referenced to infinite frequency", measurements.toa_status_reason)
+
 
 if __name__ == "__main__":
     unittest.main()

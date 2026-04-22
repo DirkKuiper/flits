@@ -97,25 +97,36 @@ def compute_toa_timing_chain(
     if blocked_reason is not None:
         return TimingChain(None, None, None, None, "blocked_existing_time_frame", blocked_reason)
 
+    assumed_already_infinite = False
     if context.reference_frequency_mhz is None:
-        return TimingChain(
-            None,
-            None,
-            None,
-            None,
-            "peak_topo_only",
-            "Missing finite dedispersion reference frequency for infinite-frequency correction.",
-        )
+        if abs(float(context.dm)) > 0.0:
+            return TimingChain(
+                None,
+                None,
+                None,
+                None,
+                "peak_topo_only",
+                "Missing finite dedispersion reference frequency for infinite-frequency correction.",
+            )
+        dispersion_ms = 0.0
+        toa_inf_topo_mjd = float(toa_peak_topo_mjd)
+        assumed_already_infinite = True
+    else:
+        try:
+            dispersion_ms = dispersion_delay_to_infinite_frequency_ms(
+                context.dm,
+                float(context.reference_frequency_mhz),
+            )
+        except Exception as exc:
+            return TimingChain(None, None, None, None, "peak_topo_only", str(exc))
 
-    try:
-        dispersion_ms = dispersion_delay_to_infinite_frequency_ms(
-            context.dm,
-            float(context.reference_frequency_mhz),
-        )
-    except Exception as exc:
-        return TimingChain(None, None, None, None, "peak_topo_only", str(exc))
+        toa_inf_topo_mjd = float(toa_peak_topo_mjd) - (dispersion_ms / 1e3 / 86400.0)
 
-    toa_inf_topo_mjd = float(toa_peak_topo_mjd) - (dispersion_ms / 1e3 / 86400.0)
+    assumption_note = (
+        "Assuming DM 0 input is already referenced to infinite frequency."
+        if assumed_already_infinite
+        else None
+    )
 
     if not _has_source_position(context):
         return TimingChain(
@@ -124,7 +135,11 @@ def compute_toa_timing_chain(
             dispersion_ms,
             None,
             "infinite_frequency_only",
-            "Missing source RA/Dec for barycentric correction.",
+            (
+                f"{assumption_note} Missing source RA/Dec for barycentric correction."
+                if assumption_note is not None
+                else "Missing source RA/Dec for barycentric correction."
+            ),
         )
 
     observatory = context.observatory
@@ -135,7 +150,11 @@ def compute_toa_timing_chain(
             dispersion_ms,
             None,
             "infinite_frequency_only",
-            "Missing observatory location for barycentric correction.",
+            (
+                f"{assumption_note} Missing observatory location for barycentric correction."
+                if assumption_note is not None
+                else "Missing observatory location for barycentric correction."
+            ),
         )
 
     time_scale = str(context.time_scale or "utc").lower()
@@ -146,7 +165,11 @@ def compute_toa_timing_chain(
             dispersion_ms,
             None,
             "infinite_frequency_only",
-            f"Unsupported time scale {context.time_scale!r}.",
+            (
+                f"{assumption_note} Unsupported time scale {context.time_scale!r}."
+                if assumption_note is not None
+                else f"Unsupported time scale {context.time_scale!r}."
+            ),
         )
 
     try:
@@ -180,6 +203,9 @@ def compute_toa_timing_chain(
         dispersion_to_infinite_frequency_ms=dispersion_ms,
         barycentric_correction_ms=float(light_travel_time.to_value(u.ms)),
         status="barycentric_tdb",
-        status_reason="Barycentric infinite-frequency TDB TOA is available.",
+        status_reason=(
+            "Assuming DM 0 input is already referenced to infinite frequency; barycentric infinite-frequency TDB TOA is available."
+            if assumed_already_infinite
+            else "Barycentric infinite-frequency TDB TOA is available."
+        ),
     )
-

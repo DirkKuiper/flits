@@ -1577,7 +1577,9 @@ class BurstSession:
             self.metadata,
             dedispersion_reference_frequency_mhz=float(np.max(self.freqs)) if abs(new_dm) > 0.0 else None,
             dedispersion_reference_basis=(
-                "flits_integer_bin_dedispersion_max_frequency" if abs(new_dm) > 0.0 else None
+                "flits_integer_bin_dedispersion_max_frequency"
+                if abs(new_dm) > 0.0
+                else "dm_zero_assumed_infinite_frequency"
             ),
         )
         self.invalidate_analysis_state()

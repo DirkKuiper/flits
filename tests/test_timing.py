@@ -71,6 +71,41 @@ def test_missing_source_position_stops_after_infinite_frequency() -> None:
     assert "RA/Dec" in chain.status_reason
 
 
+def test_dm_zero_without_reference_frequency_assumes_infinite_frequency() -> None:
+    context = TimingContext(
+        dm=0.0,
+        reference_frequency_mhz=None,
+        source_ra_deg=180.0,
+        source_dec_deg=30.0,
+        time_scale="utc",
+        observatory=ObservatoryLocation(
+            name="Green Bank Telescope",
+            longitude_deg=-79.839722,
+            latitude_deg=38.433056,
+            height_m=807.0,
+            basis="test",
+        ),
+    )
+
+    chain = compute_toa_timing_chain(60000.0, context)
+
+    location = EarthLocation.from_geodetic(
+        lon=context.observatory.longitude_deg * u.deg,
+        lat=context.observatory.latitude_deg * u.deg,
+        height=context.observatory.height_m * u.m,
+    )
+    source = SkyCoord(ra=180.0 * u.deg, dec=30.0 * u.deg, frame="icrs")
+    with iers.conf.set_temp("auto_download", False):
+        topo_time = Time(60000.0, format="mjd", scale="utc", location=location)
+        expected = (topo_time.tdb + topo_time.light_travel_time(source, kind="barycentric")).mjd
+
+    assert chain.status == "barycentric_tdb"
+    assert chain.toa_inf_topo_mjd == pytest.approx(60000.0, abs=1e-12)
+    assert chain.dispersion_to_infinite_frequency_ms == pytest.approx(0.0, abs=1e-12)
+    assert chain.toa_inf_bary_mjd_tdb == pytest.approx(expected, abs=1e-12)
+    assert "Assuming DM 0 input is already referenced to infinite frequency" in chain.status_reason
+
+
 def test_missing_observatory_stops_after_infinite_frequency() -> None:
     context = TimingContext(
         dm=100.0,
