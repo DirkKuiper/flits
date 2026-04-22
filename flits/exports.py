@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from flits.session import BurstSession
 
 
-EXPORT_SCHEMA_VERSION = "1.4"
+EXPORT_SCHEMA_VERSION = "1.5"
 DEFAULT_EXPORT_INCLUDE = ("json", "csv", "npz", "plots")
 DEFAULT_PLOT_FORMATS = ("png", "svg")
 DEFAULT_WINDOW_FORMATS = ("npz",)
@@ -1021,6 +1021,17 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
     accepted_width = width_analysis.get("accepted_width") or results.get("accepted_width") or {}
     dm = snapshot.dm_optimization or {}
     temporal = snapshot.temporal_structure or {}
+    result_uncertainty_details = results.get("uncertainty_details") or {}
+    dm_uncertainty_details = dm.get("uncertainty_details") or {}
+    temporal_uncertainty_details = temporal.get("uncertainty_details") or {}
+
+    def uncertainty_columns(prefix: str, detail: dict[str, Any] | None) -> dict[str, str]:
+        payload = detail or {}
+        return {
+            f"{prefix}_uncertainty_class": str(payload.get("classification", "") or ""),
+            f"{prefix}_uncertainty_basis": str(payload.get("basis", "") or ""),
+        }
+
     row = {
         "bundle_name": snapshot.bundle_name,
         "exported_at_utc": snapshot.created_at_utc,
@@ -1082,6 +1093,18 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         "dm_snr_metric": dm.get("snr_metric", ""),
         "residual_status": dm.get("residual_status", ""),
     }
+    row.update(uncertainty_columns("accepted_width", accepted_width.get("uncertainty_detail")))
+    row.update(uncertainty_columns("toa_topo_mjd", result_uncertainty_details.get("toa_topo_mjd")))
+    row.update(uncertainty_columns("width_ms_acf", result_uncertainty_details.get("width_ms_acf")))
+    row.update(uncertainty_columns("width_ms_model", result_uncertainty_details.get("width_ms_model")))
+    row.update(uncertainty_columns("spectral_width_mhz_acf", result_uncertainty_details.get("spectral_width_mhz_acf")))
+    row.update(uncertainty_columns("tau_sc_ms", result_uncertainty_details.get("tau_sc_ms")))
+    row.update(uncertainty_columns("peak_flux_jy", result_uncertainty_details.get("peak_flux_jy")))
+    row.update(uncertainty_columns("fluence_jyms", result_uncertainty_details.get("fluence_jyms")))
+    row.update(uncertainty_columns("iso_e_erg", result_uncertainty_details.get("iso_e")))
+    row.update(uncertainty_columns("dm", dm_uncertainty_details.get("best_dm")))
+    row.update(uncertainty_columns("psd_alpha", temporal_uncertainty_details.get("power_law_alpha")))
+    row.update(uncertainty_columns("psd_crossover_frequency_hz", temporal_uncertainty_details.get("crossover_frequency_hz")))
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=list(row))
     writer.writeheader()

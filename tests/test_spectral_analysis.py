@@ -169,6 +169,49 @@ class SpectralAnalysisTest(unittest.TestCase):
         self.assertIsNone(result.power_law_c)
         self.assertIn("Power-law fit omitted", result.message or "")
 
+    @patch("flits.analysis.spectral.core._fit_crossover_frequency")
+    @patch("flits.analysis.spectral.core._fit_power_law_model")
+    def test_run_averaged_spectral_analysis_downgrades_psd_errors_to_diagnostic_metadata(
+        self,
+        mock_fit_power_law: object,
+        mock_fit_crossover: object,
+    ) -> None:
+        mock_fit_power_law.return_value = {
+            "fit_status": "ok",
+            "fit_message": None,
+            "power_law_a": 10.0,
+            "power_law_alpha": 2.4,
+            "power_law_c": 0.6,
+            "power_law_a_err": 1.2,
+            "power_law_alpha_err": 0.3,
+            "power_law_c_err": 0.08,
+        }
+        mock_fit_crossover.return_value = {
+            "crossover_frequency_hz": 125.0,
+            "crossover_frequency_status": "ok",
+            "crossover_frequency_hz_3sigma_low": 90.0,
+            "crossover_frequency_hz_3sigma_high": 160.0,
+        }
+
+        result = run_averaged_spectral_analysis(
+            event_series=np.sin(2.0 * np.pi * np.arange(256, dtype=float) / 16.0),
+            tsamp_ms=1.0,
+            segment_length_ms=32.0,
+            event_window_ms=(0.0, 256.0),
+            spectral_extent_mhz=(1000.0, 1100.0),
+            backend_loader=_fake_backend_loader,
+        )
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.power_law_alpha, 2.4)
+        self.assertIsNone(result.power_law_alpha_err)
+        self.assertIsNone(result.power_law_a_err)
+        self.assertIsNone(result.power_law_c_err)
+        self.assertEqual(result.uncertainty_details["power_law_alpha"].classification, "diagnostic_only")
+        self.assertEqual(result.uncertainty_details["crossover_frequency_hz"].classification, "diagnostic_only")
+        self.assertEqual(result.crossover_frequency_hz_3sigma_low, 90.0)
+        self.assertEqual(result.crossover_frequency_hz_3sigma_high, 160.0)
+
     def test_quantize_segment_bins_uses_half_up_rounding(self) -> None:
         self.assertEqual(quantize_segment_bins(20.49, 1.0), 20)
         self.assertEqual(quantize_segment_bins(20.50, 1.0), 21)

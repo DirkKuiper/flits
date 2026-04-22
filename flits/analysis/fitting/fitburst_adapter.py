@@ -20,7 +20,7 @@ from typing import Any
 
 import numpy as np
 
-from flits.models import ScatteringFitDiagnostics
+from flits.models import ScatteringFitDiagnostics, UncertaintyDetail
 
 try:
     from fitburst.analysis.fitter import LSFitter
@@ -35,6 +35,36 @@ MIN_FIT_TIME_BINS = 16
 MIN_WEIGHT_BINS = 8
 FIT_PARAMETERS = ("amplitude", "arrival_time", "burst_width", "scattering_timescale")
 FIXED_PARAMETERS = ("dm", "dm_index", "scattering_index", "spectral_index", "spectral_running")
+
+
+def _fitburst_uncertainty_detail(
+    *,
+    value: float | None,
+    units: str,
+    parameter_label: str,
+) -> UncertaintyDetail:
+    basis = (
+        f"{parameter_label} uncertainty reported by fitburst from its local least-squares covariance/Hessian estimate. "
+        "This is model-based, secondary to the non-parametric FLITS measurements, and should not be compared directly "
+        "with formal 1-sigma uncertainties from other estimators."
+    )
+    tooltip = (
+        "Model-based fitburst uncertainty. It reflects the local fit covariance of the selected parametric model and "
+        "is retained as a secondary diagnostic rather than a publishable non-parametric error bar."
+    )
+    warning_flags = ["fitburst_model_hessian"]
+    if value is None:
+        warning_flags.append("uncertainty_unavailable")
+    return UncertaintyDetail(
+        value=None if value is None else float(value),
+        units=units,
+        classification="model_hessian",
+        is_formal_1sigma=False,
+        publishable=False,
+        basis=basis,
+        tooltip=tooltip,
+        warning_flags=warning_flags,
+    )
 
 
 @dataclass(frozen=True)
@@ -320,6 +350,18 @@ def fit_scattering_selected_band(
     tau_sec = _parameter_value(full_best_parameters, "scattering_timescale")
     width_uncertainty_sec = _parameter_value(bestfit_uncertainties, "burst_width")
     tau_uncertainty_sec = _parameter_value(bestfit_uncertainties, "scattering_timescale")
+    uncertainty_details = {
+        "width_ms_model": _fitburst_uncertainty_detail(
+            value=None if width_uncertainty_sec is None else float(width_uncertainty_sec * 1e3),
+            units="ms",
+            parameter_label="Intrinsic width",
+        ),
+        "tau_sc_ms": _fitburst_uncertainty_detail(
+            value=None if tau_uncertainty_sec is None else float(tau_uncertainty_sec * 1e3),
+            units="ms",
+            parameter_label="Scattering timescale",
+        ),
+    }
 
     diagnostics = ScatteringFitDiagnostics(
         status="ok",
@@ -343,6 +385,7 @@ def fit_scattering_selected_band(
         data_freq_profile_sn=np.asarray(data_freq_profile, dtype=float),
         model_freq_profile_sn=np.asarray(model_freq_profile, dtype=float),
         residual_freq_profile_sn=np.asarray(residual_freq_profile, dtype=float),
+        uncertainty_details=uncertainty_details,
     )
     return FitburstScatteringResult(
         status="ok",

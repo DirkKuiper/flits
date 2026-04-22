@@ -342,7 +342,7 @@ class ExportResultsTest(unittest.TestCase):
 
         manifest = payload["export_manifest"]
         self.assertIsNotNone(manifest)
-        self.assertEqual(manifest["schema_version"], "1.4")
+        self.assertEqual(manifest["schema_version"], "1.5")
         artifact_names = {artifact["name"] for artifact in manifest["artifacts"]}
         self.assertTrue(any(name.endswith("_science.json") for name in artifact_names))
         self.assertTrue(any(name.endswith("_catalog.csv") for name in artifact_names))
@@ -370,6 +370,9 @@ class ExportResultsTest(unittest.TestCase):
         self.assertIn("artifacts", science)
         self.assertNotIn("plot", science)
         self.assertIsNotNone(science["temporal_structure"])
+        self.assertIn("uncertainty_details", science["results"])
+        self.assertIn("uncertainty_details", science["dm_optimization"])
+        self.assertIn("uncertainty_details", science["temporal_structure"])
         self.assertIn("min_structure_ms_primary", science["temporal_structure"])
         self.assertIn("power_law_fit_status", science["temporal_structure"])
         self.assertIn("crossover_frequency_status", science["temporal_structure"])
@@ -385,6 +388,10 @@ class ExportResultsTest(unittest.TestCase):
         self.assertIn("psd_crossover_frequency_hz", csv_text.splitlines()[0])
         self.assertIn("noise_psd_segment_count", csv_text.splitlines()[0])
         self.assertIn("npol", csv_text.splitlines()[0])
+        self.assertIn("toa_topo_mjd_uncertainty_class", csv_text.splitlines()[0])
+        self.assertIn("accepted_width_uncertainty_basis", csv_text.splitlines()[0])
+        self.assertIn("dm_uncertainty_class", csv_text.splitlines()[0])
+        self.assertIn("psd_alpha_uncertainty_class", csv_text.splitlines()[0])
 
         npz_name = next(name for name in artifact_names if name.endswith("_diagnostics.npz"))
         npz_response = session_export_artifact(session_id, manifest["export_id"], npz_name)

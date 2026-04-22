@@ -17,9 +17,11 @@ from scipy.optimize import curve_fit
 from flits.models import (
     AcceptedWidthSelection,
     NoiseEstimateSummary,
+    UncertaintyDetail,
     WidthAnalysisSettings,
     WidthAnalysisSummary,
     WidthResult,
+    compatible_scalar_uncertainty,
 )
 from flits.signal import gaussian_1d
 
@@ -33,12 +35,34 @@ def _prepare_event_profile(
     event_rel_start: int,
     event_rel_end: int,
     tsamp_ms: float,
+    baseline: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract the event-window profile and convert bin starts to bin centers."""
     event = np.asarray(profile[event_rel_start:event_rel_end], dtype=float)
-    event = np.where(np.isfinite(event), event, 0.0)
+    event = np.where(np.isfinite(event), event - float(baseline), 0.0)
     event_times = np.asarray(time_axis_ms[event_rel_start:event_rel_end], dtype=float) + (float(tsamp_ms) / 2.0)
     return event, event_times
+
+
+def _reference_stats(reference: np.ndarray, estimator: str) -> tuple[float, float]:
+    finite_reference = np.asarray(reference, dtype=float)
+    finite_reference = finite_reference[np.isfinite(finite_reference)]
+    if finite_reference.size == 0:
+        return 0.0, 1.0
+    estimator = str(estimator)
+    if estimator == "mean_std":
+        baseline = float(np.nanmean(finite_reference))
+        sigma = float(np.nanstd(finite_reference))
+    elif estimator == "median_mad":
+        baseline = float(np.nanmedian(finite_reference))
+        sigma = float(1.4826 * np.nanmedian(np.abs(finite_reference - baseline)))
+    else:
+        raise ValueError(f"Unsupported noise estimator '{estimator}'.")
+    if not np.isfinite(baseline):
+        baseline = 0.0
+    if not np.isfinite(sigma) or sigma <= 0:
+        sigma = 1.0
+    return baseline, sigma
 
 
 def _boxcar_width_ms(event_profile: np.ndarray, event_times_ms: np.ndarray, _: WidthAnalysisSettings) -> float | None:
@@ -138,19 +162,35 @@ WIDTH_METHODS: dict[str, tuple[str, Callable[[np.ndarray, np.ndarray, WidthAnaly
 def _trial_uncertainty(
     method: Callable[[np.ndarray, np.ndarray, WidthAnalysisSettings], float | None],
     *,
-    event_profile: np.ndarray,
+    selected_profile: np.ndarray,
+    event_rel_start: int,
+    event_rel_end: int,
     event_times_ms: np.ndarray,
-    noise_sigma: float,
+    offpulse_bins: np.ndarray,
+    estimator: str,
     settings: WidthAnalysisSettings,
 ) -> tuple[float | None, list[str]]:
-    """Estimate a width uncertainty from noise-perturbed Monte Carlo trials."""
-    if event_profile.size == 0 or not np.isfinite(noise_sigma) or noise_sigma <= 0:
+    """Estimate a width uncertainty from off-pulse bootstrap plus noise perturbations."""
+    profile = np.asarray(selected_profile, dtype=float)
+    event_profile = np.asarray(profile[event_rel_start:event_rel_end], dtype=float)
+    reference = (
+        np.asarray(profile[np.asarray(offpulse_bins, dtype=int)], dtype=float)
+        if np.asarray(offpulse_bins, dtype=int).size
+        else np.asarray(profile, dtype=float)
+    )
+    finite_reference = reference[np.isfinite(reference)]
+    if event_profile.size == 0 or finite_reference.size == 0:
         return None, ["uncertainty_unavailable"]
 
     rng = np.random.default_rng(0)
     successes: list[float] = []
     for _ in range(int(settings.uncertainty_trials)):
-        trial = np.asarray(event_profile, dtype=float) + rng.normal(0.0, noise_sigma, size=event_profile.shape)
+        trial_reference = rng.choice(finite_reference, size=finite_reference.size, replace=True)
+        trial_baseline, trial_sigma = _reference_stats(trial_reference, estimator=estimator)
+        if not np.isfinite(trial_sigma) or trial_sigma <= 0:
+            continue
+        filled_event = np.where(np.isfinite(event_profile), event_profile, trial_baseline)
+        trial = filled_event + rng.normal(0.0, trial_sigma, size=event_profile.shape) - trial_baseline
         value = method(trial, event_times_ms, settings)
         if value is not None and np.isfinite(value) and value >= 0:
             successes.append(float(value))
@@ -187,6 +227,7 @@ def compute_width_analysis(
     event_rel_end: int,
     tsamp_ms: float,
     noise_summary: NoiseEstimateSummary,
+    offpulse_bins: np.ndarray,
     settings: WidthAnalysisSettings | None = None,
     event_window_ms: list[float],
     spectral_extent_mhz: list[float],
@@ -201,8 +242,8 @@ def compute_width_analysis(
     Parameters
     ----------
     selected_profile
-        Selected-band time profile for the current crop, typically already in
-        signal-to-noise units.
+        Selected-band time profile for the current crop on the same scale used
+        to define the off-pulse baseline.
     time_axis_ms
         Time axis in milliseconds matching ``selected_profile``.
     event_rel_start, event_rel_end
@@ -212,6 +253,8 @@ def compute_width_analysis(
     noise_summary
         Off-pulse noise estimate and warning flags associated with the current
         selection.
+    offpulse_bins
+        Off-pulse bins used to bootstrap per-trial baseline/noise estimates.
     settings
         Width-analysis settings. If omitted, defaults from
         :class:`WidthAnalysisSettings` are used.
@@ -248,6 +291,7 @@ def compute_width_analysis(
         int(event_rel_start),
         int(event_rel_end),
         float(tsamp_ms),
+        baseline=float(noise_summary.baseline),
     )
     results: list[WidthResult] = []
     shared_flags = _result_flags(event_profile=event_profile, noise_summary=noise_summary, extra_flags=extra_flags)
@@ -261,9 +305,12 @@ def compute_width_analysis(
         else:
             uncertainty, uncertainty_flags = _trial_uncertainty(
                 calculator,
-                event_profile=event_profile,
+                selected_profile=np.asarray(selected_profile, dtype=float),
+                event_rel_start=int(event_rel_start),
+                event_rel_end=int(event_rel_end),
                 event_times_ms=event_times_ms,
-                noise_sigma=float(noise_summary.sigma),
+                offpulse_bins=np.asarray(offpulse_bins, dtype=int),
+                estimator=noise_summary.estimator,
                 settings=settings,
             )
             method_flags.extend(uncertainty_flags)
@@ -278,12 +325,38 @@ def compute_width_analysis(
                     value = None
                 uncertainty = None
 
+        uncertainty_detail: UncertaintyDetail | None = None
+        if uncertainty is not None:
+            explicit_publishable = (
+                noise_summary.basis == "explicit"
+                and "low_sn" not in method_flags
+                and "uncertainty_unavailable" not in method_flags
+                and "insufficient_successful_trials" not in method_flags
+                and "insufficient_offpulse_bins" not in method_flags
+            )
+            classification = "formal_1sigma" if explicit_publishable else "statistical_only"
+            uncertainty_detail = UncertaintyDetail(
+                value=float(uncertainty),
+                units="ms",
+                classification=classification,
+                is_formal_1sigma=explicit_publishable,
+                publishable=explicit_publishable,
+                basis=(
+                    "Bootstrap resampling of the selected off-pulse bins, with a fresh baseline/noise estimate per Monte Carlo trial."
+                ),
+                tooltip=(
+                    "Width uncertainty comes from Monte Carlo trials that resample the selected off-pulse bins, re-estimate baseline/noise, "
+                    "and perturb the event profile before re-measuring the width."
+                ),
+                warning_flags=sorted(set(method_flags)),
+            )
+
         results.append(
             WidthResult(
                 method=method_name,
                 label=label,
                 value=None if value is None else float(value),
-                uncertainty=None if uncertainty is None else float(uncertainty),
+                uncertainty=compatible_scalar_uncertainty(uncertainty_detail),
                 units="ms",
                 event_window_ms=[float(value) for value in event_window_ms],
                 spectral_extent_mhz=[float(value) for value in spectral_extent_mhz],
@@ -293,6 +366,7 @@ def compute_width_analysis(
                     None if effective_bandwidth_mhz is None else float(effective_bandwidth_mhz)
                 ),
                 algorithm_name=algorithm_name,
+                uncertainty_details={} if uncertainty_detail is None else {"uncertainty": uncertainty_detail},
                 quality_flags=sorted(set(method_flags)),
             )
         )

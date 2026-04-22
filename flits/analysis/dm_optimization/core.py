@@ -33,6 +33,8 @@ from flits.models import (
     DmOptimizationProvenance,
     DmOptimizationResult,
     DmOptimizationSettings,
+    UncertaintyDetail,
+    compatible_scalar_uncertainty,
 )
 from flits.signal import dedisperse
 
@@ -139,6 +141,40 @@ class DMPhaseFitInput:
     low_idx: int
     dstd: float
     weights: np.ndarray
+
+
+def _best_dm_uncertainty_detail(
+    *,
+    value: float | None,
+    metric: str,
+    fit_status: str,
+) -> UncertaintyDetail:
+    metric_basis = (
+        "Weighted-polynomial width from the local DMphase score peak."
+        if metric == "dm_phase"
+        else "Quadratic width from the local DM score peak."
+    )
+    basis = (
+        f"{metric_basis} FLITS still evaluates the sweep with integer-bin dedispersion on the active "
+        "analysis grid, so this width is a heuristic local-fit diagnostic rather than a publishable 1-sigma DM uncertainty."
+    )
+    tooltip = (
+        "Diagnostic width of the local DM fit around the sampled peak. It is retained for comparison and UI context, "
+        "but it is not exported as a formal 1-sigma uncertainty while integer-bin dedispersion sets a quantization floor."
+    )
+    warning_flags = ["integer_bin_dedispersion", str(fit_status)]
+    if value is None:
+        warning_flags.append("uncertainty_unavailable")
+    return UncertaintyDetail(
+        value=None if value is None else float(value),
+        units="pc cm^-3",
+        classification="heuristic_local_fit",
+        is_formal_1sigma=False,
+        publishable=False,
+        basis=basis,
+        tooltip=tooltip,
+        warning_flags=warning_flags,
+    )
 
 
 def _dm_ref(label: str, citation: str, url: str, note: str | None = None) -> DmMetricReference:
@@ -927,6 +963,11 @@ def optimize_dm_trials(
         step=float(step),
         metric=metric,
     )
+    best_dm_detail = _best_dm_uncertainty_detail(
+        value=best_dm_uncertainty,
+        metric=metric,
+        fit_status=fit_status,
+    )
     return DmOptimizationResult(
         center_dm=float(center_dm),
         requested_half_range=float(half_range),
@@ -939,7 +980,7 @@ def optimize_dm_trials(
         sampled_best_dm=sampled_best_dm,
         sampled_best_sn=sampled_best_score,
         best_dm=best_dm,
-        best_dm_uncertainty=best_dm_uncertainty,
+        best_dm_uncertainty=compatible_scalar_uncertainty(best_dm_detail),
         best_sn=best_score,
         fit_status=fit_status,
         subband_freqs_mhz=subband_freqs,
@@ -952,6 +993,7 @@ def optimize_dm_trials(
         residual_rms_best_ms=residual_rms_best_ms,
         residual_slope_applied_ms_per_mhz=residual_slope_applied_ms_per_mhz,
         residual_slope_best_ms_per_mhz=residual_slope_best_ms_per_mhz,
+        uncertainty_details={"best_dm": best_dm_detail},
         settings=settings,
         provenance=provenance,
     )

@@ -290,6 +290,8 @@ class ObservationConfig:
     auto_mask_profile: str = "auto"
     distance_mpc: float | None = None
     redshift: float | None = None
+    sefd_fractional_uncertainty: float | None = None
+    distance_fractional_uncertainty: float | None = None
 
     @classmethod
     def from_preset(
@@ -304,6 +306,8 @@ class ObservationConfig:
         auto_mask_profile: str | None = "auto",
         distance_mpc: float | None = None,
         redshift: float | None = None,
+        sefd_fractional_uncertainty: float | None = None,
+        distance_fractional_uncertainty: float | None = None,
     ) -> "ObservationConfig":
         preset = get_preset(preset_key)
         mask_profile = get_auto_mask_profile(auto_mask_profile)
@@ -320,6 +324,14 @@ class ObservationConfig:
             auto_mask_profile=mask_profile.key,
             distance_mpc=distance_mpc,
             redshift=redshift,
+            sefd_fractional_uncertainty=(
+                None if sefd_fractional_uncertainty is None else max(0.0, float(sefd_fractional_uncertainty))
+            ),
+            distance_fractional_uncertainty=(
+                None
+                if distance_fractional_uncertainty is None
+                else max(0.0, float(distance_fractional_uncertainty))
+            ),
         )
 
     def read_start_for_file(self, filename: str) -> float:

@@ -57,10 +57,12 @@ const fileInput = document.getElementById("fileInput")
 const dmInput = document.getElementById("dmInput")
 const telescopeInput = document.getElementById("telescopeInput")
 const sefdInput = document.getElementById("sefdInput")
+const sefdFractionalUncertaintyInput = document.getElementById("sefdFractionalUncertaintyInput")
 const npolInput = document.getElementById("npolInput")
 const readStartInput = document.getElementById("readStartInput")
 const readEndInput = document.getElementById("readEndInput")
 const distanceInput = document.getElementById("distanceInput")
+const distanceFractionalUncertaintyInput = document.getElementById("distanceFractionalUncertaintyInput")
 const redshiftInput = document.getElementById("redshiftInput")
 const autoMaskProfileInput = document.getElementById("autoMaskProfileInput")
 const dmMetricInput = document.getElementById("dmMetricInput")
@@ -230,9 +232,11 @@ const busyLockControls = [
   dmInput,
   telescopeInput,
   sefdInput,
+  sefdFractionalUncertaintyInput,
   readStartInput,
   readEndInput,
   distanceInput,
+  distanceFractionalUncertaintyInput,
   redshiftInput,
   autoMaskProfileInput,
   dmMetricInput,
@@ -986,10 +990,12 @@ async function loadSession(options = {}) {
         dm: Number(dmInput.value),
         telescope: telescopeInput.value,
         sefd_jy: parseOptionalNumber(sefdInput.value),
+        sefd_fractional_uncertainty: parseOptionalNumber(sefdFractionalUncertaintyInput.value),
         npol_override: parseOptionalInteger(npolInput.value),
         read_start_sec: parseOptionalNumber(readStartInput.value),
         read_end_sec: parseOptionalNumber(readEndInput.value),
         distance_mpc: parseOptionalNumber(distanceInput.value),
+        distance_fractional_uncertainty: parseOptionalNumber(distanceFractionalUncertaintyInput.value),
         redshift: parseOptionalNumber(redshiftInput.value),
         auto_mask_profile: autoMaskProfileInput.value || "auto",
       }),
@@ -1079,8 +1085,10 @@ function applyView(view) {
   syncDmMetricOptions(view)
   setDmInputValue(view.meta.dm)
   sefdInput.value = view.meta.sefd_jy === null || view.meta.sefd_jy === undefined ? "" : String(view.meta.sefd_jy)
+  sefdFractionalUncertaintyInput.value = view.meta.sefd_fractional_uncertainty === null || view.meta.sefd_fractional_uncertainty === undefined ? "" : String(view.meta.sefd_fractional_uncertainty)
   npolInput.value = view.meta.npol_override === null || view.meta.npol_override === undefined ? "" : String(view.meta.npol_override)
   distanceInput.value = view.meta.distance_mpc === null || view.meta.distance_mpc === undefined ? "" : String(view.meta.distance_mpc)
+  distanceFractionalUncertaintyInput.value = view.meta.distance_fractional_uncertainty === null || view.meta.distance_fractional_uncertainty === undefined ? "" : String(view.meta.distance_fractional_uncertainty)
   redshiftInput.value = view.meta.redshift === null || view.meta.redshift === undefined ? "" : String(view.meta.redshift)
   notesInput.value = view.state.notes || ""
   syncSpectralSegmentInput(view)
@@ -1231,7 +1239,9 @@ function renderSessionFacts(view) {
     ["Raw shape", `${view.meta.shape[0]} x ${view.meta.shape[1]}`],
     ["Displayed shape", `${view.meta.view_shape[0]} x ${view.meta.view_shape[1]}`],
     ["SEFD", view.meta.sefd_jy === null ? "not set" : `${fmt(view.meta.sefd_jy, 2)} Jy`],
+    ["SEFD frac. uncertainty", view.meta.sefd_fractional_uncertainty === null || view.meta.sefd_fractional_uncertainty === undefined ? "not set" : fmt(view.meta.sefd_fractional_uncertainty, 4)],
     ["Distance", view.meta.distance_mpc === null ? "not set" : `${fmt(view.meta.distance_mpc, 3)} Mpc`],
+    ["Distance frac. uncertainty", view.meta.distance_fractional_uncertainty === null || view.meta.distance_fractional_uncertainty === undefined ? "not set" : fmt(view.meta.distance_fractional_uncertainty, 4)],
     ["Redshift", view.meta.redshift === null ? "not set" : fmt(view.meta.redshift, 5)],
     ["Crop", `${fmt(view.state.crop_ms[0], 2)} to ${fmt(view.state.crop_ms[1], 2)} ms`],
     ["Event", `${fmt(view.state.event_ms[0], 2)} to ${fmt(view.state.event_ms[1], 2)} ms`],
@@ -1274,16 +1284,30 @@ function renderPrepare(view) {
   const acceptedWidthValue = hasAcceptedWidth
     ? `${fmt(acceptedWidth.value, 3)} ${acceptedWidth.units || "ms"}`
     : (hasAcfFallback ? `${fmt(results.width_ms_acf, 3)} ms` : "n/a")
+  const acceptedWidthDetail = findAcceptedWidthDetail(acceptedWidth, widthAnalysis, results, hasAcfFallback)
+  const toaDetail = resultUncertaintyDetail(results, "toa_topo_mjd", "MJD")
+  const fluenceDetail = resultUncertaintyDetail(results, "fluence_jyms", "Jy ms")
+  const peakFluxDetail = resultUncertaintyDetail(results, "peak_flux_jy", "Jy")
+  const spectralWidthDetail = resultUncertaintyDetail(results, "spectral_width_mhz_acf", "MHz")
+  const energyDetail = resultUncertaintyDetail(results, "iso_e", results?.provenance?.energy_unit || "")
   const acceptedWidthUncertainty = hasAcceptedWidth
-    ? (acceptedWidth.uncertainty === null || acceptedWidth.uncertainty === undefined ? "n/a" : `±${fmt(acceptedWidth.uncertainty, 3)} ${acceptedWidth.units || "ms"}`)
-    : (results?.uncertainties?.width_ms_acf === null || results?.uncertainties?.width_ms_acf === undefined ? "n/a" : `±${fmt(results.uncertainties.width_ms_acf, 3)} ms`)
+    ? (
+      formatDetailUncertainty(acceptedWidthDetail, { digits: 3, units: acceptedWidth.units || "ms" })
+      || (acceptedWidth.uncertainty === null || acceptedWidth.uncertainty === undefined ? null : `±${fmt(acceptedWidth.uncertainty, 3)} ${acceptedWidth.units || "ms"}`)
+    )
+    : (
+      formatDetailUncertainty(acceptedWidthDetail, { digits: 3, units: "ms" })
+      || (results?.uncertainties?.width_ms_acf === null || results?.uncertainties?.width_ms_acf === undefined ? null : `±${fmt(results.uncertainties.width_ms_acf, 3)} ms`)
+    )
 
   const cards = [
     renderMeasurementCard("TOA (Topo MJD)", results?.toa_topo_mjd === null || results?.toa_topo_mjd === undefined ? "n/a" : fmt(results.toa_topo_mjd, 8), {
-      uncertainty: results?.uncertainties?.toa_topo_mjd ? formatToaUncertainty(results.uncertainties.toa_topo_mjd) : null,
+      uncertainty: formatDetailUncertainty(toaDetail, { formatter: formatToaUncertainty })
+        || (results?.uncertainties?.toa_topo_mjd ? formatToaUncertainty(results.uncertainties.toa_topo_mjd) : null),
       method: "peak bin",
       flags: results?.measurement_flags || [],
       tooltip: measurementTooltip("toa"),
+      detail: toaDetail,
     }),
     renderMeasurementCard("Peak Bin S/N", results?.snr_peak === null || results?.snr_peak === undefined ? "n/a" : fmt(results.snr_peak, 3), {
       method: "event peak",
@@ -1296,30 +1320,40 @@ function renderPrepare(view) {
       tooltip: measurementTooltip("integratedSn"),
     }),
     renderMeasurementCard(acceptedWidthTitle, acceptedWidthValue, {
-      uncertainty: acceptedWidthUncertainty === "n/a" ? null : acceptedWidthUncertainty,
+      uncertainty: acceptedWidthUncertainty,
       method: acceptedMethod,
       flags: acceptedWidthFlags(widthAnalysis, acceptedWidth),
       tooltip: acceptedWidthTooltip(acceptedWidth, hasAcfFallback),
+      detail: acceptedWidthDetail,
     }),
     renderMeasurementCard("Fluence", results?.fluence_jyms === null || results?.fluence_jyms === undefined ? "n/a" : `${fmt(results.fluence_jyms, 3)} Jy ms`, {
-      uncertainty: results?.uncertainties?.fluence_jyms ? `±${fmt(results.uncertainties.fluence_jyms, 3)} Jy ms` : null,
+      uncertainty: formatDetailUncertainty(fluenceDetail, { digits: 3, units: "Jy ms" })
+        || (results?.uncertainties?.fluence_jyms ? `±${fmt(results.uncertainties.fluence_jyms, 3)} Jy ms` : null),
       method: results?.provenance?.calibration_method || "n/a",
       flags: results?.measurement_flags || [],
       tooltip: measurementTooltip("fluence"),
+      detail: fluenceDetail,
     }),
     renderMeasurementCard("Peak Flux Density", results?.peak_flux_jy === null || results?.peak_flux_jy === undefined ? "n/a" : `${fmt(results.peak_flux_jy, 3)} Jy`, {
-      uncertainty: results?.uncertainties?.peak_flux_jy ? `±${fmt(results.uncertainties.peak_flux_jy, 3)} Jy` : null,
+      uncertainty: formatDetailUncertainty(peakFluxDetail, { digits: 3, units: "Jy" })
+        || (results?.uncertainties?.peak_flux_jy ? `±${fmt(results.uncertainties.peak_flux_jy, 3)} Jy` : null),
       method: results?.provenance?.calibration_method || "n/a",
       flags: results?.measurement_flags || [],
       tooltip: measurementTooltip("peakFlux"),
+      detail: peakFluxDetail,
     }),
   ]
 
   const secondaryTiles = [
-    resultTile("Spectral Correlation Width (ACF)", results?.spectral_width_mhz_acf === null || results?.spectral_width_mhz_acf === undefined ? "n/a" : `${fmt(results.spectral_width_mhz_acf, 3)} MHz`, "secondary", acfTooltip("spectralWidth")),
+    resultTile("Spectral Correlation Width (ACF)", results?.spectral_width_mhz_acf === null || results?.spectral_width_mhz_acf === undefined ? "n/a" : `${fmt(results.spectral_width_mhz_acf, 3)} MHz`, "secondary", {
+      tooltip: acfTooltip("spectralWidth"),
+      detail: spectralWidthDetail,
+    }),
     resultTile("Spectral Window", results?.spectral_extent_mhz === null || results?.spectral_extent_mhz === undefined ? "n/a" : `${fmt(results.spectral_extent_mhz, 2)} MHz`, "secondary"),
     resultTile("Event Duration", results?.event_duration_ms === null || results?.event_duration_ms === undefined ? "n/a" : `${fmt(results.event_duration_ms, 3)} ms`, "secondary", "Length of the selected event window. This is useful selection metadata, but not a measured burst-duration estimate."),
-    resultTile("Isotropic Energy", formatIsoEnergy(results?.iso_e, results?.provenance?.energy_unit), "secondary"),
+    resultTile("Isotropic Energy", formatIsoEnergy(results?.iso_e, results?.provenance?.energy_unit), "secondary", {
+      detail: energyDetail,
+    }),
     resultTile("Mask Count", results ? String(results.mask_count) : String(view.state.masked_channels.length), "secondary"),
     resultTile("Peak Positions", results?.peak_positions_ms?.length ? results.peak_positions_ms.map((value) => `${fmt(value, 2)} ms`).join(", ") : "n/a", "secondary"),
   ]
@@ -1365,7 +1399,6 @@ function renderPrepareChecklist(view, results) {
 }
 
 function renderPrepareDiagnostics(results, widthAnalysis) {
-  const uncertainties = results?.uncertainties || {}
   const provenance = results?.provenance || {}
   const measurementFlags = Array.isArray(results?.measurement_flags) ? results.measurement_flags : []
   const widthFlags = Array.isArray(widthAnalysis?.noise_summary?.warning_flags) ? widthAnalysis.noise_summary.warning_flags : []
@@ -1374,30 +1407,27 @@ function renderPrepareDiagnostics(results, widthAnalysis) {
     ? combinedFlags.map((flag) => infoChip("Flag", formatMeasurementFlag(flag), flagTone(flag))).join("")
     : infoChip("Flag", "None", "neutral")
   const uncertaintyTiles = []
-  if (uncertainties.toa_topo_mjd !== null && uncertainties.toa_topo_mjd !== undefined) {
-    uncertaintyTiles.push(resultTile("TOA", formatToaUncertainty(uncertainties.toa_topo_mjd), "secondary"))
-  }
-  if (uncertainties.width_ms_acf !== null && uncertainties.width_ms_acf !== undefined) {
-    uncertaintyTiles.push(resultTile("Width", `±${fmt(uncertainties.width_ms_acf, 3)} ms`, "secondary"))
-  }
-  if (uncertainties.spectral_width_mhz_acf !== null && uncertainties.spectral_width_mhz_acf !== undefined) {
-    uncertaintyTiles.push(resultTile("Spectral Width", `±${fmt(uncertainties.spectral_width_mhz_acf, 3)} MHz`, "secondary"))
-  }
-  if (uncertainties.peak_flux_jy !== null && uncertainties.peak_flux_jy !== undefined) {
-    uncertaintyTiles.push(resultTile("Peak Flux", `±${fmt(uncertainties.peak_flux_jy, 3)} Jy`, "secondary"))
-  }
-  if (uncertainties.fluence_jyms !== null && uncertainties.fluence_jyms !== undefined) {
-    uncertaintyTiles.push(resultTile("Fluence", `±${fmt(uncertainties.fluence_jyms, 3)} Jy ms`, "secondary"))
-  }
-  if (uncertainties.iso_e !== null && uncertainties.iso_e !== undefined) {
+  const addUncertaintyTile = (label, detail, options = {}) => {
+    if (!detail) return
     uncertaintyTiles.push(
       resultTile(
-        "Isotropic Energy",
-        `±${formatScientific(uncertainties.iso_e, 3)} ${provenance.energy_unit || ""}`.trim(),
+        label,
+        formatDetailUncertainty(detail, options) || "not quantified",
         "secondary",
+        { detail },
       ),
     )
   }
+  addUncertaintyTile("TOA", resultUncertaintyDetail(results, "toa_topo_mjd", "MJD"), { formatter: formatToaUncertainty })
+  addUncertaintyTile("Width", resultUncertaintyDetail(results, "width_ms_acf", "ms"), { digits: 3, units: "ms" })
+  addUncertaintyTile("Spectral Width", resultUncertaintyDetail(results, "spectral_width_mhz_acf", "MHz"), { digits: 3, units: "MHz" })
+  addUncertaintyTile("Peak Flux", resultUncertaintyDetail(results, "peak_flux_jy", "Jy"), { digits: 3, units: "Jy" })
+  addUncertaintyTile("Fluence", resultUncertaintyDetail(results, "fluence_jyms", "Jy ms"), { digits: 3, units: "Jy ms" })
+  addUncertaintyTile("Isotropic Energy", resultUncertaintyDetail(results, "iso_e", provenance.energy_unit || ""), {
+    digits: 3,
+    units: provenance.energy_unit || "",
+    scientific: true,
+  })
 
   const widthNoiseDetails = widthAnalysis?.noise_summary
     ? `
@@ -1468,13 +1498,24 @@ function renderDmOptimization(view) {
   const metricSummary = definition?.summary || snrMetricSummary(optimization.snr_metric)
   const residualTone = residualStatusTone(optimization.residual_status)
   const residualBandCount = Array.isArray(optimization.subband_freqs_mhz) ? optimization.subband_freqs_mhz.length : 0
+  const bestDmDetail = (
+    uncertaintyDetail(optimization?.uncertainty_details, "best_dm")
+    || legacyScalarUncertaintyDetail(
+      optimization?.best_dm_uncertainty,
+      "pc cm^-3",
+      "Legacy DM scalar uncertainty carried by an older session or API response.",
+    )
+  )
   const metricContextNote = optimization.snr_metric === "dm_phase"
     ? "Sampled Peak DM is the discrete argmax of the DMphase curve. Best DM is the upstream-style weighted polynomial refinement used for comparison with DM_phase."
     : "Sampled Peak DM is the best discrete grid point. Best DM is the local quadratic refinement around that sampled peak."
 
   const primaryTiles = [
     resultTile("Best DM", fmt(optimization.best_dm, 6), "primary", "Refined best-fit DM reported by the selected metric model."),
-    resultTile("DM Uncertainty", optimization.best_dm_uncertainty === null ? "n/a" : `±${fmt(optimization.best_dm_uncertainty, 6)}`, "primary", "Reported 1-sigma uncertainty on the refined best DM when the fit model can provide one."),
+    resultTile("DM Fit Width", formatDetailUncertainty(bestDmDetail, { digits: 6, units: "pc cm^-3" }) || "n/a", "primary", {
+      tooltip: "Local width reported by the DM peak-refinement fit.",
+      detail: bestDmDetail,
+    }),
     resultTile(`Best ${scoreLabel}`, fmt(optimization.best_sn, 3), "primary", `Best fitted ${scoreLabel.toLowerCase()} at the refined DM solution.`),
   ]
 
@@ -1592,16 +1633,26 @@ function renderDmComponentSummary(optimization) {
     return '<div class="empty-state">No component DM summary for this sweep. Add multiple component regions or manual peaks to estimate per-component DM values.</div>'
   }
 
-  const rows = components.map((component) => (
-    `<tr>` +
-    `<td>${escapeHtml(component.label || component.component_id || "Component")}</td>` +
-    `<td>${escapeHtml(`${fmt(component.event_window_ms?.[0], 3)} to ${fmt(component.event_window_ms?.[1], 3)} ms`)}</td>` +
-    `<td>${escapeHtml(fmt(component.best_dm, 6))}</td>` +
-    `<td>${escapeHtml(component.best_dm_uncertainty === null ? "n/a" : `±${fmt(component.best_dm_uncertainty, 6)}`)}</td>` +
-    `<td>${escapeHtml(fmt(component.best_value, 3))}</td>` +
-    `<td>${escapeHtml(fitStatusLabel(component.fit_status))}</td>` +
-    `</tr>`
-  )).join("")
+  const rows = components.map((component) => {
+    const detail = (
+      uncertaintyDetail(component?.uncertainty_details, "best_dm")
+      || legacyScalarUncertaintyDetail(
+        component?.best_dm_uncertainty,
+        "pc cm^-3",
+        "Legacy component-DM scalar uncertainty carried by an older session or API response.",
+      )
+    )
+    return (
+      `<tr>` +
+      `<td>${escapeHtml(component.label || component.component_id || "Component")}</td>` +
+      `<td>${escapeHtml(`${fmt(component.event_window_ms?.[0], 3)} to ${fmt(component.event_window_ms?.[1], 3)} ms`)}</td>` +
+      `<td>${escapeHtml(fmt(component.best_dm, 6))}</td>` +
+      `<td>${escapeHtml(formatDetailUncertainty(detail, { digits: 6, units: "pc cm^-3" }) || "n/a")}</td>` +
+      `<td>${escapeHtml(fmt(component.best_value, 3))}</td>` +
+      `<td>${escapeHtml(fitStatusLabel(component.fit_status))}</td>` +
+      `</tr>`
+    )
+  }).join("")
 
   return `
     <details class="details-card results-details" open>
@@ -1613,7 +1664,7 @@ function renderDmComponentSummary(optimization) {
               <th>Component</th>
               <th>Window</th>
               <th>Best DM</th>
-              <th>Uncertainty</th>
+              <th>Fit Width</th>
               <th>Best ${escapeHtml(snrMetricLabel(optimization.snr_metric))}</th>
               <th>Fit Status</th>
             </tr>
@@ -1663,9 +1714,15 @@ function renderFitting(view) {
   const initialParameters = scatteringFit.initial_parameters || {}
   const bestfit = scatteringFit.bestfit_parameters || {}
   const bestfitUncertainties = scatteringFit.bestfit_uncertainties || {}
+  const widthDetail = resultUncertaintyDetail(results, "width_ms_model", "ms")
+  const tauDetail = resultUncertaintyDetail(results, "tau_sc_ms", "ms")
   const fitSummaryTiles = [
-    resultTile("Model Width", results.width_ms_model === null ? "n/a" : `${fmt(results.width_ms_model, 3)} ms`, "primary"),
-    resultTile("Scattering Tau", results.tau_sc_ms === null ? "n/a" : `${fmt(results.tau_sc_ms, 3)} ms`, "primary"),
+    resultTile("Model Width", results.width_ms_model === null ? "n/a" : formatValueWithDetail(results.width_ms_model, widthDetail, { valueDigits: 3, uncertaintyDigits: 3, units: "ms" }), "primary", {
+      detail: widthDetail,
+    }),
+    resultTile("Scattering Tau", results.tau_sc_ms === null ? "n/a" : formatValueWithDetail(results.tau_sc_ms, tauDetail, { valueDigits: 3, uncertaintyDigits: 3, units: "ms" }), "primary", {
+      detail: tauDetail,
+    }),
     resultTile("Reduced Chi^2", fitStatistics.chisq_final_reduced === null || fitStatistics.chisq_final_reduced === undefined ? "n/a" : fmt(fitStatistics.chisq_final_reduced, 3), "primary"),
   ]
   const fitMetaTiles = [
@@ -1901,12 +1958,44 @@ function renderSpectral(view) {
 
   let spectralBody = '<div class="empty-state">No temporal-structure diagnostics yet. Choose a segment length and run the analysis on the current event window.</div>'
   if (temporalStructure) {
+    const temporalUncertaintyDetails = temporalStructure.uncertainty_details || {}
+    const psdAlphaDetail = (
+      uncertaintyDetail(temporalUncertaintyDetails, "power_law_alpha")
+      || legacyScalarUncertaintyDetail(
+        temporalStructure.power_law_alpha_err,
+        "",
+        "Legacy PSD-slope scalar uncertainty carried by an older session or API response.",
+      )
+    )
+    const noiseFloorDetail = (
+      uncertaintyDetail(temporalUncertaintyDetails, "power_law_c")
+      || legacyScalarUncertaintyDetail(
+        temporalStructure.power_law_c_err,
+        "PSD power",
+        "Legacy PSD-noise-floor scalar uncertainty carried by an older session or API response.",
+      )
+    )
+    const crossoverDetail = (
+      uncertaintyDetail(temporalUncertaintyDetails, "crossover_frequency_hz")
+      || legacyCrossoverIntervalDetail(temporalStructure)
+    )
+    const modelWidthDetail = resultUncertaintyDetail(results, "width_ms_model", "ms")
+    const tauDetail = resultUncertaintyDetail(results, "tau_sc_ms", "ms")
     const summaryTiles = [
       resultTile("Min Structure", temporalStructure.min_structure_ms_primary === null || temporalStructure.min_structure_ms_primary === undefined ? "n/a" : `${fmt(temporalStructure.min_structure_ms_primary, 3)} ms`, "primary", temporalTooltip("minStructure")),
       resultTile("Wavelet Scale", temporalStructure.min_structure_ms_wavelet === null || temporalStructure.min_structure_ms_wavelet === undefined ? "n/a" : `${fmt(temporalStructure.min_structure_ms_wavelet, 3)} ms`, "primary", temporalTooltip("waveletScale")),
-      resultTile("PSD Slope", temporalStructure.power_law_alpha === null || temporalStructure.power_law_alpha === undefined ? "n/a" : `${fmt(temporalStructure.power_law_alpha, 3)} ± ${fmt(temporalStructure.power_law_alpha_err, 3)}`, "primary", temporalTooltip("psdSlope")),
-      resultTile("Crossover", formatCrossoverFrequency(temporalStructure), "primary", temporalTooltip("crossoverFrequency")),
-      resultTile("fitburst Cross-Check", temporalStructure.fitburst_min_component_ms === null || temporalStructure.fitburst_min_component_ms === undefined ? "n/a" : `${fmt(temporalStructure.fitburst_min_component_ms, 3)} ms`, "primary", temporalTooltip("fitburstCrossCheck")),
+      resultTile("PSD Slope", temporalStructure.power_law_alpha === null || temporalStructure.power_law_alpha === undefined ? "n/a" : formatValueWithDetail(temporalStructure.power_law_alpha, psdAlphaDetail, { valueDigits: 3, uncertaintyDigits: 3 }), "primary", {
+        tooltip: temporalTooltip("psdSlope"),
+        detail: psdAlphaDetail,
+      }),
+      resultTile("Crossover", formatCrossoverFrequency(temporalStructure), "primary", {
+        tooltip: temporalTooltip("crossoverFrequency"),
+        detail: crossoverDetail,
+      }),
+      resultTile("fitburst Cross-Check", temporalStructure.fitburst_min_component_ms === null || temporalStructure.fitburst_min_component_ms === undefined ? "n/a" : `${fmt(temporalStructure.fitburst_min_component_ms, 3)} ms`, "primary", {
+        tooltip: temporalTooltip("fitburstCrossCheck"),
+        detail: modelWidthDetail,
+      }),
     ]
     const resultTiles = [
       resultTile("Status", spectralStatusLabel(temporalStructure.status), "secondary"),
@@ -1917,9 +2006,18 @@ function renderSpectral(view) {
       resultTile("Raw Bins", Array.isArray(temporalStructure.raw_periodogram_freq_hz) ? String(temporalStructure.raw_periodogram_freq_hz.length) : String(temporalStructure.raw_periodogram_freq_hz?.length || 0), "secondary", temporalTooltip("rawBins")),
       resultTile("Averaged Bins", Array.isArray(temporalStructure.averaged_psd_freq_hz) ? String(temporalStructure.averaged_psd_freq_hz.length) : String(temporalStructure.averaged_psd_freq_hz?.length || 0), "secondary", temporalTooltip("averagedBins")),
       resultTile("PSD Fit", formatPowerLawFitStatus(temporalStructure.power_law_fit_status), "secondary", temporalTooltip("psdFit")),
-      resultTile("Crossover 3sigma", formatCrossoverInterval(temporalStructure), "secondary", temporalTooltip("crossoverBand")),
-      resultTile("Noise Floor (C)", temporalStructure.power_law_c === null || temporalStructure.power_law_c === undefined ? "n/a" : `${fmt(temporalStructure.power_law_c, 3)} ± ${fmt(temporalStructure.power_law_c_err, 3)}`, "secondary", temporalTooltip("noiseFloor")),
-      resultTile("Scattering Tau", results?.tau_sc_ms === null || results?.tau_sc_ms === undefined ? "n/a" : `${fmt(results.tau_sc_ms, 3)} ms`, "secondary", temporalTooltip("scatteringTau")),
+      resultTile("Crossover Band", formatCrossoverInterval(temporalStructure), "secondary", {
+        tooltip: temporalTooltip("crossoverBand"),
+        detail: crossoverDetail,
+      }),
+      resultTile("Noise Floor (C)", temporalStructure.power_law_c === null || temporalStructure.power_law_c === undefined ? "n/a" : formatValueWithDetail(temporalStructure.power_law_c, noiseFloorDetail, { valueDigits: 3, uncertaintyDigits: 3 }), "secondary", {
+        tooltip: temporalTooltip("noiseFloor"),
+        detail: noiseFloorDetail,
+      }),
+      resultTile("Scattering Tau", results?.tau_sc_ms === null || results?.tau_sc_ms === undefined ? "n/a" : `${fmt(results.tau_sc_ms, 3)} ms`, "secondary", {
+        tooltip: temporalTooltip("scatteringTau"),
+        detail: tauDetail,
+      }),
     ]
     spectralBody = `
       <div class="results-section">
@@ -1994,8 +2092,14 @@ function renderAcfDiagnosticsSection(results) {
   const hasAcf = hasAcfDiagnostics(diagnostics)
   const widthTiles = hasAcf
     ? [
-        resultTile("Temporal ACF Width", results?.width_ms_acf === null || results?.width_ms_acf === undefined ? "n/a" : `${fmt(results.width_ms_acf, 3)} ms`, "primary", acfTooltip("temporalWidth")),
-        resultTile("Spectral ACF Width", results?.spectral_width_mhz_acf === null || results?.spectral_width_mhz_acf === undefined ? "n/a" : `${fmt(results.spectral_width_mhz_acf, 3)} MHz`, "primary", acfTooltip("spectralWidth")),
+        resultTile("Temporal ACF Width", results?.width_ms_acf === null || results?.width_ms_acf === undefined ? "n/a" : `${fmt(results.width_ms_acf, 3)} ms`, "primary", {
+          tooltip: acfTooltip("temporalWidth"),
+          detail: resultUncertaintyDetail(results, "width_ms_acf", "ms"),
+        }),
+        resultTile("Spectral ACF Width", results?.spectral_width_mhz_acf === null || results?.spectral_width_mhz_acf === undefined ? "n/a" : `${fmt(results.spectral_width_mhz_acf, 3)} MHz`, "primary", {
+          tooltip: acfTooltip("spectralWidth"),
+          detail: resultUncertaintyDetail(results, "spectral_width_mhz_acf", "MHz"),
+        }),
         resultTile("Temporal ACF Samples", String(diagnostics.temporal_acf.length), "secondary", acfTooltip("temporalSamples")),
         resultTile("Spectral ACF Samples", String(diagnostics.spectral_acf.length), "secondary", acfTooltip("spectralSamples")),
       ]
@@ -2048,7 +2152,7 @@ function temporalTooltip(topic) {
     waveletScale: "Smallest wavelet scale with significant localized curvature. Useful for sharp peaks, dips, or substructure; it can be unavailable for smooth broad bursts.",
     psdSlope: "Power-law slope of the averaged periodogram. Larger slopes indicate stronger low-frequency/red-noise structure relative to high-frequency fluctuations.",
     crossoverFrequency: "Frequency where the fitted power-law component equals the fitted white-noise floor. Out-of-band values are stored but not drawn as an in-band marker.",
-    crossoverBand: "Yellow band showing the stored 3-sigma uncertainty interval on crossover frequency after propagating the fitted covariance of A, alpha, and C. The band is clipped to the plotted frequency range.",
+    crossoverBand: "Yellow band showing the stored diagnostic crossover interval after propagating the fitted PSD covariance. The band is clipped to the plotted frequency range and should not be read as a publishable confidence interval.",
     fitburstCrossCheck: "Smallest fitted component width from the optional fitburst model. This is model-dependent and should be compared with non-parametric width estimates.",
     segmentLength: "Time span used for each averaged periodogram segment. Longer segments improve frequency resolution but reduce the number of averages.",
     segments: "Number of independent event-profile chunks used for the averaged PSD. More segments reduce noise but require shorter segment length.",
@@ -2667,17 +2771,174 @@ function renderExportPlanner() {
   exportPreviewContent.innerHTML = renderExportPreviewArtifacts(preview.artifacts || [])
 }
 
-function resultTile(label, value, variant, tooltip = "") {
+function uncertaintyDetail(detailMap, key) {
+  const detail = detailMap?.[key]
+  return detail && typeof detail === "object" ? detail : null
+}
+
+function legacyScalarUncertaintyDetail(value, units, basis = "Legacy scalar uncertainty carried by an older session or API response.") {
+  if (value === null || value === undefined) {
+    return null
+  }
+  const numericValue = Number(value)
+  if (!Number.isFinite(numericValue)) {
+    return null
+  }
+  return {
+    value: numericValue,
+    units,
+    classification: "diagnostic_only",
+    is_formal_1sigma: false,
+    publishable: false,
+    basis,
+    tooltip: "This uncertainty came from an older scalar field without current classification metadata, so it is shown as diagnostic-only.",
+    warning_flags: ["legacy_scalar_uncertainty"],
+  }
+}
+
+function resultUncertaintyDetail(results, key, units) {
+  return (
+    uncertaintyDetail(results?.uncertainty_details, key)
+    || legacyScalarUncertaintyDetail(results?.uncertainties?.[key], units)
+  )
+}
+
+function widthResultUncertaintyDetail(widthResult) {
+  return (
+    uncertaintyDetail(widthResult?.uncertainty_details, "uncertainty")
+    || legacyScalarUncertaintyDetail(
+      widthResult?.uncertainty,
+      widthResult?.units || "ms",
+      "Legacy width-comparison scalar uncertainty carried by an older session or API response.",
+    )
+  )
+}
+
+function legacyCrossoverIntervalDetail(temporalStructure) {
+  const center = Number(temporalStructure?.crossover_frequency_hz)
+  const low = Number(temporalStructure?.crossover_frequency_hz_3sigma_low)
+  const high = Number(temporalStructure?.crossover_frequency_hz_3sigma_high)
+  if (!Number.isFinite(center) || !Number.isFinite(low) || !Number.isFinite(high)) {
+    return null
+  }
+  return legacyScalarUncertaintyDetail(
+    Math.max(Math.abs(center - low), Math.abs(high - center)),
+    "Hz",
+    "Legacy PSD-crossover interval carried by an older session or API response.",
+  )
+}
+
+function findAcceptedWidthDetail(acceptedWidth, widthAnalysis, results, hasAcfFallback) {
+  if (acceptedWidth?.uncertainty_detail) {
+    return acceptedWidth.uncertainty_detail
+  }
+  const acceptedLegacyDetail = legacyScalarUncertaintyDetail(
+    acceptedWidth?.uncertainty,
+    acceptedWidth?.units || "ms",
+    "Legacy accepted-width scalar uncertainty carried by an older session or API response.",
+  )
+  if (acceptedLegacyDetail) {
+    return acceptedLegacyDetail
+  }
+  const acceptedMethod = acceptedWidth?.method
+  if (acceptedMethod && Array.isArray(widthAnalysis?.results)) {
+    const matched = widthAnalysis.results.find((result) => result?.method === acceptedMethod)
+    const matchedDetail = widthResultUncertaintyDetail(matched)
+    if (matchedDetail) {
+      return matchedDetail
+    }
+  }
+  if (hasAcfFallback || acceptedMethod === "acf_half_max") {
+    return resultUncertaintyDetail(results, "width_ms_acf", "ms")
+  }
+  return null
+}
+
+function uncertaintyDetailLabel(detail) {
+  const labels = {
+    formal_1sigma: "Formal 1σ",
+    model_hessian: "Model-based",
+    resolution_limit: "Resolution limit",
+    heuristic_local_fit: "Heuristic",
+    statistical_only: "Statistical only",
+    diagnostic_only: "Diagnostic only",
+  }
+  return labels[detail?.classification] || "Uncertainty detail"
+}
+
+function uncertaintyTone(detail) {
+  const tones = {
+    formal_1sigma: "success",
+    model_hessian: "neutral",
+    resolution_limit: "warning",
+    heuristic_local_fit: "warning",
+    statistical_only: "warning",
+    diagnostic_only: "neutral",
+  }
+  return tones[detail?.classification] || "neutral"
+}
+
+function uncertaintyTooltip(detail) {
+  if (!detail) return ""
+  const parts = []
+  if (detail.tooltip) {
+    parts.push(String(detail.tooltip))
+  }
+  if (detail.basis) {
+    parts.push(`Basis: ${detail.basis}`)
+  }
+  if (Array.isArray(detail.warning_flags) && detail.warning_flags.length) {
+    parts.push(`Flags: ${detail.warning_flags.join(", ")}`)
+  }
+  return parts.join(" ")
+}
+
+function uncertaintyBadgeMarkup(detail) {
+  if (!detail) return ""
+  return `<span class="panel-badge uncertainty-badge" data-tone="${escapeHtml(uncertaintyTone(detail))}" data-tooltip="${escapeHtml(uncertaintyTooltip(detail))}">${escapeHtml(uncertaintyDetailLabel(detail))}</span>`
+}
+
+function formatDetailUncertainty(detail, { digits = 3, units = null, scientific = false, formatter = null } = {}) {
+  if (!detail || detail.value === null || detail.value === undefined) {
+    return null
+  }
+  const value = Number(detail?.value)
+  if (!Number.isFinite(value)) {
+    return null
+  }
+  if (typeof formatter === "function") {
+    return formatter(value, detail?.units || units)
+  }
+  const resolvedUnits = detail?.units || units || ""
+  const formattedValue = scientific ? formatScientific(value, digits) : fmt(value, digits)
+  return `±${formattedValue}${resolvedUnits ? ` ${resolvedUnits}` : ""}`
+}
+
+function formatValueWithDetail(value, detail, { valueDigits = 3, uncertaintyDigits = 3, units = null, scientific = false } = {}) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "n/a"
+  }
+  const renderedValue = scientific ? formatScientific(value, valueDigits) : fmt(value, valueDigits)
+  const uncertainty = formatDetailUncertainty(detail, { digits: uncertaintyDigits, units, scientific })
+  return uncertainty ? `${renderedValue} ${uncertainty}` : renderedValue
+}
+
+function resultTile(label, value, variant, tooltipOrOptions = "") {
+  const options = typeof tooltipOrOptions === "string" ? { tooltip: tooltipOrOptions } : (tooltipOrOptions || {})
+  const tooltip = options.tooltip || ""
+  const detail = options.detail || null
   const tooltipMarkup = tooltip
     ? ` <span class="tooltip-icon" data-tooltip="${escapeHtml(tooltip)}">?</span>`
     : ""
-  return `<div class="result-tile ${variant}"><span class="results-label">${escapeHtml(label)}${tooltipMarkup}</span><strong>${escapeHtml(value)}</strong></div>`
+  const badgeMarkup = detail ? ` ${uncertaintyBadgeMarkup(detail)}` : ""
+  return `<div class="result-tile ${variant}"><span class="results-label">${escapeHtml(label)}${tooltipMarkup}${badgeMarkup}</span><strong>${escapeHtml(value)}</strong></div>`
 }
 
-function renderMeasurementCard(label, value, { uncertainty = null, method = null, flags = [], tooltip = "" } = {}) {
+function renderMeasurementCard(label, value, { uncertainty = null, method = null, flags = [], tooltip = "", detail = null } = {}) {
   const chips = Array.isArray(flags) && flags.length
     ? `<div class="measurement-flags">${flags.map((flag) => infoChip("Flag", formatMeasurementFlag(flag), flagTone(flag))).join("")}</div>`
     : ""
+  const detailMarkup = detail ? `<div class="measurement-flags">${uncertaintyBadgeMarkup(detail)}</div>` : ""
   const meta = [
     method ? `<div class="measurement-meta"><span>Method</span><strong>${escapeHtml(String(method))}</strong></div>` : "",
     uncertainty ? `<div class="measurement-meta"><span>Uncertainty</span><strong>${escapeHtml(String(uncertainty))}</strong></div>` : "",
@@ -2692,6 +2953,7 @@ function renderMeasurementCard(label, value, { uncertainty = null, method = null
         <strong>${escapeHtml(value)}</strong>
       </div>
       ${meta ? `<div class="measurement-meta-grid">${meta}</div>` : ""}
+      ${detailMarkup}
       ${chips}
     </article>
   `
@@ -2741,6 +3003,7 @@ function renderWidthAnalysisSection(widthAnalysis) {
 
   const rows = widthAnalysis.results.map((result) => {
     const isAccepted = widthAnalysis.accepted_width?.method === result.method
+    const detail = widthResultUncertaintyDetail(result)
     const flags = Array.isArray(result.quality_flags) && result.quality_flags.length
       ? result.quality_flags.map((flag) => infoChip("Flag", formatMeasurementFlag(flag), flagTone(flag))).join("")
       : infoChip("Flag", "None", "neutral")
@@ -2750,9 +3013,12 @@ function renderWidthAnalysisSection(widthAnalysis) {
     return `
       <div class="width-row">
         <div class="width-copy">
-          <strong>${escapeHtml(result.label)}</strong>
+          <strong>${escapeHtml(result.label)}${detail ? ` ${uncertaintyBadgeMarkup(detail)}` : ""}</strong>
           <span>${escapeHtml(result.value === null || result.value === undefined ? "n/a" : `${fmt(result.value, 3)} ${result.units || "ms"}`)}</span>
-          <span>${escapeHtml(result.uncertainty === null || result.uncertainty === undefined ? "uncertainty n/a" : `±${fmt(result.uncertainty, 3)} ${result.units || "ms"}`)}</span>
+          <span>${escapeHtml(
+            formatDetailUncertainty(detail, { digits: 3, units: result.units || "ms" })
+            || (result.uncertainty === null || result.uncertainty === undefined ? "uncertainty n/a" : `±${fmt(result.uncertainty, 3)} ${result.units || "ms"}`)
+          )}</span>
         </div>
         <div class="width-flags">${flags}</div>
         <div class="width-actions">${action}</div>
@@ -2912,14 +3178,15 @@ async function renderDmOptimizationPlot(optimization, appliedDm) {
   const yRange = dmOptimizationYRange([optimization.snr, ...componentCurves].flat())
   const traces = []
   const snrLabel = snrMetricLabel(optimization.snr_metric)
+  const bestDmFitWidth = Number(optimization?.uncertainty_details?.best_dm?.value)
 
-  if (optimization.best_dm_uncertainty !== null) {
+  if (Number.isFinite(bestDmFitWidth) && bestDmFitWidth > 0) {
     traces.push({
       x: [
-        optimization.best_dm - optimization.best_dm_uncertainty,
-        optimization.best_dm + optimization.best_dm_uncertainty,
-        optimization.best_dm + optimization.best_dm_uncertainty,
-        optimization.best_dm - optimization.best_dm_uncertainty,
+        optimization.best_dm - bestDmFitWidth,
+        optimization.best_dm + bestDmFitWidth,
+        optimization.best_dm + bestDmFitWidth,
+        optimization.best_dm - bestDmFitWidth,
       ],
       y: [yRange[0], yRange[0], yRange[1], yRange[1]],
       type: "scatter",
@@ -4370,10 +4637,10 @@ function fitStatusLabel(status) {
 
 function fitStatusCopy(status) {
   const labels = {
-    quadratic_peak_fit: "The fitted best DM and uncertainty come from a local quadratic model around the sampled peak.",
-    quadratic_peak_fit_uncertainty_unavailable: "The local fit found a best DM, but the sampled range was not sufficient to derive a stable uncertainty band.",
-    dmphase_weighted_polyfit: "The fitted best DM and uncertainty come from an upstream-style weighted polynomial fit applied to the DMphase curve.",
-    dmphase_weighted_polyfit_uncertainty_unavailable: "The DMphase fit found a best DM, but the weighted polynomial model did not yield a stable uncertainty.",
+    quadratic_peak_fit: "The fitted best DM comes from a local quadratic model around the sampled peak. The displayed fit width is retained as a heuristic diagnostic rather than a publishable 1-sigma DM error bar.",
+    quadratic_peak_fit_uncertainty_unavailable: "The local fit found a best DM, but the sampled range was not sufficient to derive even a stable diagnostic fit width.",
+    dmphase_weighted_polyfit: "The fitted best DM comes from an upstream-style weighted polynomial fit applied to the DMphase curve. The displayed fit width remains a heuristic local-fit diagnostic rather than a formal 1-sigma uncertainty.",
+    dmphase_weighted_polyfit_uncertainty_unavailable: "The DMphase fit found a best DM, but the weighted polynomial model did not yield a stable diagnostic fit width.",
     dmphase_weighted_polyfit_failed: "The DMphase weighted polynomial fit failed, so the sampled peak was retained.",
     dmphase_weighted_polyfit_fallback: "The DMphase peak fit could not define a stable fitting window, so the discrete sampled peak was retained.",
     peak_on_sweep_edge: "Expand the DM half-range so the peak is bracketed before trusting the best-DM estimate.",

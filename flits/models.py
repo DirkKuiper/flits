@@ -63,6 +63,68 @@ def _array_2d(values: Any, *, dtype: np.dtype[Any] | type[np.floating[Any]] | ty
     return arr
 
 
+FORMAL_UNCERTAINTY_CLASSIFICATIONS: frozenset[str] = frozenset({"formal_1sigma", "model_hessian"})
+
+
+def _uncertainty_detail_map_to_dict(values: dict[str, "UncertaintyDetail"]) -> dict[str, Any]:
+    return {str(key): detail.to_dict() for key, detail in values.items()}
+
+
+def _uncertainty_detail_map_from_dict(payload: dict[str, Any] | None) -> dict[str, "UncertaintyDetail"]:
+    if payload is None:
+        return {}
+    return {
+        str(key): UncertaintyDetail.from_dict(value)
+        for key, value in payload.items()
+        if isinstance(value, dict)
+    }
+
+
+def compatible_scalar_uncertainty(detail: "UncertaintyDetail | None") -> float | None:
+    if detail is None or detail.value is None:
+        return None
+    if detail.classification not in FORMAL_UNCERTAINTY_CLASSIFICATIONS:
+        return None
+    return float(detail.value)
+
+
+@dataclass(frozen=True)
+class UncertaintyDetail:
+    value: float | None
+    units: str | None
+    classification: str
+    is_formal_1sigma: bool
+    publishable: bool
+    basis: str
+    tooltip: str
+    warning_flags: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "value": _float_or_none(self.value),
+            "units": self.units,
+            "classification": self.classification,
+            "is_formal_1sigma": bool(self.is_formal_1sigma),
+            "publishable": bool(self.publishable),
+            "basis": self.basis,
+            "tooltip": self.tooltip,
+            "warning_flags": [str(flag) for flag in self.warning_flags],
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "UncertaintyDetail":
+        return cls(
+            value=_float_or_none(payload.get("value")),
+            units=None if payload.get("units") in (None, "") else str(payload.get("units")),
+            classification=str(payload.get("classification", "diagnostic_only")),
+            is_formal_1sigma=bool(payload.get("is_formal_1sigma", False)),
+            publishable=bool(payload.get("publishable", False)),
+            basis=str(payload.get("basis", "")),
+            tooltip=str(payload.get("tooltip", "")),
+            warning_flags=[str(flag) for flag in payload.get("warning_flags", [])],
+        )
+
+
 @dataclass(frozen=True)
 class BurstRegion:
     start_bin: int
@@ -177,6 +239,7 @@ class WidthResult:
     masked_channels: list[int]
     effective_bandwidth_mhz: float | None
     algorithm_name: str
+    uncertainty_details: dict[str, UncertaintyDetail] = field(default_factory=dict)
     quality_flags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -194,6 +257,7 @@ class WidthResult:
             "masked_channels": [int(value) for value in self.masked_channels],
             "effective_bandwidth_mhz": _float_or_none(self.effective_bandwidth_mhz),
             "algorithm_name": self.algorithm_name,
+            "uncertainty_details": _uncertainty_detail_map_to_dict(self.uncertainty_details),
             "quality_flags": list(self.quality_flags),
         }
 
@@ -213,6 +277,7 @@ class WidthResult:
             masked_channels=[int(value) for value in payload.get("masked_channels", [])],
             effective_bandwidth_mhz=_float_or_none(payload.get("effective_bandwidth_mhz")),
             algorithm_name=str(payload.get("algorithm_name", payload.get("method", "unknown"))),
+            uncertainty_details=_uncertainty_detail_map_from_dict(payload.get("uncertainty_details")),
             quality_flags=[str(flag) for flag in payload.get("quality_flags", [])],
         )
 
@@ -223,6 +288,7 @@ class AcceptedWidthSelection:
     value: float | None
     uncertainty: float | None
     units: str
+    uncertainty_detail: UncertaintyDetail | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -230,6 +296,7 @@ class AcceptedWidthSelection:
             "value": self.value,
             "uncertainty": self.uncertainty,
             "units": self.units,
+            "uncertainty_detail": None if self.uncertainty_detail is None else self.uncertainty_detail.to_dict(),
         }
 
     @classmethod
@@ -239,6 +306,7 @@ class AcceptedWidthSelection:
             value=result.value,
             uncertainty=result.uncertainty,
             units=result.units,
+            uncertainty_detail=result.uncertainty_details.get("uncertainty"),
         )
 
     @classmethod
@@ -248,6 +316,11 @@ class AcceptedWidthSelection:
             value=_float_or_none(payload.get("value")),
             uncertainty=_float_or_none(payload.get("uncertainty")),
             units=str(payload.get("units", "ms")),
+            uncertainty_detail=(
+                None
+                if payload.get("uncertainty_detail") is None
+                else UncertaintyDetail.from_dict(payload["uncertainty_detail"])
+            ),
         )
 
 
@@ -430,6 +503,7 @@ class DmComponentOptimizationResult:
     best_dm_uncertainty: float | None
     best_value: float
     fit_status: str
+    uncertainty_details: dict[str, UncertaintyDetail] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -445,6 +519,7 @@ class DmComponentOptimizationResult:
             "best_dm_uncertainty": _float_or_none(self.best_dm_uncertainty),
             "best_value": float(self.best_value),
             "fit_status": self.fit_status,
+            "uncertainty_details": _uncertainty_detail_map_to_dict(self.uncertainty_details),
         }
 
     @classmethod
@@ -462,6 +537,7 @@ class DmComponentOptimizationResult:
             best_dm_uncertainty=_float_or_none(payload.get("best_dm_uncertainty")),
             best_value=float(payload.get("best_value", payload.get("best_sn", 0.0))),
             fit_status=str(payload.get("fit_status", "unknown")),
+            uncertainty_details=_uncertainty_detail_map_from_dict(payload.get("uncertainty_details")),
         )
 
 
@@ -665,6 +741,7 @@ class DmOptimizationResult:
     residual_rms_best_ms: float | None = None
     residual_slope_applied_ms_per_mhz: float | None = None
     residual_slope_best_ms_per_mhz: float | None = None
+    uncertainty_details: dict[str, UncertaintyDetail] = field(default_factory=dict)
     component_results: list[DmComponentOptimizationResult] = field(default_factory=list)
     settings: DmOptimizationSettings | None = None
     provenance: DmOptimizationProvenance | None = None
@@ -695,6 +772,7 @@ class DmOptimizationResult:
             "residual_rms_best_ms": _float_or_none(self.residual_rms_best_ms),
             "residual_slope_applied_ms_per_mhz": _float_or_none(self.residual_slope_applied_ms_per_mhz),
             "residual_slope_best_ms_per_mhz": _float_or_none(self.residual_slope_best_ms_per_mhz),
+            "uncertainty_details": _uncertainty_detail_map_to_dict(self.uncertainty_details),
             "component_results": [item.to_dict() for item in self.component_results],
             "settings": None if self.settings is None else self.settings.to_dict(),
             "provenance": None if self.provenance is None else self.provenance.to_dict(),
@@ -727,6 +805,7 @@ class DmOptimizationResult:
             residual_rms_best_ms=_float_or_none(payload.get("residual_rms_best_ms")),
             residual_slope_applied_ms_per_mhz=_float_or_none(payload.get("residual_slope_applied_ms_per_mhz")),
             residual_slope_best_ms_per_mhz=_float_or_none(payload.get("residual_slope_best_ms_per_mhz")),
+            uncertainty_details=_uncertainty_detail_map_from_dict(payload.get("uncertainty_details")),
             component_results=[
                 DmComponentOptimizationResult.from_dict(item)
                 for item in payload.get("component_results", [])
@@ -770,6 +849,7 @@ class SpectralAnalysisResult:
     noise_psd_freq_hz: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     noise_psd_power: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     noise_psd_segment_count: int | None = None
+    uncertainty_details: dict[str, UncertaintyDetail] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -799,6 +879,7 @@ class SpectralAnalysisResult:
             "noise_psd_freq_hz": _jsonable_1d(self.noise_psd_freq_hz, digits=6),
             "noise_psd_power": _jsonable_1d(self.noise_psd_power, digits=6),
             "noise_psd_segment_count": _int_or_none(self.noise_psd_segment_count),
+            "uncertainty_details": _uncertainty_detail_map_to_dict(self.uncertainty_details),
         }
 
     @classmethod
@@ -832,6 +913,7 @@ class SpectralAnalysisResult:
             noise_psd_freq_hz=_array_1d(payload.get("noise_psd_freq_hz"), dtype=float),
             noise_psd_power=_array_1d(payload.get("noise_psd_power"), dtype=float),
             noise_psd_segment_count=_int_or_none(payload.get("noise_psd_segment_count")),
+            uncertainty_details=_uncertainty_detail_map_from_dict(payload.get("uncertainty_details")),
         )
 
 
@@ -877,6 +959,7 @@ class TemporalStructureResult:
     noise_psd_freq_hz: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     noise_psd_power: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     noise_psd_segment_count: int | None = None
+    uncertainty_details: dict[str, UncertaintyDetail] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -920,6 +1003,7 @@ class TemporalStructureResult:
             "noise_psd_freq_hz": _jsonable_1d(self.noise_psd_freq_hz, digits=6),
             "noise_psd_power": _jsonable_1d(self.noise_psd_power, digits=6),
             "noise_psd_segment_count": _int_or_none(self.noise_psd_segment_count),
+            "uncertainty_details": _uncertainty_detail_map_to_dict(self.uncertainty_details),
         }
 
     @classmethod
@@ -969,6 +1053,7 @@ class TemporalStructureResult:
             noise_psd_freq_hz=_array_1d(payload.get("noise_psd_freq_hz"), dtype=float),
             noise_psd_power=_array_1d(payload.get("noise_psd_power"), dtype=float),
             noise_psd_segment_count=_int_or_none(payload.get("noise_psd_segment_count")),
+            uncertainty_details=_uncertainty_detail_map_from_dict(payload.get("uncertainty_details")),
         )
 
 
@@ -1145,6 +1230,7 @@ class ScatteringFitDiagnostics:
     data_freq_profile_sn: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     model_freq_profile_sn: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     residual_freq_profile_sn: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    uncertainty_details: dict[str, UncertaintyDetail] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         fit_statistics = {
@@ -1181,6 +1267,7 @@ class ScatteringFitDiagnostics:
             "data_freq_profile_sn": _jsonable_1d(self.data_freq_profile_sn, digits=6),
             "model_freq_profile_sn": _jsonable_1d(self.model_freq_profile_sn, digits=6),
             "residual_freq_profile_sn": _jsonable_1d(self.residual_freq_profile_sn, digits=6),
+            "uncertainty_details": _uncertainty_detail_map_to_dict(self.uncertainty_details),
         }
 
     @classmethod
@@ -1207,6 +1294,7 @@ class ScatteringFitDiagnostics:
             data_freq_profile_sn=_array_1d(payload.get("data_freq_profile_sn"), dtype=float),
             model_freq_profile_sn=_array_1d(payload.get("model_freq_profile_sn"), dtype=float),
             residual_freq_profile_sn=_array_1d(payload.get("residual_freq_profile_sn"), dtype=float),
+            uncertainty_details=_uncertainty_detail_map_from_dict(payload.get("uncertainty_details")),
         )
 
 
@@ -1283,6 +1371,7 @@ class BurstMeasurements:
     spectral_extent_mhz: float
     measurement_flags: list[str]
     uncertainties: MeasurementUncertainties
+    uncertainty_details: dict[str, UncertaintyDetail]
     provenance: MeasurementProvenance
     diagnostics: MeasurementDiagnostics
     mask_count: int
@@ -1310,6 +1399,7 @@ class BurstMeasurements:
             "spectral_extent_mhz": self.spectral_extent_mhz,
             "measurement_flags": self.measurement_flags,
             "uncertainties": self.uncertainties.to_dict(),
+            "uncertainty_details": _uncertainty_detail_map_to_dict(self.uncertainty_details),
             "provenance": self.provenance.to_dict(),
             "diagnostics": self.diagnostics.to_dict(),
             "mask_count": self.mask_count,
@@ -1339,6 +1429,7 @@ class BurstMeasurements:
             spectral_extent_mhz=float(payload.get("spectral_extent_mhz", 0.0)),
             measurement_flags=[str(flag) for flag in payload.get("measurement_flags", [])],
             uncertainties=MeasurementUncertainties.from_dict(payload.get("uncertainties")),
+            uncertainty_details=_uncertainty_detail_map_from_dict(payload.get("uncertainty_details")),
             provenance=MeasurementProvenance.from_dict(payload.get("provenance", {})),
             diagnostics=MeasurementDiagnostics.from_dict(payload.get("diagnostics", {})),
             mask_count=int(payload.get("mask_count", 0)),
@@ -1365,6 +1456,8 @@ class AnalysisSessionSnapshot:
     auto_mask_profile: str
     distance_mpc: float | None
     redshift: float | None
+    sefd_fractional_uncertainty: float | None
+    distance_fractional_uncertainty: float | None
     time_factor: int
     freq_factor: int
     crop_bins: list[int]
@@ -1398,6 +1491,8 @@ class AnalysisSessionSnapshot:
             "auto_mask_profile": self.auto_mask_profile,
             "distance_mpc": _float_or_none(self.distance_mpc),
             "redshift": _float_or_none(self.redshift),
+            "sefd_fractional_uncertainty": _float_or_none(self.sefd_fractional_uncertainty),
+            "distance_fractional_uncertainty": _float_or_none(self.distance_fractional_uncertainty),
             "time_factor": int(self.time_factor),
             "freq_factor": int(self.freq_factor),
             "crop_bins": [int(value) for value in self.crop_bins],
@@ -1433,6 +1528,8 @@ class AnalysisSessionSnapshot:
             auto_mask_profile=str(payload.get("auto_mask_profile", "auto")),
             distance_mpc=_float_or_none(payload.get("distance_mpc")),
             redshift=_float_or_none(payload.get("redshift")),
+            sefd_fractional_uncertainty=_float_or_none(payload.get("sefd_fractional_uncertainty")),
+            distance_fractional_uncertainty=_float_or_none(payload.get("distance_fractional_uncertainty")),
             time_factor=int(payload.get("time_factor", 1)),
             freq_factor=int(payload.get("freq_factor", 1)),
             crop_bins=[int(value) for value in payload.get("crop_bins", [])],

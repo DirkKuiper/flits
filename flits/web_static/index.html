@@ -56,6 +56,10 @@
             <input id="sefdInput" type="number" step="0.1" placeholder="optional">
           </label>
           <label class="field">
+            <span>SEFD Frac. Uncertainty <span class="tooltip-icon" data-tooltip="Optional fractional systematic uncertainty on SEFD calibration, expressed as a decimal (for example 0.1 for 10%). When provided, FLITS can combine it with statistical flux/fluence errors.">?</span></span>
+            <input id="sefdFractionalUncertaintyInput" type="number" step="0.001" min="0" placeholder="optional">
+          </label>
+          <label class="field">
             <span>npol Override <span class="tooltip-icon" data-tooltip="Optional override for the number of summed polarizations used in radiometer calibration. Leave blank to use the value inferred from the data/header.">?</span></span>
             <input id="npolInput" type="number" step="1" min="1" placeholder="header default">
           </label>
@@ -79,6 +83,10 @@
               <input id="redshiftInput" type="number" step="0.0001" placeholder="optional">
             </label>
           </div>
+          <label class="field">
+            <span>Distance Frac. Uncertainty <span class="tooltip-icon" data-tooltip="Optional fractional systematic uncertainty on luminosity distance, expressed as a decimal (for example 0.2 for 20%). It is only used when isotropic energy is computed.">?</span></span>
+            <input id="distanceFractionalUncertaintyInput" type="number" step="0.001" min="0" placeholder="optional">
+          </label>
           <div class="detection-panel" id="detectionHint">
             <div class="detection-copy">Detection: waiting for a file.</div>
           </div>

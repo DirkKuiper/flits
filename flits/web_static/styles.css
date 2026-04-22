@@ -278,6 +278,13 @@ body::before {
   color: var(--alert);
 }
 
+.uncertainty-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 .field,
 .field-row {
   display: grid;

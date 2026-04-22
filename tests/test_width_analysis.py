@@ -117,11 +117,25 @@ class WidthAnalysisTest(unittest.TestCase):
             self.assertGreater(width_analysis.noise_summary.offpulse_bin_count, 0)
             uncertainties = [result.uncertainty for result in width_analysis.results if result.value is not None]
             self.assertTrue(any(value is not None for value in uncertainties))
+            self.assertTrue(
+                all(
+                    result.uncertainty_details["uncertainty"].classification == "formal_1sigma"
+                    for result in width_analysis.results
+                    if result.value is not None and "uncertainty" in result.uncertainty_details
+                )
+            )
 
             session.clear_offpulse()
             implicit = session.compute_widths()
             self.assertEqual(implicit.noise_summary.basis, "implicit_event_complement")
             self.assertIn("implicit_offpulse", implicit.noise_summary.warning_flags)
+            self.assertTrue(
+                all(
+                    result.uncertainty_details["uncertainty"].classification == "statistical_only"
+                    for result in implicit.results
+                    if result.value is not None and "uncertainty" in result.uncertainty_details
+                )
+            )
 
     @patch("flits.session.compute_width_analysis")
     def test_compute_widths_uses_reduced_profile_and_sampling(self, mock_compute_width_analysis: object) -> None:

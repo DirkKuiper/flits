@@ -34,11 +34,13 @@ class CreateSessionRequest(BaseModel):
     dm: float
     telescope: str | None = None
     sefd_jy: float | None = None
+    sefd_fractional_uncertainty: float | None = None
     npol_override: int | None = None
     read_start_sec: float | None = None
     read_end_sec: float | None = None
     auto_mask_profile: str | None = "auto"
     distance_mpc: float | None = None
+    distance_fractional_uncertainty: float | None = None
     redshift: float | None = None
 
 
@@ -231,6 +233,8 @@ def create_session(request: CreateSessionRequest) -> dict[str, Any]:
         read_end_sec=request.read_end_sec,
         auto_mask_profile=request.auto_mask_profile,
         distance_mpc=request.distance_mpc,
+        sefd_fractional_uncertainty=request.sefd_fractional_uncertainty,
+        distance_fractional_uncertainty=request.distance_fractional_uncertainty,
         redshift=request.redshift,
     )
     session_id = uuid4().hex

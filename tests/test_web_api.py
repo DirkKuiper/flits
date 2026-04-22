@@ -13,7 +13,7 @@ import numpy as np
 from fastapi import HTTPException
 
 from flits.io.filterbank import FilterbankInspection, your
-from flits.models import FilterbankMetadata, SpectralAnalysisResult, TemporalStructureResult
+from flits.models import FilterbankMetadata, SpectralAnalysisResult, TemporalStructureResult, UncertaintyDetail
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
 from flits.web.app import (
@@ -400,7 +400,18 @@ class WebApiTest(unittest.TestCase):
     @patch("flits.web.app.resolve_burst_path")
     def test_create_session_passes_selected_auto_mask_profile(self, mock_resolve_path: object, mock_from_file: object) -> None:
         mock_resolve_path.return_value = Path("/tmp/synthetic.fil")
-        mock_from_file.return_value = _synthetic_session(auto_mask_profile="thorough")
+        session = _synthetic_session(auto_mask_profile="thorough")
+        session.config = ObservationConfig.from_preset(
+            dm=0.0,
+            preset_key="generic",
+            sefd_jy=10.0,
+            auto_mask_profile="thorough",
+            distance_mpc=123.0,
+            redshift=0.12,
+            sefd_fractional_uncertainty=0.1,
+            distance_fractional_uncertainty=0.2,
+        )
+        mock_from_file.return_value = session
 
         payload = create_session(
             CreateSessionRequest(
@@ -408,6 +419,8 @@ class WebApiTest(unittest.TestCase):
                 dm=50.0,
                 auto_mask_profile="thorough",
                 distance_mpc=123.0,
+                sefd_fractional_uncertainty=0.1,
+                distance_fractional_uncertainty=0.2,
                 redshift=0.12,
             )
         )
@@ -415,16 +428,20 @@ class WebApiTest(unittest.TestCase):
         try:
             self.assertEqual(payload["view"]["meta"]["auto_mask_profile"], "thorough")
             self.assertEqual(payload["view"]["meta"]["auto_mask_profile_label"], "Thorough")
+            self.assertEqual(payload["view"]["meta"]["sefd_fractional_uncertainty"], 0.1)
+            self.assertEqual(payload["view"]["meta"]["distance_fractional_uncertainty"], 0.2)
             mock_from_file.assert_called_once_with(
                 "/tmp/synthetic.fil",
                 dm=50.0,
                 telescope=None,
                 sefd_jy=None,
+                sefd_fractional_uncertainty=0.1,
                 npol_override=None,
                 read_start_sec=None,
                 read_end_sec=None,
                 auto_mask_profile="thorough",
                 distance_mpc=123.0,
+                distance_fractional_uncertainty=0.2,
                 redshift=0.12,
             )
         finally:
@@ -455,11 +472,13 @@ class WebApiTest(unittest.TestCase):
                 dm=50.0,
                 telescope=None,
                 sefd_jy=None,
+                sefd_fractional_uncertainty=None,
                 npol_override=1,
                 read_start_sec=None,
                 read_end_sec=None,
                 auto_mask_profile="auto",
                 distance_mpc=None,
+                distance_fractional_uncertainty=None,
                 redshift=None,
             )
         finally:
@@ -566,6 +585,30 @@ class WebApiTest(unittest.TestCase):
 
         session.fit_scattering.assert_called_once_with(payload)
 
+    def test_session_action_compute_properties_returns_uncertainty_details(self) -> None:
+        session_id = "synthetic-compute-uncertainty"
+        session = _synthetic_session()
+        SESSIONS[session_id] = session
+        try:
+            payload = session_action(
+                session_id,
+                ActionRequest(type="compute_properties", payload={}),
+            )
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        results = payload["view"]["results"]
+        self.assertIsNotNone(results)
+        details = results["uncertainty_details"]
+        self.assertIn("toa_topo_mjd", details)
+        self.assertIn("width_ms_acf", details)
+        self.assertIn("fluence_jyms", details)
+        self.assertIsNone(results["uncertainties"]["toa_topo_mjd"])
+        self.assertIsNone(results["uncertainties"]["width_ms_acf"])
+        self.assertEqual(details["toa_topo_mjd"]["classification"], "resolution_limit")
+        self.assertEqual(details["width_ms_acf"]["classification"], "resolution_limit")
+        self.assertEqual(details["fluence_jyms"]["classification"], "statistical_only")
+
     def test_session_action_run_spectral_analysis_returns_serialized_payload(self) -> None:
         session_id = "synthetic-spectral-dispatch"
         session = _synthetic_session()
@@ -590,6 +633,17 @@ class WebApiTest(unittest.TestCase):
             noise_psd_freq_hz=np.array([62.5, 125.0], dtype=float),
             noise_psd_power=np.array([0.2, 0.25], dtype=float),
             noise_psd_segment_count=3,
+            uncertainty_details={
+                "power_law_alpha": UncertaintyDetail(
+                    value=0.25,
+                    units="index",
+                    classification="diagnostic_only",
+                    is_formal_1sigma=False,
+                    publishable=False,
+                    basis="web api spectral test",
+                    tooltip="diagnostic spectral uncertainty",
+                ),
+            },
         )
 
         def _run(segment_length_ms: float) -> SpectralAnalysisResult:
@@ -620,6 +674,7 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(analysis["crossover_frequency_status"], "ok")
         self.assertEqual(analysis["noise_psd_power"], [0.2, 0.25])
         self.assertEqual(analysis["noise_psd_segment_count"], 3)
+        self.assertEqual(analysis["uncertainty_details"]["power_law_alpha"]["classification"], "diagnostic_only")
 
     def test_session_action_run_temporal_structure_analysis_returns_serialized_payload(self) -> None:
         session_id = "synthetic-temporal-dispatch"
@@ -659,6 +714,17 @@ class WebApiTest(unittest.TestCase):
             noise_psd_freq_hz=np.array([62.5, 125.0], dtype=float),
             noise_psd_power=np.array([0.2, 0.25], dtype=float),
             noise_psd_segment_count=3,
+            uncertainty_details={
+                "crossover_frequency_hz": UncertaintyDetail(
+                    value=12.0,
+                    units="Hz",
+                    classification="diagnostic_only",
+                    is_formal_1sigma=False,
+                    publishable=False,
+                    basis="web api temporal test",
+                    tooltip="diagnostic crossover uncertainty",
+                ),
+            },
         )
 
         def _run(segment_length_ms: float) -> TemporalStructureResult:
@@ -690,6 +756,7 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(temporal["crossover_frequency_status"], "out_of_band")
         self.assertEqual(temporal["noise_psd_freq_hz"], [62.5, 125.0])
         self.assertEqual(temporal["noise_psd_segment_count"], 3)
+        self.assertEqual(temporal["uncertainty_details"]["crossover_frequency_hz"]["classification"], "diagnostic_only")
 
     def test_session_action_supports_offpulse_width_and_notes_actions(self) -> None:
         session_id = "synthetic-phase1-actions"
