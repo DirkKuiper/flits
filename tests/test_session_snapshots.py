@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from flits.models import AutoMaskRunSummary, FilterbankMetadata, SpectralAnalysisResult, TemporalStructureResult
+from flits.models import AutoMaskRunSummary, FilterbankMetadata, SpectralAnalysisResult, TemporalStructureResult, UncertaintyDetail
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
 
@@ -52,7 +52,9 @@ def _synthetic_width_session(
         dm=applied_dm,
         preset_key="generic",
         sefd_jy=10.0,
+        sefd_fractional_uncertainty=0.1,
         distance_mpc=150.0,
+        distance_fractional_uncertainty=0.2,
         redshift=0.05,
     )
     session = BurstSession(
@@ -144,6 +146,17 @@ class SessionSnapshotTest(unittest.TestCase):
                 noise_psd_freq_hz=np.array([125.0, 250.0], dtype=float),
                 noise_psd_power=np.array([0.2, 0.1], dtype=float),
                 noise_psd_segment_count=4,
+                uncertainty_details={
+                    "power_law_alpha": UncertaintyDetail(
+                        value=0.25,
+                        units="index",
+                        classification="diagnostic_only",
+                        is_formal_1sigma=False,
+                        publishable=False,
+                        basis="snapshot spectral test",
+                        tooltip="diagnostic spectral uncertainty",
+                    ),
+                },
             )
             session.temporal_structure = TemporalStructureResult(
                 status="ok",
@@ -170,6 +183,17 @@ class SessionSnapshotTest(unittest.TestCase):
                 noise_psd_freq_hz=np.array([125.0, 250.0], dtype=float),
                 noise_psd_power=np.array([0.2, 0.1], dtype=float),
                 noise_psd_segment_count=4,
+                uncertainty_details={
+                    "crossover_frequency_hz": UncertaintyDetail(
+                        value=50.0,
+                        units="Hz",
+                        classification="diagnostic_only",
+                        is_formal_1sigma=False,
+                        publishable=False,
+                        basis="snapshot temporal test",
+                        tooltip="diagnostic crossover interval",
+                    ),
+                },
             )
 
             snapshot = session.to_snapshot()
@@ -184,6 +208,8 @@ class SessionSnapshotTest(unittest.TestCase):
             self.assertEqual(restored.offpulse_regions, session.offpulse_regions)
             self.assertEqual(restored.burst_regions, session.burst_regions)
             self.assertEqual(restored.notes, "phase-1 snapshot")
+            self.assertAlmostEqual(restored.config.sefd_fractional_uncertainty or 0.0, 0.1)
+            self.assertAlmostEqual(restored.config.distance_fractional_uncertainty or 0.0, 0.2)
             self.assertEqual(np.flatnonzero(restored.channel_mask).tolist(), np.flatnonzero(session.channel_mask).tolist())
             self.assertIsNotNone(restored.last_auto_mask)
             self.assertIsNotNone(restored.width_analysis)
@@ -198,9 +224,11 @@ class SessionSnapshotTest(unittest.TestCase):
             self.assertTrue(np.allclose(restored.spectral_analysis.freq_hz, np.array([125.0, 250.0, 375.0])))
             self.assertEqual(restored.spectral_analysis.crossover_frequency_status, "ok")
             self.assertTrue(np.allclose(restored.spectral_analysis.noise_psd_power, np.array([0.2, 0.1])))
+            self.assertEqual(restored.spectral_analysis.uncertainty_details["power_law_alpha"].classification, "diagnostic_only")
             self.assertIsNotNone(restored.temporal_structure)
             self.assertEqual(restored.temporal_structure.min_structure_ms_primary, 2.0)
             self.assertEqual(restored.temporal_structure.crossover_frequency_hz, 250.0)
+            self.assertEqual(restored.temporal_structure.uncertainty_details["crossover_frequency_hz"].classification, "diagnostic_only")
 
     def test_snapshot_import_fails_when_source_file_is_missing(self) -> None:
         with TemporaryDirectory() as tmpdir:

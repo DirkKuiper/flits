@@ -6,6 +6,7 @@ import numpy as np
 from astropy import units as u
 
 from flits.measurements import build_measurement_context, compute_burst_measurements
+from flits.models import NoiseEstimateSettings
 
 
 def _synthetic_burst(
@@ -52,7 +53,10 @@ class MeasurementEngineTest(unittest.TestCase):
             npol=1,
             distance_mpc=150.0,
             redshift=0.05,
+            sefd_fractional_uncertainty=0.1,
+            distance_fractional_uncertainty=0.2,
             masked_channels=[],
+            offpulse_regions_rel=[(0, 36), (88, 120)],
         )
 
         expected_toa = 60000.0 + ((1.25 + peak_bin * 1e-3) / 86400.0)
@@ -84,9 +88,16 @@ class MeasurementEngineTest(unittest.TestCase):
         self.assertGreaterEqual(len(measurements.diagnostics.gaussian_fits), 1)
         self.assertEqual(measurements.provenance.calibration_method, "radiometer_equation")
         self.assertEqual(measurements.provenance.energy_unit, "erg")
-        self.assertIsNotNone(measurements.uncertainties.width_ms_acf)
+        self.assertIsNone(measurements.uncertainties.width_ms_acf)
+        self.assertIsNone(measurements.uncertainties.toa_topo_mjd)
         self.assertIsNone(measurements.uncertainties.snr_peak)
         self.assertIsNone(measurements.uncertainties.snr_integrated)
+        self.assertEqual(measurements.uncertainty_details["toa_topo_mjd"].classification, "resolution_limit")
+        self.assertEqual(measurements.uncertainty_details["width_ms_acf"].classification, "resolution_limit")
+        self.assertEqual(measurements.uncertainty_details["spectral_width_mhz_acf"].classification, "resolution_limit")
+        self.assertEqual(measurements.uncertainty_details["peak_flux_jy"].classification, "formal_1sigma")
+        self.assertEqual(measurements.uncertainty_details["fluence_jyms"].classification, "formal_1sigma")
+        self.assertEqual(measurements.uncertainty_details["iso_e"].classification, "formal_1sigma")
 
     def test_measurement_context_tracks_effective_bandwidth_after_masking(self) -> None:
         masked, freqs = _synthetic_burst(num_channels=6, num_time_bins=64)
@@ -135,6 +146,8 @@ class MeasurementEngineTest(unittest.TestCase):
             npol=1,
             distance_mpc=None,
             redshift=None,
+            sefd_fractional_uncertainty=None,
+            distance_fractional_uncertainty=None,
             masked_channels=[1],
         )
 
@@ -143,6 +156,47 @@ class MeasurementEngineTest(unittest.TestCase):
         self.assertIn("missing_distance", measurements.measurement_flags)
         self.assertIn("missing_sefd", measurements.measurement_flags)
         self.assertIn("heavily_masked", measurements.measurement_flags)
+
+    def test_noise_estimator_changes_measurement_context_statistics(self) -> None:
+        masked = np.zeros((2, 24), dtype=float)
+        masked[:, 10:14] = np.array([[5.0, 8.0, 8.0, 5.0], [4.5, 7.5, 7.5, 4.5]])
+        masked[0, 0] = 40.0
+        freqs = np.array([1100.0, 1099.0], dtype=float)
+        offpulse_regions = [(0, 8), (16, 24)]
+
+        mean_std = build_measurement_context(
+            masked=masked,
+            time_axis_ms=np.arange(masked.shape[1], dtype=float),
+            freqs_mhz=freqs,
+            event_rel_start=10,
+            event_rel_end=14,
+            spec_lo=0,
+            spec_hi=1,
+            freqres_mhz=1.0,
+            offpulse_regions=offpulse_regions,
+            noise_settings=NoiseEstimateSettings(estimator="mean_std"),
+        )
+        median_mad = build_measurement_context(
+            masked=masked,
+            time_axis_ms=np.arange(masked.shape[1], dtype=float),
+            freqs_mhz=freqs,
+            event_rel_start=10,
+            event_rel_end=14,
+            spec_lo=0,
+            spec_hi=1,
+            freqres_mhz=1.0,
+            offpulse_regions=offpulse_regions,
+            noise_settings=NoiseEstimateSettings(estimator="median_mad"),
+        )
+
+        self.assertEqual(mean_std.noise_summary.estimator, "mean_std")
+        self.assertEqual(median_mad.noise_summary.estimator, "median_mad")
+        self.assertGreater(mean_std.noise_summary.sigma, median_mad.noise_summary.sigma)
+        self.assertNotAlmostEqual(
+            float(mean_std.selected_profile_sn[11]),
+            float(median_mad.selected_profile_sn[11]),
+            places=6,
+        )
 
 
 if __name__ == "__main__":

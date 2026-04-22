@@ -207,16 +207,21 @@ class DmOptimizationTest(unittest.TestCase):
         np.testing.assert_allclose(session.data, original_data)
         self.assertIs(session.dm_optimization, result)
 
-    def test_optimize_dm_reports_quadratic_uncertainty_for_interior_peak(self) -> None:
+    def test_optimize_dm_keeps_quadratic_fit_width_as_metadata_only_under_integer_bin_dedispersion(self) -> None:
         session = _synthetic_dm_session(true_dm=50.0)
 
         result = session.optimize_dm(center_dm=50.0, half_range=4.0, step=0.5)
 
         self.assertEqual(result.fit_status, "quadratic_peak_fit")
-        self.assertIsNotNone(result.best_dm_uncertainty)
-        self.assertGreater(result.best_dm_uncertainty or 0.0, 0.0)
+        self.assertIsNone(result.best_dm_uncertainty)
         self.assertGreater(result.best_dm, float(np.min(result.trial_dms)))
         self.assertLess(result.best_dm, float(np.max(result.trial_dms)))
+        detail = result.uncertainty_details["best_dm"]
+        self.assertEqual(detail.classification, "heuristic_local_fit")
+        self.assertFalse(detail.publishable)
+        self.assertIsNotNone(detail.value)
+        self.assertGreater(detail.value or 0.0, 0.0)
+        self.assertIn("integer_bin_dedispersion", detail.warning_flags)
 
     def test_optimize_dm_falls_back_when_peak_hits_sweep_edge(self) -> None:
         session = _synthetic_dm_session(true_dm=50.0)
@@ -226,6 +231,7 @@ class DmOptimizationTest(unittest.TestCase):
         self.assertEqual(result.fit_status, "peak_on_sweep_edge")
         self.assertEqual(result.best_dm, result.sampled_best_dm)
         self.assertIsNone(result.best_dm_uncertainty)
+        self.assertEqual(result.uncertainty_details["best_dm"].classification, "heuristic_local_fit")
 
     def test_dm_optimization_clears_on_resolution_data_and_selection_changes(self) -> None:
         session = _synthetic_dm_session(true_dm=50.0)

@@ -25,7 +25,7 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.stats import norm
 
-from flits.models import SpectralAnalysisResult, TemporalStructureResult
+from flits.models import SpectralAnalysisResult, TemporalStructureResult, UncertaintyDetail, compatible_scalar_uncertainty
 
 
 MIN_EVENT_BINS = 4
@@ -34,6 +34,26 @@ MIN_POWER_LAW_BINS = 12
 DEFAULT_SIGNIFICANCE_SIGMA = 5.0
 CROSSOVER_UNCERTAINTY_SIGMA = 3.0
 FWHM_PER_SIGMA = float(2.0 * np.sqrt(2.0 * np.log(2.0)))
+
+
+def _diagnostic_uncertainty_detail(
+    *,
+    value: float | None,
+    units: str,
+    basis: str,
+    tooltip: str,
+    warning_flags: list[str] | None = None,
+) -> UncertaintyDetail:
+    return UncertaintyDetail(
+        value=None if value is None else float(value),
+        units=units,
+        classification="diagnostic_only",
+        is_formal_1sigma=False,
+        publishable=False,
+        basis=basis,
+        tooltip=tooltip,
+        warning_flags=[] if warning_flags is None else list(warning_flags),
+    )
 
 
 def default_segment_bins(event_bin_count: int) -> int:
@@ -538,6 +558,67 @@ def _fit_crossover_frequency(power_law: dict[str, Any], freq_hz: np.ndarray) -> 
     }
 
 
+def _psd_uncertainty_details(
+    power_law: dict[str, Any],
+    crossover: dict[str, float | str | None],
+) -> dict[str, UncertaintyDetail]:
+    basis = (
+        "Derived from the local covariance/Hessian of the FLITS power-law-plus-constant PSD fit. "
+        "These bars remain diagnostic only until the averaged-periodogram likelihood is validated against "
+        "Stingray's PSD treatment for m=segment_count."
+    )
+    tooltip = (
+        "Diagnostic PSD-fit uncertainty from the local covariance of the fitted model. It is retained for trend "
+        "inspection but is not currently treated as a publishable physical 1-sigma interval."
+    )
+    details: dict[str, UncertaintyDetail] = {}
+    warning_flags = [str(power_law.get("fit_status", "unavailable")), "psd_likelihood_unvalidated"]
+
+    parameter_specs = {
+        "power_law_a": ("power_law_a_err", "PSD amplitude"),
+        "power_law_alpha": ("power_law_alpha_err", "index"),
+        "power_law_c": ("power_law_c_err", "PSD power"),
+    }
+    for field_name, (error_key, units) in parameter_specs.items():
+        error_value = power_law.get(error_key)
+        if isinstance(error_value, (int, float)) and np.isfinite(error_value):
+            details[field_name] = _diagnostic_uncertainty_detail(
+                value=float(error_value),
+                units=units,
+                basis=basis,
+                tooltip=tooltip,
+                warning_flags=warning_flags,
+            )
+
+    crossover_value = crossover.get("crossover_frequency_hz")
+    low = crossover.get("crossover_frequency_hz_3sigma_low")
+    high = crossover.get("crossover_frequency_hz_3sigma_high")
+    half_width = None
+    if all(isinstance(value, (int, float)) and np.isfinite(value) for value in (crossover_value, low, high)):
+        assert crossover_value is not None and low is not None and high is not None
+        center = float(crossover_value)
+        half_width = float(max(abs(center - float(low)), abs(float(high) - center)))
+    if crossover_value is not None:
+        details["crossover_frequency_hz"] = _diagnostic_uncertainty_detail(
+            value=half_width,
+            units="Hz",
+            basis=(
+                "Stored from the propagated covariance interval of the PSD fit at the power-law/white-noise crossover. "
+                "The interval is diagnostic only until the PSD likelihood is formally validated."
+            ),
+            tooltip=(
+                "Diagnostic crossover interval derived from the fitted PSD covariance. The displayed band is kept for "
+                "context, not as a publishable confidence interval."
+            ),
+            warning_flags=[
+                str(crossover.get("crossover_frequency_status", "unavailable")),
+                str(power_law.get("fit_status", "unavailable")),
+                "psd_likelihood_unvalidated",
+            ],
+        )
+    return details
+
+
 def temporal_to_spectral_result(result: TemporalStructureResult) -> SpectralAnalysisResult:
     """Project temporal-analysis PSD products into the spectral result schema."""
     return SpectralAnalysisResult(
@@ -557,9 +638,9 @@ def temporal_to_spectral_result(result: TemporalStructureResult) -> SpectralAnal
         power_law_a=result.power_law_a,
         power_law_alpha=result.power_law_alpha,
         power_law_c=result.power_law_c,
-        power_law_a_err=result.power_law_a_err,
-        power_law_alpha_err=result.power_law_alpha_err,
-        power_law_c_err=result.power_law_c_err,
+        power_law_a_err=compatible_scalar_uncertainty(result.uncertainty_details.get("power_law_a")),
+        power_law_alpha_err=compatible_scalar_uncertainty(result.uncertainty_details.get("power_law_alpha")),
+        power_law_c_err=compatible_scalar_uncertainty(result.uncertainty_details.get("power_law_c")),
         crossover_frequency_hz=result.crossover_frequency_hz,
         crossover_frequency_status=result.crossover_frequency_status,
         crossover_frequency_hz_3sigma_low=result.crossover_frequency_hz_3sigma_low,
@@ -567,6 +648,7 @@ def temporal_to_spectral_result(result: TemporalStructureResult) -> SpectralAnal
         noise_psd_freq_hz=np.asarray(result.noise_psd_freq_hz, dtype=float),
         noise_psd_power=np.asarray(result.noise_psd_power, dtype=float),
         noise_psd_segment_count=result.noise_psd_segment_count,
+        uncertainty_details=dict(result.uncertainty_details),
     )
 
 
@@ -851,6 +933,7 @@ def run_temporal_structure_analysis(
     )
     power_law = _fit_power_law_model(freq_hz, power, resolved_segment_count)
     crossover = _fit_crossover_frequency(power_law, freq_hz)
+    uncertainty_details = _psd_uncertainty_details(power_law, crossover)
     combined_message = power_law["fit_message"]
 
     return TemporalStructureResult(
@@ -884,9 +967,9 @@ def run_temporal_structure_analysis(
         power_law_a=power_law["power_law_a"],
         power_law_alpha=power_law["power_law_alpha"],
         power_law_c=power_law["power_law_c"],
-        power_law_a_err=power_law["power_law_a_err"],
-        power_law_alpha_err=power_law["power_law_alpha_err"],
-        power_law_c_err=power_law["power_law_c_err"],
+        power_law_a_err=compatible_scalar_uncertainty(uncertainty_details.get("power_law_a")),
+        power_law_alpha_err=compatible_scalar_uncertainty(uncertainty_details.get("power_law_alpha")),
+        power_law_c_err=compatible_scalar_uncertainty(uncertainty_details.get("power_law_c")),
         crossover_frequency_hz=crossover["crossover_frequency_hz"],
         crossover_frequency_status=str(crossover["crossover_frequency_status"]),
         crossover_frequency_hz_3sigma_low=crossover["crossover_frequency_hz_3sigma_low"],
@@ -894,4 +977,5 @@ def run_temporal_structure_analysis(
         noise_psd_freq_hz=np.asarray(noise_psd["noise_psd_freq_hz"], dtype=float),
         noise_psd_power=np.asarray(noise_psd["noise_psd_power"], dtype=float),
         noise_psd_segment_count=noise_psd["noise_psd_segment_count"],
+        uncertainty_details=uncertainty_details,
     )

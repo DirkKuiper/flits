@@ -17,7 +17,9 @@ from flits.models import (
     MeasurementUncertainties,
     NoiseEstimateSettings,
     NoiseEstimateSummary,
+    UncertaintyDetail,
     WidthResult,
+    compatible_scalar_uncertainty,
 )
 from flits.signal import acf_1d, gaussian_1d, radiometer
 
@@ -27,6 +29,36 @@ HEAVILY_MASKED_FRACTION = 0.25
 DM_RESIDUAL_MAX_SUBBANDS = 8
 DM_RESIDUAL_MIN_CHANNELS = 4
 DM_RESIDUAL_MIN_SUBBANDS = 3
+
+
+def _uncertainty_detail(
+    *,
+    value: float | None,
+    units: str | None,
+    classification: str,
+    basis: str,
+    tooltip: str,
+    publishable: bool,
+    warning_flags: Sequence[str] = (),
+) -> UncertaintyDetail:
+    finite_value = None if value is None or not np.isfinite(value) else float(value)
+    return UncertaintyDetail(
+        value=finite_value,
+        units=units,
+        classification=classification,
+        is_formal_1sigma=(classification == "formal_1sigma"),
+        publishable=bool(publishable),
+        basis=str(basis),
+        tooltip=str(tooltip),
+        warning_flags=sorted(set(str(flag) for flag in warning_flags)),
+    )
+
+
+def _noise_uncertainty_publishable(noise_summary: NoiseEstimateSummary) -> bool:
+    if noise_summary.basis != "explicit":
+        return False
+    blocking_flags = {"implicit_offpulse", "insufficient_offpulse_bins", "zero_noise"}
+    return not any(flag in blocking_flags for flag in noise_summary.warning_flags)
 
 
 def _nanmean_profile(values: np.ndarray, axis: int) -> np.ndarray:
@@ -72,13 +104,20 @@ def _explicit_offpulse_bins(
     return np.asarray(sorted(set(bins)), dtype=int), "explicit"
 
 
-def _reference_stats(reference: np.ndarray) -> tuple[float, float]:
+def _reference_stats(reference: np.ndarray, estimator: str = "mean_std") -> tuple[float, float]:
     finite_reference = np.asarray(reference, dtype=float)
     finite_reference = finite_reference[np.isfinite(finite_reference)]
     if finite_reference.size == 0:
         return 0.0, 1.0
-    baseline = float(np.nanmean(finite_reference))
-    sigma = float(np.nanstd(finite_reference))
+    estimator = str(estimator)
+    if estimator == "mean_std":
+        baseline = float(np.nanmean(finite_reference))
+        sigma = float(np.nanstd(finite_reference))
+    elif estimator == "median_mad":
+        baseline = float(np.nanmedian(finite_reference))
+        sigma = float(1.4826 * np.nanmedian(np.abs(finite_reference - baseline)))
+    else:
+        raise ValueError(f"Unsupported noise estimator '{estimator}'.")
     if not np.isfinite(baseline):
         baseline = 0.0
     if not np.isfinite(sigma) or sigma <= 0:
@@ -102,7 +141,7 @@ def _noise_summary(
     estimator: str,
     offpulse_bins: np.ndarray,
 ) -> NoiseEstimateSummary:
-    baseline, sigma = _reference_stats(reference)
+    baseline, sigma = _reference_stats(reference, estimator=estimator)
     warning_flags: list[str] = []
     if basis != "explicit":
         warning_flags.append("implicit_offpulse")
@@ -344,8 +383,8 @@ def build_measurement_context(
 
     event_spectrum_raw = _nanmean_profile(selected[:, event_rel_start:event_rel_end], axis=1) if selected.size else np.array([], dtype=float)
     offpulse_spectrum_raw = _nanmean_profile(selected[:, offpulse_bins], axis=1) if selected.size and offpulse_bins.size else np.array([], dtype=float)
-    spectrum_baseline, spectrum_sigma = _reference_stats(offpulse_spectrum_raw)
-    full_baseline, full_sigma = _reference_stats(full_offpulse)
+    spectrum_baseline, spectrum_sigma = _reference_stats(offpulse_spectrum_raw, estimator=noise_settings.estimator)
+    full_baseline, full_sigma = _reference_stats(full_offpulse, estimator=noise_settings.estimator)
 
     return MeasurementContext(
         masked=masked,
@@ -570,6 +609,8 @@ def compute_burst_measurements(
     npol: int,
     distance_mpc: float | None,
     redshift: float | None,
+    sefd_fractional_uncertainty: float | None,
+    distance_fractional_uncertainty: float | None,
     masked_channels: Sequence[int],
     offpulse_regions_rel: Sequence[tuple[int, int]] | None = None,
     noise_settings: NoiseEstimateSettings | None = None,
@@ -678,21 +719,156 @@ def compute_burst_measurements(
     if sefd_jy is None or context.effective_bandwidth_mhz <= 0:
         measurement_flags.append("missing_sefd")
 
+    uncertainty_details: dict[str, UncertaintyDetail] = {}
+    noise_publishable = _noise_uncertainty_publishable(context.noise_summary)
+    resolution_warning_flags = list(context.noise_summary.warning_flags)
+
+    if toa_topo_mjd is not None:
+        uncertainty_details["toa_topo_mjd"] = _uncertainty_detail(
+            value=float((tsamp_ms / 1e3) / (2 * 86400.0)),
+            units="MJD",
+            classification="resolution_limit",
+            basis="Half of the effective time bin after reduction; TOA is anchored to the selected peak bin rather than a fitted centroid model.",
+            tooltip="Resolution limit from half of the effective time bin. This is a discretization floor, not a formal statistical 1σ error bar.",
+            publishable=False,
+            warning_flags=resolution_warning_flags,
+        )
+    if width_ms_acf is not None:
+        uncertainty_details["width_ms_acf"] = _uncertainty_detail(
+            value=float(tsamp_ms * 0.5),
+            units="ms",
+            classification="resolution_limit",
+            basis="Half of the effective time sample used to evaluate the temporal ACF crossing.",
+            tooltip="Resolution limit from half the effective time sample. The temporal ACF width itself is retained, but this is not treated as a formal 1σ uncertainty.",
+            publishable=False,
+            warning_flags=resolution_warning_flags,
+        )
+    if spectral_width_mhz_acf is not None:
+        uncertainty_details["spectral_width_mhz_acf"] = _uncertainty_detail(
+            value=float(abs(freqres_mhz) * 0.5),
+            units="MHz",
+            classification="resolution_limit",
+            basis="Half of the effective channel width used to evaluate the spectral ACF crossing.",
+            tooltip="Resolution limit from half the effective channel width. The spectral ACF width is retained as a diagnostic scale, not a formal 1σ uncertainty.",
+            publishable=False,
+            warning_flags=resolution_warning_flags,
+        )
+
+    flux_like_warning_flags = list(context.noise_summary.warning_flags)
+    if "low_sn" in measurement_flags:
+        flux_like_warning_flags.append("low_sn")
+    sefd_fractional_uncertainty = (
+        None if sefd_fractional_uncertainty is None else max(0.0, float(sefd_fractional_uncertainty))
+    )
+    distance_fractional_uncertainty = (
+        None if distance_fractional_uncertainty is None else max(0.0, float(distance_fractional_uncertainty))
+    )
+    if peak_flux_jy is not None and flux_scale is not None:
+        peak_flux_stat = float(flux_scale)
+        peak_flux_value = None
+        peak_flux_classification = "statistical_only"
+        peak_flux_basis = "Radiometer-noise statistical term from one off-pulse sigma in the selected band."
+        peak_flux_publishable = False
+        if sefd_fractional_uncertainty is not None:
+            peak_flux_value = float(
+                np.sqrt(peak_flux_stat**2 + (abs(peak_flux_jy) * sefd_fractional_uncertainty) ** 2)
+            )
+            peak_flux_classification = "formal_1sigma"
+            peak_flux_basis = (
+                "Quadrature combination of the radiometer-noise statistical term and the supplied SEFD fractional uncertainty."
+            )
+            peak_flux_publishable = noise_publishable
+        else:
+            peak_flux_value = peak_flux_stat
+            flux_like_warning_flags.append("missing_sefd_fractional_uncertainty")
+        uncertainty_details["peak_flux_jy"] = _uncertainty_detail(
+            value=peak_flux_value,
+            units="Jy",
+            classification=peak_flux_classification,
+            basis=peak_flux_basis,
+            tooltip=(
+                "Peak-flux uncertainty combines radiometer-noise statistics with any supplied SEFD fractional systematic. "
+                "Without an SEFD uncertainty input, this remains statistical-only and non-publishable."
+            ),
+            publishable=peak_flux_publishable,
+            warning_flags=flux_like_warning_flags,
+        )
+    if fluence_jyms is not None and fluence_uncertainty is not None:
+        fluence_value = None
+        fluence_classification = "statistical_only"
+        fluence_basis = "Radiometer-noise statistical term from the event-window sum over off-pulse-normalized bins."
+        fluence_publishable = False
+        if sefd_fractional_uncertainty is not None:
+            fluence_value = float(
+                np.sqrt(fluence_uncertainty**2 + (abs(fluence_jyms) * sefd_fractional_uncertainty) ** 2)
+            )
+            fluence_classification = "formal_1sigma"
+            fluence_basis = (
+                "Quadrature combination of the radiometer-noise statistical term and the supplied SEFD fractional uncertainty."
+            )
+            fluence_publishable = noise_publishable
+        else:
+            fluence_value = float(fluence_uncertainty)
+        uncertainty_details["fluence_jyms"] = _uncertainty_detail(
+            value=fluence_value,
+            units="Jy ms",
+            classification=fluence_classification,
+            basis=fluence_basis,
+            tooltip=(
+                "Fluence uncertainty combines radiometer-noise statistics with any supplied SEFD fractional systematic. "
+                "Without an SEFD uncertainty input, this remains statistical-only and non-publishable."
+            ),
+            publishable=fluence_publishable,
+            warning_flags=flux_like_warning_flags,
+        )
+    if iso_e is not None and fluence_jyms not in (None, 0.0):
+        iso_stat = 0.0
+        if "fluence_jyms" in uncertainty_details and uncertainty_details["fluence_jyms"].value is not None:
+            iso_stat = float(uncertainty_details["fluence_jyms"].value) / abs(float(fluence_jyms))
+        iso_value = None
+        iso_classification = "statistical_only"
+        iso_basis = "Propagated from the fluence statistical term only."
+        iso_publishable = False
+        if sefd_fractional_uncertainty is not None and distance_fractional_uncertainty is not None:
+            iso_fractional = float(
+                np.sqrt(iso_stat**2 + (2.0 * distance_fractional_uncertainty) ** 2)
+            )
+            iso_value = float(abs(iso_e) * iso_fractional)
+            iso_classification = "formal_1sigma"
+            iso_basis = (
+                "Quadrature combination of the propagated fluence term and the supplied luminosity-distance fractional uncertainty."
+            )
+            iso_publishable = noise_publishable
+        else:
+            iso_value = float(abs(iso_e) * iso_stat) if iso_stat > 0 else None
+            if sefd_fractional_uncertainty is None:
+                flux_like_warning_flags.append("missing_sefd_fractional_uncertainty")
+            if distance_fractional_uncertainty is None:
+                flux_like_warning_flags.append("missing_distance_fractional_uncertainty")
+        uncertainty_details["iso_e"] = _uncertainty_detail(
+            value=iso_value,
+            units="erg",
+            classification=iso_classification,
+            basis=iso_basis,
+            tooltip=(
+                "Isotropic-energy uncertainty is only treated as publishable after both calibration (SEFD) and distance systematics are supplied. "
+                "Otherwise it is statistical-only."
+            ),
+            publishable=iso_publishable,
+            warning_flags=flux_like_warning_flags,
+        )
+
     uncertainties = MeasurementUncertainties(
-        toa_topo_mjd=None if toa_topo_mjd is None else float((tsamp_ms / 1e3) / (2 * 86400.0)),
+        toa_topo_mjd=compatible_scalar_uncertainty(uncertainty_details.get("toa_topo_mjd")),
         snr_peak=None,
         snr_integrated=None,
-        width_ms_acf=float(tsamp_ms * 0.5) if width_ms_acf is not None else None,
+        width_ms_acf=compatible_scalar_uncertainty(uncertainty_details.get("width_ms_acf")),
         width_ms_model=None,
-        spectral_width_mhz_acf=float(abs(freqres_mhz) * 0.5) if spectral_width_mhz_acf is not None else None,
+        spectral_width_mhz_acf=compatible_scalar_uncertainty(uncertainty_details.get("spectral_width_mhz_acf")),
         tau_sc_ms=None,
-        peak_flux_jy=flux_scale if peak_flux_jy is not None and flux_scale is not None else None,
-        fluence_jyms=fluence_uncertainty,
-        iso_e=(
-            None
-            if iso_e is None or fluence_jyms in (None, 0.0) or not fluence_uncertainty
-            else float(abs(iso_e) * (fluence_uncertainty / abs(fluence_jyms)))
-        ),
+        peak_flux_jy=compatible_scalar_uncertainty(uncertainty_details.get("peak_flux_jy")),
+        fluence_jyms=compatible_scalar_uncertainty(uncertainty_details.get("fluence_jyms")),
+        iso_e=compatible_scalar_uncertainty(uncertainty_details.get("iso_e")),
     )
 
     offpulse_windows_ms = _offpulse_windows_ms(
@@ -714,7 +890,8 @@ def compute_burst_measurements(
         calibration_method="radiometer_equation" if flux_scale is not None else "uncalibrated",
         energy_unit="erg" if iso_e is not None else None,
         uncertainty_basis=(
-            "TOA and ACF-width uncertainties are resolution-limited; flux, fluence, and energy uncertainties assume radiometer-noise-dominated off-pulse variance."
+            "Measurement uncertainty details classify each value as formal, model-based, statistical-only, heuristic, or resolution-limited. "
+            "Formal flux-like uncertainties require explicit off-pulse noise plus supplied calibration and distance systematics where applicable."
         ),
         event_window_ms=[
             float(time_axis_ms[max(0, min(event_rel_start, time_axis_ms.size - 1))]) if time_axis_ms.size else 0.0,
@@ -785,6 +962,7 @@ def compute_burst_measurements(
         spectral_extent_mhz=spectral_extent_mhz,
         measurement_flags=sorted(set(measurement_flags)),
         uncertainties=uncertainties,
+        uncertainty_details=uncertainty_details,
         provenance=provenance,
         diagnostics=diagnostics,
         mask_count=len(list(masked_channels)),

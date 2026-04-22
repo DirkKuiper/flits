@@ -44,6 +44,7 @@ from flits.models import (
     TemporalStructureResult,
     WidthAnalysisSettings,
     WidthAnalysisSummary,
+    compatible_scalar_uncertainty,
 )
 from flits.settings import ObservationConfig, get_auto_mask_profile, get_preset
 from flits.signal import block_reduce_mean, dedisperse
@@ -56,7 +57,7 @@ except Exception:  # pragma: no cover - optional dependency
     jess = SimpleNamespace(channel_masks=SimpleNamespace(channel_masker=None))
 
 
-SESSION_SNAPSHOT_SCHEMA_VERSION = "1.2"
+SESSION_SNAPSHOT_SCHEMA_VERSION = "1.3"
 JESS_MASK_DTYPE = np.float32
 JESS_WORKING_COPY_FACTOR = 6
 JESS_TEST_SEQUENCE = ("skew", "stand-dev")
@@ -192,6 +193,8 @@ class BurstSession:
         auto_mask_profile: str | None = "auto",
         distance_mpc: float | None = None,
         redshift: float | None = None,
+        sefd_fractional_uncertainty: float | None = None,
+        distance_fractional_uncertainty: float | None = None,
     ) -> "BurstSession":
         from flits.io import inspect_filterbank, load_filterbank_data
 
@@ -207,6 +210,8 @@ class BurstSession:
             auto_mask_profile=auto_mask_profile,
             distance_mpc=distance_mpc,
             redshift=redshift,
+            sefd_fractional_uncertainty=sefd_fractional_uncertainty,
+            distance_fractional_uncertainty=distance_fractional_uncertainty,
         )
         data, metadata = load_filterbank_data(bfile, config, inspection=inspection)
         num_time_bins = data.shape[1]
@@ -245,6 +250,8 @@ class BurstSession:
             auto_mask_profile=snapshot.auto_mask_profile,
             distance_mpc=snapshot.distance_mpc,
             redshift=snapshot.redshift,
+            sefd_fractional_uncertainty=snapshot.sefd_fractional_uncertainty,
+            distance_fractional_uncertainty=snapshot.distance_fractional_uncertainty,
         )
         session._validate_snapshot_source(snapshot.source)
 
@@ -1102,6 +1109,8 @@ class BurstSession:
                 "header_npol": self.header_npol,
                 "distance_mpc": self.config.distance_mpc,
                 "redshift": self.config.redshift,
+                "sefd_fractional_uncertainty": self.config.sefd_fractional_uncertainty,
+                "distance_fractional_uncertainty": self.config.distance_fractional_uncertainty,
                 "shape": [self.total_channels, self.total_time_bins],
                 "view_shape": [int(grid.display.shape[0]), int(grid.display.shape[1])],
                 "freq_range_mhz": [freq_lo_mhz, freq_hi_mhz],
@@ -1487,12 +1496,13 @@ class BurstSession:
         if self.width_analysis is not None and self.width_analysis.accepted_width is not None:
             existing_method = self.width_analysis.accepted_width.method
         self.width_analysis = compute_width_analysis(
-            selected_profile=context.selected_profile_baselined,
+            selected_profile=context.selected_profile_raw,
             time_axis_ms=context.time_axis_ms,
             event_rel_start=context.event_rel_start,
             event_rel_end=context.event_rel_end,
             tsamp_ms=grid.effective_tsamp_ms,
             noise_summary=context.noise_summary,
+            offpulse_bins=context.offpulse_bins,
             settings=self.width_settings,
             event_window_ms=[
                 float(context.time_axis_ms[context.event_rel_start]) if context.time_axis_ms.size else 0.0,
@@ -1633,6 +1643,7 @@ class BurstSession:
                     best_dm_uncertainty=component_optimization.best_dm_uncertainty,
                     best_value=float(component_optimization.best_sn),
                     fit_status=component_optimization.fit_status,
+                    uncertainty_details=dict(component_optimization.uncertainty_details),
                 )
             )
 
@@ -1678,6 +1689,8 @@ class BurstSession:
             npol=self.npol,
             distance_mpc=self.config.distance_mpc,
             redshift=self.config.redshift,
+            sefd_fractional_uncertainty=self.config.sefd_fractional_uncertainty,
+            distance_fractional_uncertainty=self.config.distance_fractional_uncertainty,
             masked_channels=np.flatnonzero(self.channel_mask).astype(int).tolist(),
             offpulse_regions_rel=grid.offpulse_regions_rel,
             noise_settings=self.noise_settings,
@@ -1686,15 +1699,33 @@ class BurstSession:
             time_axis_ms=grid.time_axis_ms,
         )
         if previous_results is not None and previous_results.diagnostics.scattering_fit is not None:
+            fit_uncertainty_details = {
+                key: value
+                for key, value in previous_results.uncertainty_details.items()
+                if key in {"width_ms_model", "tau_sc_ms"}
+            }
+            updated_flags = list(measurements.measurement_flags)
+            if "fit" not in updated_flags:
+                updated_flags.append("fit")
             measurements = replace(
                 measurements,
                 width_ms_model=previous_results.width_ms_model,
                 tau_sc_ms=previous_results.tau_sc_ms,
+                measurement_flags=updated_flags,
                 uncertainties=replace(
                     measurements.uncertainties,
-                    width_ms_model=previous_results.uncertainties.width_ms_model,
-                    tau_sc_ms=previous_results.uncertainties.tau_sc_ms,
+                    width_ms_model=(
+                        compatible_scalar_uncertainty(fit_uncertainty_details.get("width_ms_model"))
+                        if "width_ms_model" in fit_uncertainty_details
+                        else previous_results.uncertainties.width_ms_model
+                    ),
+                    tau_sc_ms=(
+                        compatible_scalar_uncertainty(fit_uncertainty_details.get("tau_sc_ms"))
+                        if "tau_sc_ms" in fit_uncertainty_details
+                        else previous_results.uncertainties.tau_sc_ms
+                    ),
                 ),
+                uncertainty_details={**measurements.uncertainty_details, **fit_uncertainty_details},
                 diagnostics=replace(
                     measurements.diagnostics,
                     scattering_fit=previous_results.diagnostics.scattering_fit,
@@ -1755,6 +1786,16 @@ class BurstSession:
         updated_flags = list(self.results.measurement_flags)
         if fit_result.status == "ok" and "fit" not in updated_flags:
             updated_flags.append("fit")
+        updated_uncertainty_details = dict(self.results.uncertainty_details)
+        updated_uncertainty_details.pop("width_ms_model", None)
+        updated_uncertainty_details.pop("tau_sc_ms", None)
+        updated_uncertainty_details.update(
+            {
+                key: value
+                for key, value in fit_result.diagnostics.uncertainty_details.items()
+                if key in {"width_ms_model", "tau_sc_ms"}
+            }
+        )
 
         self.results = replace(
             self.results,
@@ -1763,9 +1804,10 @@ class BurstSession:
             measurement_flags=updated_flags,
             uncertainties=replace(
                 self.results.uncertainties,
-                width_ms_model=fit_result.width_uncertainty_ms,
-                tau_sc_ms=fit_result.tau_uncertainty_ms,
+                width_ms_model=compatible_scalar_uncertainty(updated_uncertainty_details.get("width_ms_model")),
+                tau_sc_ms=compatible_scalar_uncertainty(updated_uncertainty_details.get("tau_sc_ms")),
             ),
+            uncertainty_details=updated_uncertainty_details,
             diagnostics=replace(
                 self.results.diagnostics,
                 scattering_fit=fit_result.diagnostics,
@@ -1891,6 +1933,8 @@ class BurstSession:
             auto_mask_profile=self.config.auto_mask_profile,
             distance_mpc=self.config.distance_mpc,
             redshift=self.config.redshift,
+            sefd_fractional_uncertainty=self.config.sefd_fractional_uncertainty,
+            distance_fractional_uncertainty=self.config.distance_fractional_uncertainty,
             time_factor=int(self.time_factor),
             freq_factor=int(self.freq_factor),
             crop_bins=[int(self.crop_start), int(self.crop_end)],

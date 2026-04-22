@@ -14,11 +14,12 @@ from typing import Any
 
 import numpy as np
 
-from flits.models import SpectralAnalysisResult
+from flits.models import SpectralAnalysisResult, compatible_scalar_uncertainty
 from flits.analysis.temporal.core import (
     _compute_noise_psd,
     _fit_crossover_frequency,
     _fit_power_law_model,
+    _psd_uncertainty_details,
     quantize_segment_bins,
 )
 
@@ -256,6 +257,7 @@ def run_averaged_spectral_analysis(
     )
     power_law = _fit_power_law_model(freq_hz, power, resolved_segment_count)
     crossover = _fit_crossover_frequency(power_law, freq_hz)
+    uncertainty_details = _psd_uncertainty_details(power_law, crossover)
 
     return SpectralAnalysisResult(
         status="ok",
@@ -274,9 +276,9 @@ def run_averaged_spectral_analysis(
         power_law_a=power_law["power_law_a"],
         power_law_alpha=power_law["power_law_alpha"],
         power_law_c=power_law["power_law_c"],
-        power_law_a_err=power_law["power_law_a_err"],
-        power_law_alpha_err=power_law["power_law_alpha_err"],
-        power_law_c_err=power_law["power_law_c_err"],
+        power_law_a_err=compatible_scalar_uncertainty(uncertainty_details.get("power_law_a")),
+        power_law_alpha_err=compatible_scalar_uncertainty(uncertainty_details.get("power_law_alpha")),
+        power_law_c_err=compatible_scalar_uncertainty(uncertainty_details.get("power_law_c")),
         crossover_frequency_hz=crossover["crossover_frequency_hz"],
         crossover_frequency_status=str(crossover["crossover_frequency_status"]),
         crossover_frequency_hz_3sigma_low=crossover["crossover_frequency_hz_3sigma_low"],
@@ -284,4 +286,5 @@ def run_averaged_spectral_analysis(
         noise_psd_freq_hz=np.asarray(noise_psd["noise_psd_freq_hz"], dtype=float),
         noise_psd_power=np.asarray(noise_psd["noise_psd_power"], dtype=float),
         noise_psd_segment_count=noise_psd["noise_psd_segment_count"],
+        uncertainty_details=uncertainty_details,
     )
