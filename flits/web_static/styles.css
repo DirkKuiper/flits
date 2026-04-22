@@ -584,6 +584,25 @@ button.is-busy::after {
   padding: 12px 14px 14px;
 }
 
+.load-details {
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.load-details .load-details-body {
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.load-details .field-row {
+  margin: 0;
+}
+
+.load-action-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .plot-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -888,6 +907,21 @@ button.is-busy::after {
   gap: 12px;
 }
 
+.prepare-section + .prepare-section {
+  padding-top: 18px;
+  border-top: 1px solid rgba(24, 33, 38, 0.08);
+}
+
+.prepare-headline-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.prepare-headline-grid .measurement-card {
+  min-height: 100%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 244, 252, 0.96));
+  border-color: rgba(114, 53, 162, 0.12);
+}
+
 .measurement-card {
   padding: 16px;
   border-radius: 18px;
@@ -941,6 +975,15 @@ button.is-busy::after {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.prepare-secondary-grid .result-tile {
+  background: rgba(255, 255, 255, 0.52);
+  border-color: rgba(24, 33, 38, 0.06);
+}
+
+.prepare-secondary-grid .result-tile.secondary strong {
+  font-size: 0.98rem;
 }
 
 .export-actions {

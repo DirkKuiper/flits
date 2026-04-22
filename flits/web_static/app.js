@@ -1311,6 +1311,44 @@ function renderSessionFacts(view) {
     .join("")
 }
 
+function referenceToaCardData(results) {
+  const peakToa = results?.toa_peak_topo_mjd ?? results?.toa_topo_mjd
+  const peakDetail = resultUncertaintyDetail(results, "toa_peak_topo_mjd", "MJD")
+    || resultUncertaintyDetail(results, "toa_topo_mjd", "MJD")
+  const infTopoToa = results?.toa_inf_topo_mjd
+  const infTopoDetail = resultUncertaintyDetail(results, "toa_inf_topo_mjd", "MJD")
+  const infBaryToa = results?.toa_inf_bary_mjd_tdb
+  const infBaryDetail = resultUncertaintyDetail(results, "toa_inf_bary_mjd_tdb", "MJD")
+
+  if (infBaryToa !== null && infBaryToa !== undefined) {
+    return {
+      value: fmt(infBaryToa, 8),
+      method: "Infinite-freq barycentric (TDB)",
+      uncertainty: formatDetailUncertainty(infBaryDetail, { formatter: formatToaUncertainty }),
+      detail: infBaryDetail,
+      tooltip: measurementTooltip("toaBary"),
+    }
+  }
+
+  if (infTopoToa !== null && infTopoToa !== undefined) {
+    return {
+      value: fmt(infTopoToa, 8),
+      method: "Infinite-freq topocentric",
+      uncertainty: formatDetailUncertainty(infTopoDetail, { formatter: formatToaUncertainty }),
+      detail: infTopoDetail,
+      tooltip: measurementTooltip("toaInf"),
+    }
+  }
+
+  return {
+    value: peakToa === null || peakToa === undefined ? "n/a" : fmt(peakToa, 8),
+    method: "Peak-bin topocentric",
+    uncertainty: formatDetailUncertainty(peakDetail, { formatter: formatToaUncertainty }),
+    detail: peakDetail,
+    tooltip: measurementTooltip("toa"),
+  }
+}
+
 function renderPrepare(view) {
   const results = view.results
   const widthAnalysis = view.width_analysis
@@ -1327,14 +1365,14 @@ function renderPrepare(view) {
   const acceptedWidth = results?.accepted_width || widthAnalysis?.accepted_width || null
   const hasAcceptedWidth = acceptedWidth?.value !== null && acceptedWidth?.value !== undefined
   const hasAcfFallback = !hasAcceptedWidth && results?.width_ms_acf !== null && results?.width_ms_acf !== undefined
-  const acceptedWidthTitle = hasAcceptedWidth ? "Accepted Width" : "Temporal Correlation Width (ACF)"
   const acceptedMethod = hasAcceptedWidth
     ? formatWidthMethod(acceptedWidth.method)
-    : (hasAcfFallback ? "ACF half max" : "n/a")
+    : (hasAcfFallback ? "ACF half max fallback" : "n/a")
   const acceptedWidthValue = hasAcceptedWidth
     ? `${fmt(acceptedWidth.value, 3)} ${acceptedWidth.units || "ms"}`
     : (hasAcfFallback ? `${fmt(results.width_ms_acf, 3)} ms` : "n/a")
   const acceptedWidthDetail = findAcceptedWidthDetail(acceptedWidth, widthAnalysis, results, hasAcfFallback)
+  const referenceToa = referenceToaCardData(results)
   const toaDetail = resultUncertaintyDetail(results, "toa_peak_topo_mjd", "MJD")
     || resultUncertaintyDetail(results, "toa_topo_mjd", "MJD")
   const toaInfDetail = resultUncertaintyDetail(results, "toa_inf_topo_mjd", "MJD")
@@ -1353,43 +1391,16 @@ function renderPrepare(view) {
       || (results?.uncertainties?.width_ms_acf === null || results?.uncertainties?.width_ms_acf === undefined ? null : `±${fmt(results.uncertainties.width_ms_acf, 3)} ms`)
     )
 
-  const cards = [
-    renderMeasurementCard("Peak-bin TOA (Topo MJD)", results?.toa_peak_topo_mjd === null || results?.toa_peak_topo_mjd === undefined ? (results?.toa_topo_mjd === null || results?.toa_topo_mjd === undefined ? "n/a" : fmt(results.toa_topo_mjd, 8)) : fmt(results.toa_peak_topo_mjd, 8), {
-      uncertainty: formatDetailUncertainty(toaDetail, { formatter: formatToaUncertainty })
-        || (results?.uncertainties?.toa_peak_topo_mjd ? formatToaUncertainty(results.uncertainties.toa_peak_topo_mjd) : null),
-      method: "peak bin",
-      flags: results?.measurement_flags || [],
-      tooltip: measurementTooltip("toa"),
-      detail: toaDetail,
+  const headlineCards = [
+    renderMeasurementCard("Reference TOA", referenceToa.value, {
+      uncertainty: referenceToa.uncertainty,
+      method: referenceToa.method,
+      tooltip: referenceToa.tooltip,
+      detail: referenceToa.detail,
     }),
-    renderMeasurementCard("Infinite-freq TOA (Topo MJD)", results?.toa_inf_topo_mjd === null || results?.toa_inf_topo_mjd === undefined ? "n/a" : fmt(results.toa_inf_topo_mjd, 8), {
-      uncertainty: formatDetailUncertainty(toaInfDetail, { formatter: formatToaUncertainty }),
-      method: "DM reference correction",
-      flags: results?.measurement_flags || [],
-      tooltip: measurementTooltip("toaInf"),
-      detail: toaInfDetail,
-    }),
-    renderMeasurementCard("Infinite-freq TOA (Bary TDB)", results?.toa_inf_bary_mjd_tdb === null || results?.toa_inf_bary_mjd_tdb === undefined ? "n/a" : fmt(results.toa_inf_bary_mjd_tdb, 8), {
-      uncertainty: formatDetailUncertainty(toaBaryDetail, { formatter: formatToaUncertainty }),
-      method: results?.toa_status || "timing metadata",
-      flags: results?.measurement_flags || [],
-      tooltip: measurementTooltip("toaBary"),
-      detail: toaBaryDetail,
-    }),
-    renderMeasurementCard("Peak Bin S/N", results?.snr_peak === null || results?.snr_peak === undefined ? "n/a" : fmt(results.snr_peak, 3), {
-      method: "event peak",
-      flags: results?.measurement_flags || [],
-      tooltip: measurementTooltip("peakSn"),
-    }),
-    renderMeasurementCard("Integrated Event S/N", results?.snr_integrated === null || results?.snr_integrated === undefined ? "n/a" : fmt(results.snr_integrated, 3), {
-      method: "selected event window",
-      flags: results?.measurement_flags || [],
-      tooltip: measurementTooltip("integratedSn"),
-    }),
-    renderMeasurementCard(acceptedWidthTitle, acceptedWidthValue, {
+    renderMeasurementCard("Accepted Width", acceptedWidthValue, {
       uncertainty: acceptedWidthUncertainty,
       method: acceptedMethod,
-      flags: acceptedWidthFlags(widthAnalysis, acceptedWidth),
       tooltip: acceptedWidthTooltip(acceptedWidth, hasAcfFallback),
       detail: acceptedWidthDetail,
     }),
@@ -1397,7 +1408,6 @@ function renderPrepare(view) {
       uncertainty: formatDetailUncertainty(fluenceDetail, { digits: 3, units: "Jy ms" })
         || (results?.uncertainties?.fluence_jyms ? `±${fmt(results.uncertainties.fluence_jyms, 3)} Jy ms` : null),
       method: results?.provenance?.calibration_method || "n/a",
-      flags: results?.measurement_flags || [],
       tooltip: measurementTooltip("fluence"),
       detail: fluenceDetail,
     }),
@@ -1405,37 +1415,78 @@ function renderPrepare(view) {
       uncertainty: formatDetailUncertainty(peakFluxDetail, { digits: 3, units: "Jy" })
         || (results?.uncertainties?.peak_flux_jy ? `±${fmt(results.uncertainties.peak_flux_jy, 3)} Jy` : null),
       method: results?.provenance?.calibration_method || "n/a",
-      flags: results?.measurement_flags || [],
       tooltip: measurementTooltip("peakFlux"),
       detail: peakFluxDetail,
     }),
   ]
 
-  const secondaryTiles = [
-    resultTile("Spectral Correlation Width (ACF)", results?.spectral_width_mhz_acf === null || results?.spectral_width_mhz_acf === undefined ? "n/a" : `${fmt(results.spectral_width_mhz_acf, 3)} MHz`, "secondary", {
-      tooltip: acfTooltip("spectralWidth"),
-      detail: spectralWidthDetail,
+  const timingTiles = [
+    resultTile("Peak-bin TOA (Topo MJD)", results?.toa_peak_topo_mjd === null || results?.toa_peak_topo_mjd === undefined ? (results?.toa_topo_mjd === null || results?.toa_topo_mjd === undefined ? "n/a" : fmt(results.toa_topo_mjd, 8)) : fmt(results.toa_peak_topo_mjd, 8), "secondary", {
+      tooltip: measurementTooltip("toa"),
+      detail: toaDetail,
     }),
-    resultTile("Spectral Window", results?.spectral_extent_mhz === null || results?.spectral_extent_mhz === undefined ? "n/a" : `${fmt(results.spectral_extent_mhz, 2)} MHz`, "secondary"),
-    resultTile("Event Duration", results?.event_duration_ms === null || results?.event_duration_ms === undefined ? "n/a" : `${fmt(results.event_duration_ms, 3)} ms`, "secondary", "Length of the selected event window. This is useful selection metadata, but not a measured burst-duration estimate."),
-    resultTile("Isotropic Energy", formatIsoEnergy(results?.iso_e, results?.provenance?.energy_unit), "secondary", {
-      detail: energyDetail,
+    resultTile("Infinite-freq TOA (Topo MJD)", results?.toa_inf_topo_mjd === null || results?.toa_inf_topo_mjd === undefined ? "n/a" : fmt(results.toa_inf_topo_mjd, 8), "secondary", {
+      tooltip: measurementTooltip("toaInf"),
+      detail: toaInfDetail,
+    }),
+    resultTile("Infinite-freq TOA (Bary TDB)", results?.toa_inf_bary_mjd_tdb === null || results?.toa_inf_bary_mjd_tdb === undefined ? "n/a" : fmt(results.toa_inf_bary_mjd_tdb, 8), "secondary", {
+      tooltip: measurementTooltip("toaBary"),
+      detail: toaBaryDetail,
     }),
     resultTile("TOA Status", results?.toa_status || "n/a", "secondary", results?.toa_status_reason || ""),
     resultTile("Dispersion Correction", results?.dispersion_to_infinite_frequency_ms === null || results?.dispersion_to_infinite_frequency_ms === undefined ? "n/a" : `${fmt(results.dispersion_to_infinite_frequency_ms, 6)} ms`, "secondary"),
     resultTile("Barycentric Correction", results?.barycentric_correction_ms === null || results?.barycentric_correction_ms === undefined ? "n/a" : `${fmt(results.barycentric_correction_ms, 6)} ms`, "secondary"),
+  ]
+
+  const signalSelectionTiles = [
+    resultTile("Peak Bin S/N", results?.snr_peak === null || results?.snr_peak === undefined ? "n/a" : fmt(results.snr_peak, 3), "secondary", measurementTooltip("peakSn")),
+    resultTile("Integrated Event S/N", results?.snr_integrated === null || results?.snr_integrated === undefined ? "n/a" : fmt(results.snr_integrated, 3), "secondary", measurementTooltip("integratedSn")),
+    resultTile("Event Duration", results?.event_duration_ms === null || results?.event_duration_ms === undefined ? "n/a" : `${fmt(results.event_duration_ms, 3)} ms`, "secondary", "Length of the selected event window. This is useful selection metadata, but not a measured burst-duration estimate."),
+    resultTile("Spectral Window", results?.spectral_extent_mhz === null || results?.spectral_extent_mhz === undefined ? "n/a" : `${fmt(results.spectral_extent_mhz, 2)} MHz`, "secondary"),
+    resultTile("Spectral Correlation Width (ACF)", results?.spectral_width_mhz_acf === null || results?.spectral_width_mhz_acf === undefined ? "n/a" : `${fmt(results.spectral_width_mhz_acf, 3)} MHz`, "secondary", {
+      tooltip: acfTooltip("spectralWidth"),
+      detail: spectralWidthDetail,
+    }),
     resultTile("Mask Count", results ? String(results.mask_count) : String(view.state.masked_channels.length), "secondary"),
     resultTile("Peak Positions", results?.peak_positions_ms?.length ? results.peak_positions_ms.map((value) => `${fmt(value, 2)} ms`).join(", ") : "n/a", "secondary"),
   ]
 
+  const isoEnergy = formatIsoEnergy(results?.iso_e, results?.provenance?.energy_unit)
+  if (isoEnergy !== "n/a") {
+    signalSelectionTiles.push(resultTile("Isotropic Energy", isoEnergy, "secondary", {
+      detail: energyDetail,
+    }))
+  }
+
   resultsContent.innerHTML = `
     ${renderPrepareChecklist(view, results)}
-    <div class="measurement-grid">
-      ${cards.join("")}
-    </div>
-    <div class="results-secondary">
-      ${secondaryTiles.join("")}
-    </div>
+    <section class="results-section prepare-section">
+      <div class="analysis-panel-head compact">
+        <h5>Headline Measurements</h5>
+        <p>Keep the default view focused on one reference TOA plus the most decision-critical burst measurements.</p>
+      </div>
+      <div class="measurement-grid prepare-headline-grid">
+        ${headlineCards.join("")}
+      </div>
+    </section>
+    <section class="results-section prepare-section">
+      <div class="analysis-panel-head compact">
+        <h5>Timing Details</h5>
+        <p>Inspect the full TOA ladder and applied corrections without promoting every timing value to headline status.</p>
+      </div>
+      <div class="results-secondary prepare-secondary-grid">
+        ${timingTiles.join("")}
+      </div>
+    </section>
+    <section class="results-section prepare-section">
+      <div class="analysis-panel-head compact">
+        <h5>Signal and Selection</h5>
+        <p>Review the signal metrics and selection context that explain the current derived measurements.</p>
+      </div>
+      <div class="results-secondary prepare-secondary-grid">
+        ${signalSelectionTiles.join("")}
+      </div>
+    </section>
     ${renderPrepareDiagnostics(results, widthAnalysis)}
   `
 }
@@ -3135,11 +3186,6 @@ function bindWidthActionButtons() {
   })
 }
 
-function acceptedWidthFlags(widthAnalysis, acceptedWidth) {
-  const flags = widthAnalysis?.results?.find((result) => result.method === acceptedWidth?.method)?.quality_flags
-  return Array.isArray(flags) ? flags : []
-}
-
 function formatWidthMethod(method) {
   const labels = {
     boxcar_equivalent: "Boxcar equivalent",
@@ -4313,7 +4359,7 @@ function busyButtonText(action) {
   if (action === "run_spectral_analysis") return "Running..."
   if (action === "export_results") return "Building..."
   if (action === "set_notes") return "Saving..."
-  if (action === "set_timing_metadata") return "Updating..."
+  if (action === "set_timing_metadata") return "Applying..."
   if (action === "set_dm") return "Applying DM..."
   if (action === "reset_view") return "Resetting..."
   return actionBusyText(action)
@@ -4346,7 +4392,7 @@ function actionBusyText(action) {
     run_spectral_analysis: "Running power spectrum",
     export_results: "Building export bundle",
     set_notes: "Saving notes",
-    set_timing_metadata: "Updating timing metadata",
+    set_timing_metadata: "Applying timing metadata",
     set_dm: "Applying DM",
     compute_properties: "Computing",
   }
@@ -4368,7 +4414,7 @@ function actionSuccessText(action) {
     run_spectral_analysis: "Power spectrum updated",
     export_results: "Export bundle built",
     set_notes: "Notes saved",
-    set_timing_metadata: "Timing metadata updated",
+    set_timing_metadata: "Timing metadata applied",
     set_dm: "Dispersion measure updated",
     compute_properties: "Derived properties updated",
   }
