@@ -4,6 +4,13 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [0.3.0](https://github.com/DirkKuiper/flits/compare/flits-v0.2.1...flits-v0.3.0) (2026-04-23)
+
+
+### Features
+
+* add paper-grade arrival timing and workspace UI ([c108289](https://github.com/DirkKuiper/flits/commit/c108289005f24c51ce1b978bd31d675dea417569))
+
 ## [0.2.1](https://github.com/DirkKuiper/flits/compare/flits-v0.2.0...flits-v0.2.1) (2026-04-22)
 
 
