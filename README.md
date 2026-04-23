@@ -51,6 +51,7 @@ pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3
 
 - Full docs: [dirkkuiper.github.io/flits](https://dirkkuiper.github.io/flits/)
 - Getting started: [Quickstart](https://dirkkuiper.github.io/flits/getting-started/)
+- Guided example: [GBT Burst Workflow](https://dirkkuiper.github.io/flits/guided-workflow/)
 - Installation and deployment: [Installation](https://dirkkuiper.github.io/flits/installation/)
 - Developer testing: [Testing](https://dirkkuiper.github.io/flits/developer/testing/)
 - Developer publishing: [Publishing](https://dirkkuiper.github.io/flits/developer/publishing/)

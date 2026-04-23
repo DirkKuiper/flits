@@ -57,3 +57,6 @@ The typical order is:
 
 For the interface walkthrough, continue to
 [Session Workflow](user-guide/session-workflow.md).
+
+For a concrete end-to-end example with a GBT burst, continue to the
+[Guided Workflow](guided-workflow.md).

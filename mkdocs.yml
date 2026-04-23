@@ -40,6 +40,7 @@ nav:
   - Home: index.md
   - Getting Started:
       - Quickstart: getting-started.md
+      - Guided Workflow: guided-workflow.md
       - Installation and Deployment: installation.md
   - User Guide:
       - Session Workflow: user-guide/session-workflow.md
