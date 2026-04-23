@@ -42,6 +42,12 @@ class CreateSessionRequest(BaseModel):
     distance_mpc: float | None = None
     distance_fractional_uncertainty: float | None = None
     redshift: float | None = None
+    source_ra_deg: float | None = None
+    source_dec_deg: float | None = None
+    time_scale: str | None = None
+    observatory_longitude_deg: float | None = None
+    observatory_latitude_deg: float | None = None
+    observatory_height_m: float | None = None
 
 
 class DetectFilterbankRequest(BaseModel):
@@ -212,6 +218,13 @@ def detect_filterbank(request: DetectFilterbankRequest) -> dict[str, Any]:
         "telescope_name": inspection.telescope_name,
         "schema_version": inspection.schema_version,
         "coherent_dm": inspection.coherent_dm,
+        "source_ra_deg": inspection.source_ra_deg,
+        "source_dec_deg": inspection.source_dec_deg,
+        "source_position_basis": inspection.source_position_basis,
+        "time_scale": inspection.time_scale,
+        "time_reference_frame": inspection.time_reference_frame,
+        "barycentric_header_flag": inspection.barycentric_header_flag,
+        "pulsarcentric_header_flag": inspection.pulsarcentric_header_flag,
         "suggested_dm": suggested_dm,
         "dm_guidance": dm_guidance,
         "detected_preset_key": inspection.detected_preset_key,
@@ -236,6 +249,12 @@ def create_session(request: CreateSessionRequest) -> dict[str, Any]:
         sefd_fractional_uncertainty=request.sefd_fractional_uncertainty,
         distance_fractional_uncertainty=request.distance_fractional_uncertainty,
         redshift=request.redshift,
+        source_ra_deg=request.source_ra_deg,
+        source_dec_deg=request.source_dec_deg,
+        time_scale=request.time_scale,
+        observatory_longitude_deg=request.observatory_longitude_deg,
+        observatory_latitude_deg=request.observatory_latitude_deg,
+        observatory_height_m=request.observatory_height_m,
     )
     session_id = uuid4().hex
     SESSIONS[session_id] = session
@@ -374,6 +393,24 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
             )
         elif action == "set_notes":
             session.set_notes(payload.get("notes"))
+        elif action == "set_timing_metadata":
+            session.set_timing_metadata(
+                source_ra_deg=payload.get("source_ra_deg", session.config.source_ra_deg),
+                source_dec_deg=payload.get("source_dec_deg", session.config.source_dec_deg),
+                time_scale=payload.get("time_scale", session.config.time_scale),
+                observatory_longitude_deg=payload.get(
+                    "observatory_longitude_deg",
+                    session.config.observatory_longitude_deg,
+                ),
+                observatory_latitude_deg=payload.get(
+                    "observatory_latitude_deg",
+                    session.config.observatory_latitude_deg,
+                ),
+                observatory_height_m=payload.get(
+                    "observatory_height_m",
+                    session.config.observatory_height_m,
+                ),
+            )
         elif action == "preview_export_results":
             preview = session.preview_export_results(
                 include=payload.get("include"),

@@ -54,6 +54,10 @@ UI surfaces which signal was used via the "Detected: …" label and basis.
   automatically patches these in from the FITS primary header via
   `astropy.io.fits`. If a required field is genuinely absent, a
   `MetadataMissingError` names the missing fields so you can fix the file.
+- FLITS promotes common source-position and timing-frame metadata when present:
+  SIGPROC/`your` RA and Dec fields, PSRFITS `RAJ`/`DECJ` fallbacks, and
+  barycentric/pulsarcentric header flags. Existing barycentric or pulsarcentric
+  inputs are not barycenter-corrected a second time.
 
 ## CHIME/FRB HDF5 schema (`flits_chime_v1`)
 
@@ -71,6 +75,8 @@ FLITS-written test fixtures and new HDF5 writers should target this layout:
 | `nchan`          | `int`    | no       | Declared channel count (cross-checked).   |
 | `npol`           | `int`    | no       | Polarization count (defaults to 1).       |
 | `source_name`    | `str`    | no       | Source or FRB name.                       |
+| `source_ra_deg`  | `float`  | no       | ICRS right ascension, for barycentric TOA.|
+| `source_dec_deg` | `float`  | no       | ICRS declination, for barycentric TOA.    |
 | `telescope_id`   | `int`    | no       | SIGPROC-style telescope ID.               |
 | `telescope_name` | `str`    | no       | Free-form telescope name.                 |
 | `sefd_jy`        | `float`  | no       | System-equivalent flux density, for calibration. |
@@ -98,6 +104,9 @@ register a custom reader via an entry point (see
   `calibrated_wfall` / `wfall` are supported directly.
 - These waterfalls are treated as already dedispersed for FLITS loading.
   In the UI, the detection step suggests `DM = 0`.
+- Their dedispersion reference frequency is marked unknown unless an explicit
+  future metadata field says otherwise, so FLITS does not silently invent an
+  infinite-frequency TOA for public catalog files.
 
 ## CHIME beamformed `BBData`
 
@@ -119,6 +128,8 @@ The reader:
 - applies the fixed per-channel time alignment encoded in `time0`,
 - uses `tiedbeam_power.attrs["DM_coherent"]` as the coherent-dedispersion
   reference,
+- promotes `tiedbeam_locations` RA/Dec when the file describes a single
+  tied-beam position,
 - then applies **residual** incoherent dedispersion relative to the DM you ask
   FLITS to use.
 

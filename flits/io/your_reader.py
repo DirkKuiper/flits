@@ -114,6 +114,120 @@ def _safe_int(value: object) -> int | None:
         return None
 
 
+def _safe_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if np.isfinite(result) else None
+
+
+def _safe_bool_flag(value: object) -> bool | None:
+    if value is None:
+        return None
+    try:
+        return bool(int(value))
+    except (TypeError, ValueError):
+        text = str(value).strip().lower()
+        if text in {"true", "t", "yes", "y"}:
+            return True
+        if text in {"false", "f", "no", "n"}:
+            return False
+        return None
+
+
+def _first_present(*values: object) -> object | None:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _packed_sexagesimal_to_deg(value: object, *, is_ra: bool) -> float | None:
+    numeric = _safe_float(value)
+    if numeric is None:
+        return None
+    sign = -1.0 if numeric < 0 else 1.0
+    current = abs(numeric)
+    first = int(current // 10000)
+    minutes = int((current - first * 10000) // 100)
+    seconds = current - first * 10000 - minutes * 100
+    if minutes >= 60 or seconds >= 60:
+        return None
+    degrees = first + minutes / 60.0 + seconds / 3600.0
+    if is_ra:
+        return float(degrees * 15.0)
+    return float(sign * degrees)
+
+
+def _coerce_coordinate_deg(value: object, *, is_ra: bool) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            from astropy import units as u
+            from astropy.coordinates import Angle
+
+            unit = u.hourangle if is_ra else u.deg
+            return float(Angle(text, unit=unit).deg)
+        except Exception:
+            return _safe_float(text)
+    numeric = _safe_float(value)
+    if numeric is None:
+        return None
+    if abs(numeric) > 360.0:
+        return _packed_sexagesimal_to_deg(numeric, is_ra=is_ra)
+    return numeric
+
+
+def _reader_timing_metadata(reader: object) -> dict[str, object]:
+    header = getattr(reader, "your_header", None)
+    metadata: dict[str, object] = {}
+    for obj in (reader, header):
+        if obj is None:
+            continue
+        if "source_ra_deg" not in metadata:
+            ra = _coerce_coordinate_deg(
+                _first_present(
+                    getattr(obj, "ra_deg", None),
+                    getattr(obj, "src_raj", None),
+                    getattr(obj, "RAJ", None),
+                ),
+                is_ra=True,
+            )
+            if ra is not None:
+                metadata["source_ra_deg"] = ra
+        if "source_dec_deg" not in metadata:
+            dec = _coerce_coordinate_deg(
+                _first_present(
+                    getattr(obj, "dec_deg", None),
+                    getattr(obj, "src_dej", None),
+                    getattr(obj, "DECJ", None),
+                ),
+                is_ra=False,
+            )
+            if dec is not None:
+                metadata["source_dec_deg"] = dec
+        if "barycentric_header_flag" not in metadata:
+            bary = _safe_bool_flag(getattr(obj, "barycentric", None))
+            if bary is not None:
+                metadata["barycentric_header_flag"] = bary
+        if "pulsarcentric_header_flag" not in metadata:
+            pulsar = _safe_bool_flag(getattr(obj, "pulsarcentric", None))
+            if pulsar is not None:
+                metadata["pulsarcentric_header_flag"] = pulsar
+    if "source_ra_deg" in metadata and "source_dec_deg" in metadata:
+        metadata["source_position_basis"] = "reader_header"
+    return metadata
+
+
 def _peek_bytes(path: Path, n: int) -> bytes:
     try:
         with open(path, "rb") as handle:
@@ -208,6 +322,26 @@ def _psrfits_primary_fallback(path: Path) -> dict[str, object]:
             source = primary.get("SRC_NAME")
             if source:
                 out["source_name"] = str(source).strip()
+            ra = None
+            for candidate in (primary.get("RAJ"), primary.get("RA"), primary.get("OBJCTRA")):
+                ra = _coerce_coordinate_deg(candidate, is_ra=True)
+                if ra is not None:
+                    break
+            dec = None
+            for candidate in (primary.get("DECJ"), primary.get("DEC"), primary.get("OBJCTDEC")):
+                dec = _coerce_coordinate_deg(candidate, is_ra=False)
+                if dec is not None:
+                    break
+            if ra is not None and dec is not None:
+                out["source_ra_deg"] = float(ra)
+                out["source_dec_deg"] = float(dec)
+                out["source_position_basis"] = "psrfits_primary_header"
+            bary = _safe_bool_flag(_first_present(primary.get("BARYCENT"), primary.get("BARYCORR")))
+            if bary is not None:
+                out["barycentric_header_flag"] = bary
+            pulsar = _safe_bool_flag(_first_present(primary.get("PULSAREN"), primary.get("PULSARC")))
+            if pulsar is not None:
+                out["pulsarcentric_header_flag"] = pulsar
     except Exception:
         return out
     return out
@@ -308,11 +442,21 @@ class YourFilterbankReader:
                 or getattr(getattr(reader, "your_header", None), "telescope", None)
             )
             freq_lo, freq_hi = _peek_header_freq_range(getattr(reader, "your_header", None))
+            timing_metadata = _reader_timing_metadata(reader)
 
         if is_fits and source_name is None:
             source_name = fits_fallback.get("source_name")  # type: ignore[assignment]
         if telescope_name is None:
             telescope_name = fits_fallback.get("telescope_name")  # type: ignore[assignment]
+        for key in (
+            "source_ra_deg",
+            "source_dec_deg",
+            "source_position_basis",
+            "barycentric_header_flag",
+            "pulsarcentric_header_flag",
+        ):
+            if key not in timing_metadata and key in fits_fallback:
+                timing_metadata[key] = fits_fallback[key]
 
         schema_version = "psrfits_search" if is_fits else "sigproc_search"
 
@@ -335,6 +479,13 @@ class YourFilterbankReader:
             schema_version=schema_version,
             freq_lo_mhz=freq_lo,
             freq_hi_mhz=freq_hi,
+            source_ra_deg=_safe_float(timing_metadata.get("source_ra_deg")),
+            source_dec_deg=_safe_float(timing_metadata.get("source_dec_deg")),
+            source_position_basis=timing_metadata.get("source_position_basis"),  # type: ignore[arg-type]
+            time_scale="utc",
+            time_reference_frame="topocentric",
+            barycentric_header_flag=_safe_bool_flag(timing_metadata.get("barycentric_header_flag")),
+            pulsarcentric_header_flag=_safe_bool_flag(timing_metadata.get("pulsarcentric_header_flag")),
         )
 
     def load(
@@ -360,6 +511,16 @@ class YourFilterbankReader:
         filterbank_inspection = inspection
         with _open_your(source_path) as reader:
             header = reader.your_header
+            timing_metadata = _reader_timing_metadata(reader)
+            for key in (
+                "source_ra_deg",
+                "source_dec_deg",
+                "source_position_basis",
+                "barycentric_header_flag",
+                "pulsarcentric_header_flag",
+            ):
+                if key not in timing_metadata and key in fits_fallback:
+                    timing_metadata[key] = fits_fallback[key]
             if filterbank_inspection is None:
                 telescope_id = _safe_int(getattr(reader, "telescope_id", None))
                 machine_id = _safe_int(getattr(reader, "machine_id", None))
@@ -393,6 +554,13 @@ class YourFilterbankReader:
                     schema_version=schema_version,
                     freq_lo_mhz=freq_lo_hint,
                     freq_hi_mhz=freq_hi_hint,
+                    source_ra_deg=_safe_float(timing_metadata.get("source_ra_deg")),
+                    source_dec_deg=_safe_float(timing_metadata.get("source_dec_deg")),
+                    source_position_basis=timing_metadata.get("source_position_basis"),  # type: ignore[arg-type]
+                    time_scale="utc",
+                    time_reference_frame="topocentric",
+                    barycentric_header_flag=_safe_bool_flag(timing_metadata.get("barycentric_header_flag")),
+                    pulsarcentric_header_flag=_safe_bool_flag(timing_metadata.get("pulsarcentric_header_flag")),
                 )
 
             tsamp = float(_coerce_header_field(
@@ -465,6 +633,38 @@ class YourFilterbankReader:
             machine_id=filterbank_inspection.machine_id,
             detected_preset_key=filterbank_inspection.detected_preset_key,
             detection_basis=filterbank_inspection.detection_basis,
+            source_ra_deg=(
+                filterbank_inspection.source_ra_deg
+                if filterbank_inspection.source_ra_deg is not None
+                else _safe_float(timing_metadata.get("source_ra_deg"))
+            ),
+            source_dec_deg=(
+                filterbank_inspection.source_dec_deg
+                if filterbank_inspection.source_dec_deg is not None
+                else _safe_float(timing_metadata.get("source_dec_deg"))
+            ),
+            source_position_basis=(
+                filterbank_inspection.source_position_basis
+                or timing_metadata.get("source_position_basis")  # type: ignore[arg-type]
+            ),
+            time_scale=filterbank_inspection.time_scale or "utc",
+            time_reference_frame=filterbank_inspection.time_reference_frame or "topocentric",
+            barycentric_header_flag=(
+                filterbank_inspection.barycentric_header_flag
+                if filterbank_inspection.barycentric_header_flag is not None
+                else _safe_bool_flag(timing_metadata.get("barycentric_header_flag"))
+            ),
+            pulsarcentric_header_flag=(
+                filterbank_inspection.pulsarcentric_header_flag
+                if filterbank_inspection.pulsarcentric_header_flag is not None
+                else _safe_bool_flag(timing_metadata.get("pulsarcentric_header_flag"))
+            ),
+            dedispersion_reference_frequency_mhz=(
+                float(np.max(freqs_mhz)) if abs(float(config.dm)) > 0.0 else None
+            ),
+            dedispersion_reference_basis=(
+                "flits_integer_bin_dedispersion_max_frequency" if abs(float(config.dm)) > 0.0 else None
+            ),
         )
         return stokes_i, validate_metadata(metadata)
 

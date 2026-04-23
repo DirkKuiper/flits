@@ -142,6 +142,28 @@ class WebApiTest(unittest.TestCase):
 
     @patch("flits.web.app.inspect_filterbank")
     @patch("flits.web.app.resolve_burst_path")
+    def test_detect_endpoint_reports_chime_catalog_dm_guidance(self, mock_resolve_path: object, mock_inspect: object) -> None:
+        burst_path = Path("/tmp/catalog.h5")
+        mock_resolve_path.return_value = burst_path
+        mock_inspect.return_value = FilterbankInspection(
+            source_path=burst_path,
+            source_name="FRB20180729A",
+            telescope_id=None,
+            machine_id=None,
+            detected_preset_key="chime",
+            detection_basis="matched format signature 'chime_frb_catalog_v1'",
+            telescope_name="CHIME/FRB",
+            schema_version="chime_frb_catalog_v1",
+        )
+
+        payload = detect_filterbank(DetectFilterbankRequest(bfile=str(burst_path)))
+
+        self.assertIsNone(payload["coherent_dm"])
+        self.assertEqual(payload["suggested_dm"], 0.0)
+        self.assertIn("already dedispersed", payload["dm_guidance"])
+
+    @patch("flits.web.app.inspect_filterbank")
+    @patch("flits.web.app.resolve_burst_path")
     def test_detect_endpoint_reports_bbdata_dm_guidance(self, mock_resolve_path: object, mock_inspect: object) -> None:
         burst_path = Path("/tmp/beamformed.h5")
         mock_resolve_path.return_value = burst_path
@@ -325,9 +347,34 @@ class WebApiTest(unittest.TestCase):
         self.assertIn('id="importSessionInput"', index_html)
         self.assertIn('id="notesInput"', index_html)
         self.assertIn('id="dmMetricInput"', index_html)
+        self.assertIn('id="sourceRaInput"', index_html)
+        self.assertIn('id="sourceDecInput"', index_html)
+        self.assertIn('id="timeScaleInput"', index_html)
+        self.assertIn('id="observatoryLongitudeInput"', index_html)
+        self.assertIn('id="observatoryLatitudeInput"', index_html)
+        self.assertIn('id="observatoryHeightInput"', index_html)
+        self.assertIn('id="acquisitionOverridesDetails"', index_html)
+        self.assertIn('id="sourceContextDetails"', index_html)
+        self.assertIn('id="timingMetadataDetails"', index_html)
+        self.assertIn('id="updateTimingButton"', index_html)
+        self.assertIn('id="dmInput" type="number" step="0.001" placeholder="enter DM or 0 if already dedispersed"', index_html)
+        self.assertNotIn('value="527.851"', index_html)
+        self.assertIn("Acquisition Overrides", index_html)
+        self.assertIn("Source Context", index_html)
+        self.assertIn("Timing Metadata", index_html)
+        self.assertIn("Apply Timing Metadata", index_html)
+        self.assertIn("Some formats provide an automatic suggestion.", index_html)
         self.assertIn("Component Region", index_html)
         self.assertNotIn("Why this value?", app_js)
         self.assertIn("function measurementTooltip", app_js)
+        self.assertIn("function requireDmValue(actionLabel, options = {})", app_js)
+        self.assertIn("FLITS did not detect a DM from the file metadata.", app_js)
+        self.assertIn('setDmInputValue("")', app_js)
+        self.assertIn("Reference TOA", app_js)
+        self.assertIn("Peak-bin TOA (Topo MJD)", app_js)
+        self.assertIn("Infinite-freq TOA (Bary TDB)", app_js)
+        self.assertIn("toa_inf_bary_mjd_tdb", app_js)
+        self.assertIn("set_timing_metadata", app_js)
         self.assertIn("Peak event-window S/N times the radiometer flux scale", app_js)
         self.assertIn("Selection and Provenance", app_js)
         self.assertIn("Clear Components", index_html)
@@ -443,6 +490,12 @@ class WebApiTest(unittest.TestCase):
                 distance_mpc=123.0,
                 distance_fractional_uncertainty=0.2,
                 redshift=0.12,
+                source_ra_deg=None,
+                source_dec_deg=None,
+                time_scale=None,
+                observatory_longitude_deg=None,
+                observatory_latitude_deg=None,
+                observatory_height_m=None,
             )
         finally:
             SESSIONS.pop(payload["session_id"], None)
@@ -480,6 +533,12 @@ class WebApiTest(unittest.TestCase):
                 distance_mpc=None,
                 distance_fractional_uncertainty=None,
                 redshift=None,
+                source_ra_deg=None,
+                source_dec_deg=None,
+                time_scale=None,
+                observatory_longitude_deg=None,
+                observatory_latitude_deg=None,
+                observatory_height_m=None,
             )
         finally:
             SESSIONS.pop(payload["session_id"], None)
@@ -600,14 +659,47 @@ class WebApiTest(unittest.TestCase):
         results = payload["view"]["results"]
         self.assertIsNotNone(results)
         details = results["uncertainty_details"]
+        self.assertIn("toa_peak_topo_mjd", details)
         self.assertIn("toa_topo_mjd", details)
         self.assertIn("width_ms_acf", details)
         self.assertIn("fluence_jyms", details)
+        self.assertIsNone(results["uncertainties"]["toa_peak_topo_mjd"])
         self.assertIsNone(results["uncertainties"]["toa_topo_mjd"])
         self.assertIsNone(results["uncertainties"]["width_ms_acf"])
+        self.assertEqual(details["toa_peak_topo_mjd"]["classification"], "resolution_limit")
         self.assertEqual(details["toa_topo_mjd"]["classification"], "resolution_limit")
         self.assertEqual(details["width_ms_acf"]["classification"], "resolution_limit")
         self.assertEqual(details["fluence_jyms"]["classification"], "statistical_only")
+
+    def test_session_action_updates_timing_metadata(self) -> None:
+        session_id = "synthetic-timing-metadata"
+        session = _synthetic_session()
+        SESSIONS[session_id] = session
+        try:
+            payload = session_action(
+                session_id,
+                ActionRequest(
+                    type="set_timing_metadata",
+                    payload={
+                        "source_ra_deg": 123.4,
+                        "source_dec_deg": -45.6,
+                        "time_scale": "tt",
+                        "observatory_longitude_deg": 1.2,
+                        "observatory_latitude_deg": 52.3,
+                        "observatory_height_m": 10.0,
+                    },
+                ),
+            )
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        meta = payload["view"]["meta"]
+        self.assertEqual(meta["source_ra_deg"], 123.4)
+        self.assertEqual(meta["source_dec_deg"], -45.6)
+        self.assertEqual(meta["time_scale"], "tt")
+        self.assertEqual(meta["observatory_longitude_deg"], 1.2)
+        self.assertEqual(meta["observatory_latitude_deg"], 52.3)
+        self.assertEqual(meta["observatory_height_m"], 10.0)
 
     def test_session_action_run_spectral_analysis_returns_serialized_payload(self) -> None:
         session_id = "synthetic-spectral-dispatch"
@@ -829,7 +921,11 @@ class WebApiTest(unittest.TestCase):
 
         results = payload["view"]["results"]
         self.assertIsNotNone(results)
+        self.assertIn("toa_peak_topo_mjd", results)
         self.assertIn("toa_topo_mjd", results)
+        self.assertIn("toa_inf_topo_mjd", results)
+        self.assertIn("toa_inf_bary_mjd_tdb", results)
+        self.assertIn("toa_status", results)
         self.assertIn("measurement_flags", results)
         self.assertIn("uncertainties", results)
         self.assertIn("provenance", results)

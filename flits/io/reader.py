@@ -29,6 +29,13 @@ class FilterbankInspection:
     freq_lo_mhz: float | None = None
     freq_hi_mhz: float | None = None
     coherent_dm: float | None = None
+    source_ra_deg: float | None = None
+    source_dec_deg: float | None = None
+    source_position_basis: str | None = None
+    time_scale: str | None = None
+    time_reference_frame: str | None = None
+    barycentric_header_flag: bool | None = None
+    pulsarcentric_header_flag: bool | None = None
 
 
 @runtime_checkable

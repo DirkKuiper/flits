@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from flits.session import BurstSession
 
 
-EXPORT_SCHEMA_VERSION = "1.5"
+EXPORT_SCHEMA_VERSION = "1.6"
 DEFAULT_EXPORT_INCLUDE = ("json", "csv", "npz", "plots")
 DEFAULT_PLOT_FORMATS = ("png", "svg")
 DEFAULT_WINDOW_FORMATS = ("npz",)
@@ -1048,7 +1048,15 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         "accepted_width_method": accepted_width.get("method", ""),
         "accepted_width_value_ms": accepted_width.get("value", ""),
         "accepted_width_uncertainty_ms": accepted_width.get("uncertainty", ""),
+        "toa_peak_topo_mjd": results.get("toa_peak_topo_mjd", results.get("toa_topo_mjd", "")),
         "toa_topo_mjd": results.get("toa_topo_mjd", ""),
+        "toa_inf_topo_mjd": results.get("toa_inf_topo_mjd", ""),
+        "toa_inf_bary_mjd_tdb": results.get("toa_inf_bary_mjd_tdb", ""),
+        "dispersion_to_infinite_frequency_ms": results.get("dispersion_to_infinite_frequency_ms", ""),
+        "barycentric_correction_ms": results.get("barycentric_correction_ms", ""),
+        "toa_reference_frequency_mhz": results.get("toa_reference_frequency_mhz", ""),
+        "toa_status": results.get("toa_status", ""),
+        "toa_status_reason": results.get("toa_status_reason", ""),
         "snr_peak": results.get("snr_peak", ""),
         "snr_integrated": results.get("snr_integrated", ""),
         "width_ms_acf": results.get("width_ms_acf", ""),
@@ -1077,6 +1085,20 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         "measurement_flags": _join_list(results.get("measurement_flags", [])),
         "mask_count": results.get("mask_count", len(snapshot.state.get("masked_channels", []))),
         "masked_channels": _join_list(snapshot.state.get("masked_channels", [])),
+        "source_ra_deg": snapshot.meta.get("source_ra_deg", ""),
+        "source_dec_deg": snapshot.meta.get("source_dec_deg", ""),
+        "source_position_basis": snapshot.meta.get("source_position_basis", ""),
+        "time_scale": snapshot.meta.get("time_scale", ""),
+        "time_reference_frame": snapshot.meta.get("time_reference_frame", ""),
+        "barycentric_header_flag": snapshot.meta.get("barycentric_header_flag", ""),
+        "pulsarcentric_header_flag": snapshot.meta.get("pulsarcentric_header_flag", ""),
+        "dedispersion_reference_frequency_mhz": snapshot.meta.get("dedispersion_reference_frequency_mhz", ""),
+        "dedispersion_reference_basis": snapshot.meta.get("dedispersion_reference_basis", ""),
+        "observatory_name": snapshot.meta.get("observatory_name", ""),
+        "observatory_longitude_deg": snapshot.meta.get("observatory_longitude_deg", ""),
+        "observatory_latitude_deg": snapshot.meta.get("observatory_latitude_deg", ""),
+        "observatory_height_m": snapshot.meta.get("observatory_height_m", ""),
+        "observatory_location_basis": snapshot.meta.get("observatory_location_basis", ""),
         "sefd_jy": snapshot.meta.get("sefd_jy", ""),
         "npol": snapshot.meta.get("npol", ""),
         "header_npol": snapshot.meta.get("header_npol", ""),
@@ -1094,7 +1116,10 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         "residual_status": dm.get("residual_status", ""),
     }
     row.update(uncertainty_columns("accepted_width", accepted_width.get("uncertainty_detail")))
+    row.update(uncertainty_columns("toa_peak_topo_mjd", result_uncertainty_details.get("toa_peak_topo_mjd")))
     row.update(uncertainty_columns("toa_topo_mjd", result_uncertainty_details.get("toa_topo_mjd")))
+    row.update(uncertainty_columns("toa_inf_topo_mjd", result_uncertainty_details.get("toa_inf_topo_mjd")))
+    row.update(uncertainty_columns("toa_inf_bary_mjd_tdb", result_uncertainty_details.get("toa_inf_bary_mjd_tdb")))
     row.update(uncertainty_columns("width_ms_acf", result_uncertainty_details.get("width_ms_acf")))
     row.update(uncertainty_columns("width_ms_model", result_uncertainty_details.get("width_ms_model")))
     row.update(uncertainty_columns("spectral_width_mhz_acf", result_uncertainty_details.get("spectral_width_mhz_acf")))

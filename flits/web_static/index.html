@@ -25,127 +25,97 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h2>Load</h2>
-            <span class="panel-badge" id="statusChip">Idle</span>
+            <h2>Acquisition</h2>
           </div>
-          <label class="field">
-            <span>Mounted folder</span>
-            <select id="directorySelect"></select>
-          </label>
-          <label class="field">
-            <span>Known files</span>
-            <select id="fileSelect" required></select>
-          </label>
-          <p class="field-note">Browse by folder first, or type a relative or absolute path directly below.</p>
-          <label class="field">
-            <span>File path</span>
-            <input id="fileInput" type="text" placeholder="relative or absolute path">
-          </label>
-          <div class="field-row">
-            <label class="field">
-              <span>DM <span class="tooltip-icon" data-tooltip="Dispersion Measure (pc/cm³) used to de-disperse the burst data. Pass 0 for files that are already dedispersed (e.g. CHIME/FRB catalog waterfalls). For CHIME beamformed BBData files, use the suggested DM_coherent unless you want a residual DM offset.">?</span></span>
-              <input id="dmInput" type="number" step="0.001" value="527.851">
-            </label>
-            <label class="field">
-              <span>Preset</span>
-              <select id="telescopeInput"></select>
-            </label>
-          </div>
-          <label class="field">
-            <span>SEFD (Jy) <span class="tooltip-icon" data-tooltip="System Equivalent Flux Density. Used to convert arbitrary data units into physical Janskys (Jy). Leave blank to remain in arbitrary units.">?</span></span>
-            <input id="sefdInput" type="number" step="0.1" placeholder="optional">
-          </label>
-          <label class="field">
-            <span>SEFD Frac. Uncertainty <span class="tooltip-icon" data-tooltip="Optional fractional systematic uncertainty on SEFD calibration, expressed as a decimal (for example 0.1 for 10%). When provided, FLITS can combine it with statistical flux/fluence errors.">?</span></span>
-            <input id="sefdFractionalUncertaintyInput" type="number" step="0.001" min="0" placeholder="optional">
-          </label>
-          <label class="field">
-            <span>npol Override <span class="tooltip-icon" data-tooltip="Optional override for the number of summed polarizations used in radiometer calibration. Leave blank to use the value inferred from the data/header.">?</span></span>
-            <input id="npolInput" type="number" step="1" min="1" placeholder="header default">
-          </label>
-          <div class="field-row">
-            <label class="field">
-              <span>Read Start (s) <span class="tooltip-icon" data-tooltip="Offset in seconds from the start of the file to begin reading. Useful for skipping header artifacts or seeking into large files.">?</span></span>
-              <input id="readStartInput" type="text" inputmode="decimal" placeholder="preset default">
-            </label>
-            <label class="field">
-              <span>Read End (s) <span class="tooltip-icon" data-tooltip="Absolute time in seconds from the start of the file to stop reading. A smaller bounds speeds up load times and reduces memory usage.">?</span></span>
-              <input id="readEndInput" type="text" inputmode="decimal" placeholder="preset default">
-            </label>
-          </div>
-          <div class="field-row">
-            <label class="field">
-              <span>Distance (Mpc) <span class="tooltip-icon" data-tooltip="Luminosity distance to the source in Megaparsecs. Used to compute isotropic equivalent energy.">?</span></span>
-              <input id="distanceInput" type="number" step="0.001" placeholder="optional">
-            </label>
-            <label class="field">
-              <span>Redshift <span class="tooltip-icon" data-tooltip="Cosmological redshift of the source. Used to compute rest-frame properties (e.g. intrinsic frequency and energy).">?</span></span>
-              <input id="redshiftInput" type="number" step="0.0001" placeholder="optional">
-            </label>
-          </div>
-          <label class="field">
-            <span>Distance Frac. Uncertainty <span class="tooltip-icon" data-tooltip="Optional fractional systematic uncertainty on luminosity distance, expressed as a decimal (for example 0.2 for 20%). It is only used when isotropic energy is computed.">?</span></span>
-            <input id="distanceFractionalUncertaintyInput" type="number" step="0.001" min="0" placeholder="optional">
-          </label>
-          <div class="detection-panel" id="detectionHint">
-            <div class="detection-copy">Detection: waiting for a file.</div>
-          </div>
-          <button class="primary-button" id="loadButton">Load Session</button>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2>View</h2>
-            <span class="panel-badge" id="resolutionLabel">t x1 / f x1</span>
-          </div>
-          <div class="button-grid two">
-            <button class="ghost-button" id="timeDownButton">Time -</button>
-            <button class="ghost-button" id="timeUpButton">Time +</button>
-            <button class="ghost-button" id="freqDownButton">Freq -</button>
-            <button class="ghost-button" id="freqUpButton">Freq +</button>
-          </div>
-          <div class="button-grid two">
-            <button class="ghost-button" id="setDmButton">Apply DM</button>
-            <button class="ghost-button" id="resetViewButton">Reset View</button>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Interaction</h2>
-          </div>
-          <div class="mode-groups">
-            <section class="mode-group">
-              <h3>Time</h3>
-              <div class="button-grid two">
-                <button class="mode-button active" data-mode="event">Event Window</button>
-                <button class="mode-button" data-mode="crop">Crop Window</button>
-                <button class="mode-button" data-mode="offpulse">Off-Pulse</button>
+          <details class="details-card load-details" id="acquisitionOverridesDetails">
+            <summary>Acquisition Overrides</summary>
+            <div class="load-details-body">
+              <label class="field">
+                <span>SEFD (Jy) <span class="tooltip-icon" data-tooltip="System Equivalent Flux Density. Used to convert arbitrary data units into physical Janskys (Jy). Leave blank to remain in arbitrary units.">?</span></span>
+                <input id="sefdInput" type="number" step="0.1" placeholder="optional">
+              </label>
+              <label class="field">
+                <span>SEFD Frac. Uncertainty <span class="tooltip-icon" data-tooltip="Optional fractional systematic uncertainty on SEFD calibration, expressed as a decimal (for example 0.1 for 10%). When provided, FLITS can combine it with statistical flux/fluence errors.">?</span></span>
+                <input id="sefdFractionalUncertaintyInput" type="number" step="0.001" min="0" placeholder="optional">
+              </label>
+              <label class="field">
+                <span>npol Override <span class="tooltip-icon" data-tooltip="Optional override for the number of summed polarizations used in radiometer calibration. Leave blank to use the value inferred from the data/header.">?</span></span>
+                <input id="npolInput" type="number" step="1" min="1" placeholder="header default">
+              </label>
+              <div class="field-row">
+                <label class="field">
+                  <span>Read Start (s) <span class="tooltip-icon" data-tooltip="Offset in seconds from the start of the file to begin reading. Useful for skipping header artifacts or seeking into large files.">?</span></span>
+                  <input id="readStartInput" type="text" inputmode="decimal" placeholder="preset default">
+                </label>
+                <label class="field">
+                  <span>Read End (s) <span class="tooltip-icon" data-tooltip="Absolute time in seconds from the start of the file to stop reading. A smaller bounds speeds up load times and reduces memory usage.">?</span></span>
+                  <input id="readEndInput" type="text" inputmode="decimal" placeholder="preset default">
+                </label>
               </div>
-            </section>
-            <section class="mode-group">
-              <h3>Frequency</h3>
-              <div class="button-grid two">
-                <button class="mode-button" data-mode="mask-channel">Mask Channel</button>
-                <button class="mode-button" data-mode="mask-range">Mask Range</button>
-                <button class="mode-button wide" data-mode="spec-extent">Spectral Window</button>
+            </div>
+          </details>
+          <details class="details-card load-details" id="sourceContextDetails">
+            <summary>Source Context</summary>
+            <div class="load-details-body">
+              <div class="field-row">
+                <label class="field">
+                  <span>Distance (Mpc) <span class="tooltip-icon" data-tooltip="Luminosity distance to the source in Megaparsecs. Used to compute isotropic equivalent energy.">?</span></span>
+                  <input id="distanceInput" type="number" step="0.001" placeholder="optional">
+                </label>
+                <label class="field">
+                  <span>Redshift <span class="tooltip-icon" data-tooltip="Cosmological redshift of the source. Used to compute rest-frame properties (e.g. intrinsic frequency and energy).">?</span></span>
+                  <input id="redshiftInput" type="number" step="0.0001" placeholder="optional">
+                </label>
               </div>
-            </section>
-            <section class="mode-group">
-              <h3>Peaks</h3>
-              <div class="button-grid two">
-                <button class="mode-button" data-mode="add-peak">Add Peak</button>
-                <button class="mode-button" data-mode="remove-peak">Remove Peak</button>
+              <label class="field">
+                <span>Distance Frac. Uncertainty <span class="tooltip-icon" data-tooltip="Optional fractional systematic uncertainty on luminosity distance, expressed as a decimal (for example 0.2 for 20%). It is only used when isotropic energy is computed.">?</span></span>
+                <input id="distanceFractionalUncertaintyInput" type="number" step="0.001" min="0" placeholder="optional">
+              </label>
+            </div>
+          </details>
+          <details class="details-card load-details" id="timingMetadataDetails">
+            <summary>Timing Metadata</summary>
+            <div class="load-details-body">
+              <div class="field-row">
+                <label class="field">
+                  <span>Source RA (deg) <span class="tooltip-icon" data-tooltip="ICRS right ascension in decimal degrees. Required, with Dec and observatory location, for barycentric TOA.">?</span></span>
+                  <input id="sourceRaInput" type="number" step="0.000001" placeholder="header/default">
+                </label>
+                <label class="field">
+                  <span>Source Dec (deg) <span class="tooltip-icon" data-tooltip="ICRS declination in decimal degrees. Required, with RA and observatory location, for barycentric TOA.">?</span></span>
+                  <input id="sourceDecInput" type="number" step="0.000001" placeholder="header/default">
+                </label>
               </div>
-            </section>
-            <section class="mode-group">
-              <h3>Components</h3>
-              <div class="button-grid two">
-                <button class="mode-button wide" data-mode="region">Component Region</button>
+              <div class="field-row">
+                <label class="field">
+                  <span>Time Scale <span class="tooltip-icon" data-tooltip="Time scale for the input MJD. UTC is the default for filterbank headers unless stronger metadata are present.">?</span></span>
+                  <select id="timeScaleInput">
+                    <option value="utc">UTC</option>
+                    <option value="tdb">TDB</option>
+                    <option value="tt">TT</option>
+                    <option value="tai">TAI</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Obs. Height (m) <span class="tooltip-icon" data-tooltip="Optional observatory height override in meters. Leave blank to use the telescope preset location when available.">?</span></span>
+                  <input id="observatoryHeightInput" type="number" step="0.001" placeholder="preset/default">
+                </label>
               </div>
-            </section>
-          </div>
-          <p class="mode-help compact">Choose a mode here. Live guidance appears above the viewer.</p>
+              <div class="field-row">
+                <label class="field">
+                  <span>Obs. Lon (deg) <span class="tooltip-icon" data-tooltip="Optional geodetic longitude override in degrees east. Leave blank to use the telescope preset location when available.">?</span></span>
+                  <input id="observatoryLongitudeInput" type="number" step="0.000001" placeholder="preset/default">
+                </label>
+                <label class="field">
+                  <span>Obs. Lat (deg) <span class="tooltip-icon" data-tooltip="Optional geodetic latitude override in degrees. Leave blank to use the telescope preset location when available.">?</span></span>
+                  <input id="observatoryLatitudeInput" type="number" step="0.000001" placeholder="preset/default">
+                </label>
+              </div>
+              <div class="load-action-row">
+                <button class="ghost-button" id="updateTimingButton">Apply Timing Metadata</button>
+              </div>
+            </div>
+          </details>
         </section>
 
         <section class="panel">
@@ -179,17 +149,47 @@
       </aside>
 
       <main class="main-content">
-        <section class="hero card">
-          <div class="hero-copy">
-            <div class="eyebrow">Interactive Workspace</div>
-            <h2 id="burstTitle">Load a burst file to begin</h2>
-            <div class="hero-tags" id="heroTags"></div>
+        <section class="workspace-header card">
+          <div class="workspace-title">
+            <div class="workspace-title-line">
+              <div>
+                <div class="eyebrow">Workspace</div>
+                <h2 id="burstTitle">Load a burst file to begin</h2>
+              </div>
+              <span class="panel-badge" id="statusChip">Idle</span>
+            </div>
+            <div class="workspace-tags" id="heroTags"></div>
             <p class="muted" id="burstSubtitle">
-              Use the aligned viewer: top time profile for time edits, center dynamic spectrum for
-              masking, and right frequency profile for spectral selection.
+              Choose a file, set the dispersion measure, then work directly in the aligned viewer.
             </p>
+            <div class="detection-panel workspace-detection" id="detectionHint">
+              <div class="detection-copy">Detection: waiting for a file.</div>
+            </div>
           </div>
-          <div class="hero-metrics" id="heroMetrics">
+          <div class="workspace-load">
+            <label class="field">
+              <span>Mounted folder</span>
+              <select id="directorySelect"></select>
+            </label>
+            <label class="field">
+              <span>Known files</span>
+              <select id="fileSelect" required></select>
+            </label>
+            <label class="field workspace-file-path">
+              <span>File path</span>
+              <input id="fileInput" type="text" placeholder="relative or absolute path">
+            </label>
+            <label class="field workspace-dm-field">
+              <span>DM <span class="tooltip-icon" data-tooltip="Dispersion Measure (pc/cm³) used to de-disperse the burst data. Some formats provide an automatic suggestion. Enter 0 for files that are already dedispersed (e.g. CHIME/FRB catalog waterfalls). For CHIME beamformed BBData files, use the suggested DM_coherent unless you want a residual DM offset.">?</span></span>
+              <input id="dmInput" type="number" step="0.001" placeholder="enter DM or 0 if already dedispersed">
+            </label>
+            <label class="field">
+              <span>Preset</span>
+              <select id="telescopeInput"></select>
+            </label>
+            <button class="primary-button workspace-load-button" id="loadButton">Load Session</button>
+          </div>
+          <div class="workspace-metrics" id="heroMetrics">
             <div class="metric-card">
               <span>Time Resolution</span>
               <strong>-</strong>
@@ -222,6 +222,37 @@
               </div>
               <div class="pending-box viewer-pending" id="pendingBox">Waiting for first click.</div>
             </div>
+            <div class="viewer-mode-panel" aria-label="Viewer interaction modes">
+              <section class="mode-group">
+                <h3>Time</h3>
+                <div class="mode-button-row">
+                  <button class="mode-button active" data-mode="event">Event Window</button>
+                  <button class="mode-button" data-mode="crop">Crop Window</button>
+                  <button class="mode-button" data-mode="offpulse">Off-Pulse</button>
+                </div>
+              </section>
+              <section class="mode-group">
+                <h3>Frequency</h3>
+                <div class="mode-button-row">
+                  <button class="mode-button" data-mode="mask-channel">Mask Channel</button>
+                  <button class="mode-button" data-mode="mask-range">Mask Range</button>
+                  <button class="mode-button" data-mode="spec-extent">Spectral Window</button>
+                </div>
+              </section>
+              <section class="mode-group">
+                <h3>Peaks</h3>
+                <div class="mode-button-row">
+                  <button class="mode-button" data-mode="add-peak">Add Peak</button>
+                  <button class="mode-button" data-mode="remove-peak">Remove Peak</button>
+                </div>
+              </section>
+              <section class="mode-group">
+                <h3>Components</h3>
+                <div class="mode-button-row">
+                  <button class="mode-button" data-mode="region">Component Region</button>
+                </div>
+              </section>
+            </div>
             <div class="viewer-legend" aria-label="Plot legend">
               <div class="legend-item"><span class="legend-swatch event"></span><span>Event window</span></div>
               <div class="legend-item"><span class="legend-swatch offpulse"></span><span>Off-pulse</span></div>
@@ -230,11 +261,17 @@
               <div class="legend-item"><span class="legend-swatch spectral"></span><span>Spectral window</span></div>
             </div>
             <div class="viewer-toolbar viewer-toolbar-top">
+              <span class="panel-badge" id="resolutionLabel">t x1 / f x1</span>
+              <button class="ghost-button" id="timeDownButton">Time -</button>
+              <button class="ghost-button" id="timeUpButton">Time +</button>
+              <button class="ghost-button" id="freqDownButton">Freq -</button>
+              <button class="ghost-button" id="freqUpButton">Freq +</button>
+              <button class="ghost-button" id="setDmButton">Apply DM</button>
+              <button class="ghost-button" id="resetViewButton">Reset View</button>
               <button class="ghost-button" id="clearRegionsButton">Clear Components</button>
               <button class="ghost-button" id="clearOffpulseButton">Clear Off-Pulse</button>
               <button class="primary-button" id="computeButton">Compute</button>
             </div>
-            <div class="plot viewer-plot" id="viewerPlot"></div>
             <div class="viewer-toolbar viewer-toolbar-bottom">
               <button class="ghost-button" id="undoMaskButton">Undo Mask</button>
               <button class="ghost-button" id="resetMaskButton">Reset Masks</button>
@@ -244,6 +281,7 @@
               </label>
               <button class="ghost-button" id="jessButton">Auto Mask</button>
             </div>
+            <div class="plot viewer-plot" id="viewerPlot"></div>
           </div>
 
           <div class="card results-card analysis-card">

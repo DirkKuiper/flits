@@ -74,8 +74,28 @@ def _synthetic_width_session(
     return session
 
 
-def _snapshot_loader(path: str, *, dm: float, **_: object) -> BurstSession:
-    return _synthetic_width_session(path=Path(path), applied_dm=dm)
+def _snapshot_loader(
+    path: str,
+    *,
+    dm: float,
+    source_ra_deg: float | None = None,
+    source_dec_deg: float | None = None,
+    time_scale: str | None = None,
+    observatory_longitude_deg: float | None = None,
+    observatory_latitude_deg: float | None = None,
+    observatory_height_m: float | None = None,
+    **_: object,
+) -> BurstSession:
+    session = _synthetic_width_session(path=Path(path), applied_dm=dm)
+    session.set_timing_metadata(
+        source_ra_deg=source_ra_deg,
+        source_dec_deg=source_dec_deg,
+        time_scale=time_scale,
+        observatory_longitude_deg=observatory_longitude_deg,
+        observatory_latitude_deg=observatory_latitude_deg,
+        observatory_height_m=observatory_height_m,
+    )
+    return session
 
 
 class SessionSnapshotTest(unittest.TestCase):
@@ -107,6 +127,14 @@ class SessionSnapshotTest(unittest.TestCase):
             session.add_peak_ms(120.0)
             session.mask_channel_freq(float(session.freqs[0]))
             session.set_spectral_extent_freq(float(session.freqs[1]), float(session.freqs[-2]))
+            session.set_timing_metadata(
+                source_ra_deg=123.456,
+                source_dec_deg=-12.345,
+                time_scale="tt",
+                observatory_longitude_deg=1.25,
+                observatory_latitude_deg=52.0,
+                observatory_height_m=30.0,
+            )
             session.set_notes("phase-1 snapshot")
             session.last_auto_mask = AutoMaskRunSummary(
                 profile="auto",
@@ -210,6 +238,12 @@ class SessionSnapshotTest(unittest.TestCase):
             self.assertEqual(restored.notes, "phase-1 snapshot")
             self.assertAlmostEqual(restored.config.sefd_fractional_uncertainty or 0.0, 0.1)
             self.assertAlmostEqual(restored.config.distance_fractional_uncertainty or 0.0, 0.2)
+            self.assertAlmostEqual(restored.config.source_ra_deg or 0.0, 123.456)
+            self.assertAlmostEqual(restored.config.source_dec_deg or 0.0, -12.345)
+            self.assertEqual(restored.config.time_scale, "tt")
+            self.assertAlmostEqual(restored.config.observatory_longitude_deg or 0.0, 1.25)
+            self.assertAlmostEqual(restored.config.observatory_latitude_deg or 0.0, 52.0)
+            self.assertAlmostEqual(restored.config.observatory_height_m or 0.0, 30.0)
             self.assertEqual(np.flatnonzero(restored.channel_mask).tolist(), np.flatnonzero(session.channel_mask).tolist())
             self.assertIsNotNone(restored.last_auto_mask)
             self.assertIsNotNone(restored.width_analysis)
