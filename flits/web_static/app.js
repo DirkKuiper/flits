@@ -81,7 +81,7 @@ const dmOptimizeBadge = document.getElementById("dmOptimizeBadge")
 const sessionSummary = document.getElementById("sessionSummary")
 const sessionFacts = document.getElementById("sessionFacts")
 const sessionBadge = document.getElementById("sessionBadge")
-const hero = document.querySelector(".hero")
+const workspaceHeader = document.querySelector(".workspace-header")
 const burstTitle = document.getElementById("burstTitle")
 const heroTags = document.getElementById("heroTags")
 const burstSubtitle = document.getElementById("burstSubtitle")
@@ -1275,7 +1275,7 @@ function syncSpectralSegmentInput(view) {
 function renderHero(view) {
   const maskedCount = view.state.masked_channels.length
   const usesDetectedProfile = view.meta.preset_key === view.meta.detected_preset_key
-  hero.classList.toggle("is-loaded", true)
+  workspaceHeader.classList.toggle("is-loaded", true)
   heroTags.innerHTML = [
     infoChip("Detected", view.meta.detected_telescope, "neutral"),
     infoChip("Using", view.meta.telescope, usesDetectedProfile ? "success" : "warning"),
@@ -4341,7 +4341,7 @@ function updateControlStates() {
   setDmButton.disabled = !hasSession || isBusy || !hasRequiredDm
   optimizeDmButton.disabled = !hasSession || isBusy || !hasRequiredDm
   applyBestDmButton.disabled = !hasSession || isBusy || !hasBestDm
-  hero.classList.toggle("is-loaded", hasSession)
+  workspaceHeader.classList.toggle("is-loaded", hasSession)
 
   if (!hasSession) {
     sessionBadge.textContent = "Not loaded"
