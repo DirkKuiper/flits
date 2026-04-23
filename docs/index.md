@@ -39,6 +39,9 @@ pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3
 
 - Use [Quickstart](getting-started.md) if you want the shortest path from
   install to first session.
+- Use [Guided Workflow](guided-workflow.md) for a concrete GBT burst example
+  that goes from loading through preparation, measurements, DM, temporal
+  diagnostics, fitting, and export.
 - Use [Installation and Deployment](installation.md) if you need Docker,
   Apptainer, or remote/HPC usage.
 - Use [Session Workflow](user-guide/session-workflow.md) once the interface is
