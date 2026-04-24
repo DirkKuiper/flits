@@ -559,6 +559,10 @@ class SessionSourceRef:
     start_mjd: float
     npol: int
     freq_range_mhz: list[float]
+    file_name: str | None = None
+    data_dir_relative_path: str | None = None
+    content_hash_algorithm: str | None = None
+    content_hash_sha256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -572,12 +576,17 @@ class SessionSourceRef:
             "start_mjd": float(self.start_mjd),
             "npol": int(self.npol),
             "freq_range_mhz": [float(value) for value in self.freq_range_mhz],
+            "file_name": self.file_name,
+            "data_dir_relative_path": self.data_dir_relative_path,
+            "content_hash_algorithm": self.content_hash_algorithm,
+            "content_hash_sha256": self.content_hash_sha256,
         }
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "SessionSourceRef":
+        source_path = Path(payload["source_path"])
         return cls(
-            source_path=Path(payload["source_path"]),
+            source_path=source_path,
             source_name=payload.get("source_name"),
             file_size_bytes=int(payload.get("file_size_bytes", 0)),
             mtime_unix=float(payload.get("mtime_unix", 0.0)),
@@ -587,6 +596,10 @@ class SessionSourceRef:
             start_mjd=float(payload.get("start_mjd", 0.0)),
             npol=int(payload.get("npol", 0)),
             freq_range_mhz=[float(value) for value in payload.get("freq_range_mhz", [])],
+            file_name=payload.get("file_name") or source_path.name or None,
+            data_dir_relative_path=payload.get("data_dir_relative_path"),
+            content_hash_algorithm=payload.get("content_hash_algorithm"),
+            content_hash_sha256=payload.get("content_hash_sha256"),
         )
 
 

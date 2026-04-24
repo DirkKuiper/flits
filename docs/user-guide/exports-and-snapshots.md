@@ -24,6 +24,13 @@ outputs. They are useful for:
 - sharing a reproducible interactive state
 - archiving the exact crop/mask/selection choices used in an analysis
 
+Snapshots do not embed the raw filterbank data. To share a snapshot with someone
+else, send them the JSON snapshot and make sure they start FLITS with
+`--data-dir` or `FLITS_DATA_DIR` pointing at a directory that contains the same
+source data file. FLITS records the source file name, data-directory-relative
+path when available, file size, SHA-256 content hash, and scientific metadata so
+the import can find moved/copied data and reject the wrong file.
+
 ## Recommended practice
 
 For reproducible work, it is often useful to keep both:

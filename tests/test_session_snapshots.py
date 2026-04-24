@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import os
+import shutil
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import numpy as np
 
@@ -225,6 +228,10 @@ class SessionSnapshotTest(unittest.TestCase):
             )
 
             snapshot = session.to_snapshot()
+            self.assertEqual(snapshot.schema_version, "1.4")
+            self.assertEqual(snapshot.source.file_name, "snapshot_source.fil")
+            self.assertEqual(snapshot.source.content_hash_algorithm, "sha256")
+            self.assertIsNotNone(snapshot.source.content_hash_sha256)
             restored = BurstSession.from_snapshot(snapshot, loader=_snapshot_loader)
 
             self.assertEqual(restored.crop_start, session.crop_start)
@@ -274,6 +281,111 @@ class SessionSnapshotTest(unittest.TestCase):
 
             with self.assertRaises(FileNotFoundError):
                 BurstSession.from_snapshot(snapshot, loader=_snapshot_loader)
+
+    def test_snapshot_import_remaps_host_path_under_flits_data_dir(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            original = tmp / "host" / "project" / "data" / "GBT-L" / "source.fil"
+            original.parent.mkdir(parents=True)
+            original.write_bytes(b"snapshot-source")
+            session = _synthetic_width_session(path=original)
+            snapshot = session.to_snapshot()
+
+            mounted = tmp / "mounted" / "data" / "GBT-L" / original.name
+            mounted.parent.mkdir(parents=True)
+            shutil.copyfile(original, mounted)
+            os.utime(mounted, (original.stat().st_mtime + 10.0, original.stat().st_mtime + 10.0))
+            original.unlink()
+
+            with patch.dict("os.environ", {"FLITS_DATA_DIR": str(tmp / "mounted")}):
+                restored = BurstSession.from_snapshot(snapshot, loader=_snapshot_loader)
+
+            self.assertEqual(Path(restored.burst_file).resolve(), mounted.resolve())
+
+    def test_snapshot_import_uses_data_dir_relative_path(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            original_root = tmp / "original"
+            original = original_root / "GBT-L" / "source.fil"
+            original.parent.mkdir(parents=True)
+            original.write_bytes(b"snapshot-source")
+
+            with patch.dict("os.environ", {"FLITS_DATA_DIR": str(original_root)}):
+                session = _synthetic_width_session(path=original)
+                snapshot = session.to_snapshot()
+
+            self.assertEqual(snapshot.source.data_dir_relative_path, "GBT-L/source.fil")
+
+            mounted_root = tmp / "mounted"
+            mounted = mounted_root / "GBT-L" / "source.fil"
+            mounted.parent.mkdir(parents=True)
+            shutil.copyfile(original, mounted)
+            shutil.rmtree(original_root)
+
+            with patch.dict("os.environ", {"FLITS_DATA_DIR": str(mounted_root)}):
+                restored = BurstSession.from_snapshot(snapshot, loader=_snapshot_loader)
+
+            self.assertEqual(Path(restored.burst_file).resolve(), mounted.resolve())
+
+    def test_snapshot_import_finds_same_filename_recursively_under_data_dir(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            original = tmp / "host" / "source.fil"
+            original.parent.mkdir(parents=True)
+            original.write_bytes(b"snapshot-source")
+            session = _synthetic_width_session(path=original)
+            snapshot = session.to_snapshot()
+
+            mounted = tmp / "data" / "nested" / "deeper" / "source.fil"
+            mounted.parent.mkdir(parents=True)
+            shutil.copyfile(original, mounted)
+            original.unlink()
+
+            with patch.dict("os.environ", {"FLITS_DATA_DIR": str(tmp / "data")}):
+                restored = BurstSession.from_snapshot(snapshot, loader=_snapshot_loader)
+
+            self.assertEqual(Path(restored.burst_file).resolve(), mounted.resolve())
+
+    def test_snapshot_import_rejects_same_size_wrong_hash_candidate(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            original = tmp / "host" / "source.fil"
+            original.parent.mkdir(parents=True)
+            original.write_bytes(b"snapshot-source")
+            session = _synthetic_width_session(path=original)
+            snapshot = session.to_snapshot()
+
+            mounted = tmp / "data" / "source.fil"
+            mounted.parent.mkdir(parents=True)
+            mounted.write_bytes(b"snapshot-sourcf")
+            original.unlink()
+
+            with patch.dict("os.environ", {"FLITS_DATA_DIR": str(tmp / "data")}):
+                with self.assertRaises(ValueError):
+                    BurstSession.from_snapshot(snapshot, loader=_snapshot_loader)
+
+    def test_legacy_snapshot_without_hash_imports_moved_file_by_metadata(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            original = tmp / "host" / "source.fil"
+            original.parent.mkdir(parents=True)
+            original.write_bytes(b"snapshot-source")
+            session = _synthetic_width_session(path=original)
+            snapshot_payload = session.snapshot_dict()
+            snapshot_payload["schema_version"] = "1.3"
+            snapshot_payload["source"].pop("content_hash_algorithm", None)
+            snapshot_payload["source"].pop("content_hash_sha256", None)
+
+            mounted = tmp / "data" / "source.fil"
+            mounted.parent.mkdir(parents=True)
+            shutil.copyfile(original, mounted)
+            os.utime(mounted, (original.stat().st_mtime + 10.0, original.stat().st_mtime + 10.0))
+            original.unlink()
+
+            with patch.dict("os.environ", {"FLITS_DATA_DIR": str(tmp / "data")}):
+                restored = BurstSession.from_snapshot(snapshot_payload, loader=_snapshot_loader)
+
+            self.assertEqual(Path(restored.burst_file).resolve(), mounted.resolve())
 
     def test_snapshot_import_fails_on_metadata_mismatch(self) -> None:
         with TemporaryDirectory() as tmpdir:
