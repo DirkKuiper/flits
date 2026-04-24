@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+import hashlib
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
@@ -58,7 +60,9 @@ except Exception:  # pragma: no cover - optional dependency
     jess = SimpleNamespace(channel_masks=SimpleNamespace(channel_masker=None))
 
 
-SESSION_SNAPSHOT_SCHEMA_VERSION = "1.3"
+SESSION_SNAPSHOT_SCHEMA_VERSION = "1.4"
+SOURCE_HASH_ALGORITHM = "sha256"
+SOURCE_HASH_CHUNK_BYTES = 1024 * 1024
 JESS_MASK_DTYPE = np.float32
 JESS_WORKING_COPY_FACTOR = 6
 JESS_TEST_SEQUENCE = ("skew", "stand-dev")
@@ -130,6 +134,146 @@ def _coerce_snapshot(snapshot: AnalysisSessionSnapshot | dict[str, Any]) -> Anal
     if isinstance(snapshot, AnalysisSessionSnapshot):
         return snapshot
     return AnalysisSessionSnapshot.from_dict(snapshot)
+
+
+def _resolve_existing_or_candidate(path: Path) -> Path:
+    expanded = path.expanduser()
+    try:
+        return expanded.resolve()
+    except OSError:
+        return expanded
+
+
+def _configured_data_dir() -> Path | None:
+    configured = os.environ.get("FLITS_DATA_DIR")
+    if not configured:
+        return None
+    return _resolve_existing_or_candidate(Path(configured))
+
+
+def _data_dir_relative_path(path: Path) -> str | None:
+    data_root = _configured_data_dir()
+    if data_root is None:
+        return None
+    try:
+        return path.relative_to(data_root).as_posix()
+    except ValueError:
+        return None
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(SOURCE_HASH_CHUNK_BYTES), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _snapshot_expected_sha256(source: SessionSourceRef) -> str | None:
+    expected = source.content_hash_sha256
+    if not expected:
+        return None
+    algorithm = (source.content_hash_algorithm or SOURCE_HASH_ALGORITHM).lower()
+    if algorithm != SOURCE_HASH_ALGORITHM:
+        raise ValueError(f"Unsupported session source hash algorithm: {source.content_hash_algorithm}")
+    return str(expected).lower()
+
+
+def _format_candidate_paths(candidates: list[Path], *, limit: int = 12) -> str:
+    shown = [str(candidate) for candidate in candidates[:limit]]
+    if len(candidates) > limit:
+        shown.append(f"... {len(candidates) - limit} more")
+    return ", ".join(shown)
+
+
+def _data_dir_hint() -> str:
+    return (
+        "Start FLITS with --data-dir or FLITS_DATA_DIR pointing at a directory "
+        "that contains the source data."
+    )
+
+
+def _snapshot_source_candidates(source: SessionSourceRef) -> list[Path]:
+    expanded = Path(source.source_path).expanduser()
+    candidates: list[Path] = []
+
+    def add(candidate: Path) -> None:
+        resolved = _resolve_existing_or_candidate(candidate)
+        if resolved not in candidates:
+            candidates.append(resolved)
+
+    add(expanded)
+    if not expanded.is_absolute():
+        add(Path.cwd() / expanded)
+
+    data_root = _configured_data_dir()
+    if data_root is not None:
+        if source.data_dir_relative_path:
+            add(data_root / source.data_dir_relative_path)
+
+        if not expanded.is_absolute():
+            add(data_root / expanded)
+
+        parts = [part for part in expanded.parts if part not in {expanded.anchor, ""}]
+        for index in range(len(parts)):
+            suffix = Path(*parts[index:])
+            add(data_root / suffix)
+
+        file_name = source.file_name or expanded.name
+        if file_name and data_root.exists():
+            try:
+                for candidate in data_root.rglob(file_name):
+                    add(candidate)
+            except OSError:
+                pass
+
+    return candidates
+
+
+def _resolve_snapshot_source_path(source: SessionSourceRef) -> Path:
+    candidates = _snapshot_source_candidates(source)
+    existing = [candidate for candidate in candidates if candidate.exists()]
+    if not existing:
+        attempted = _format_candidate_paths(candidates)
+        raise FileNotFoundError(
+            f"Session source file not found: {source.source_path}. {_data_dir_hint()} Tried: {attempted}"
+        )
+
+    expected_size = int(source.file_size_bytes)
+    expected_hash = _snapshot_expected_sha256(source)
+    hash_cache: dict[Path, str] = {}
+
+    def identity_matches(candidate: Path) -> bool:
+        if expected_size > 0:
+            try:
+                if candidate.stat().st_size != expected_size:
+                    return False
+            except OSError:
+                return False
+        if expected_hash is None:
+            return True
+        try:
+            if candidate not in hash_cache:
+                hash_cache[candidate] = _sha256_file(candidate)
+            candidate_hash = hash_cache[candidate]
+        except OSError:
+            return False
+        return candidate_hash.lower() == expected_hash
+
+    for candidate in existing:
+        if identity_matches(candidate):
+            return candidate
+
+    attempted = _format_candidate_paths(existing)
+    if expected_size > 0 or expected_hash is not None:
+        expected = f"size {expected_size} bytes"
+        if expected_hash is not None:
+            expected += f" and SHA-256 {expected_hash}"
+        raise ValueError(
+            f"Session source file identity did not match the saved snapshot ({expected}). "
+            f"{_data_dir_hint()} Tried: {attempted}"
+        )
+    return existing[0]
 
 
 @dataclass(frozen=True)
@@ -252,8 +396,9 @@ class BurstSession:
     ) -> "BurstSession":
         snapshot = _coerce_snapshot(snapshot)
         session_loader = cls.from_file if loader is None else loader
+        source_path = _resolve_snapshot_source_path(snapshot.source)
         session = session_loader(
-            str(snapshot.source.source_path),
+            str(source_path),
             dm=float(snapshot.dm),
             telescope=snapshot.preset_key,
             sefd_jy=snapshot.sefd_jy,
@@ -2002,10 +2147,14 @@ class BurstSession:
 
     def _build_source_ref(self) -> SessionSourceRef:
         source_path = Path(self.burst_file).expanduser().resolve()
+        content_hash_sha256: str | None = None
+        content_hash_algorithm: str | None = None
         try:
             stat = source_path.stat()
             file_size = int(stat.st_size)
             mtime_unix = float(stat.st_mtime)
+            content_hash_sha256 = _sha256_file(source_path)
+            content_hash_algorithm = SOURCE_HASH_ALGORITHM
         except FileNotFoundError:
             file_size = 0
             mtime_unix = 0.0
@@ -2021,19 +2170,24 @@ class BurstSession:
             start_mjd=float(self.start_mjd),
             npol=int(self.npol),
             freq_range_mhz=[float(freq_lo), float(freq_hi)],
+            file_name=source_path.name,
+            data_dir_relative_path=_data_dir_relative_path(source_path),
+            content_hash_algorithm=content_hash_algorithm,
+            content_hash_sha256=content_hash_sha256,
         )
 
     def _validate_snapshot_source(self, source: SessionSourceRef) -> None:
-        path = Path(source.source_path).expanduser().resolve()
-        if not path.exists():
-            raise FileNotFoundError(f"Session source file not found: {path}")
         current = self._build_source_ref()
         if current.file_size_bytes != int(source.file_size_bytes):
             raise ValueError("Session source file size does not match the saved snapshot.")
         if current.shape != list(source.shape):
             raise ValueError("Session source shape does not match the saved snapshot.")
-        if not np.isclose(current.mtime_unix, float(source.mtime_unix)):
-            raise ValueError("Session source modification time does not match the saved snapshot.")
+        expected_hash = _snapshot_expected_sha256(source)
+        if expected_hash is not None:
+            if current.content_hash_sha256 is None:
+                raise ValueError("Session source SHA-256 hash is unavailable.")
+            if current.content_hash_sha256.lower() != expected_hash:
+                raise ValueError("Session source SHA-256 hash does not match the saved snapshot.")
         comparisons = [
             ("tsamp", current.tsamp, float(source.tsamp)),
             ("freqres", current.freqres, float(source.freqres)),
