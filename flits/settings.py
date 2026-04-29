@@ -115,6 +115,17 @@ PRESETS: dict[str, TelescopePreset] = {
         height_m=807.00000000084,
         observatory_location_basis="astropy_site_registry_green_bank_telescope",
     ),
+    "stockert": TelescopePreset(
+        key="stockert",
+        label="Stockert",
+        telescope_ids=(16,),
+        machine_ids=(8,),
+        sefd_jy=420.0,
+        read_start_sec=0.0,
+        read_end_sec=None,
+        normalization_tail_fraction=0.25,
+        observatory_name="Stockert Radio Telescope",
+    ),
     "lofar": TelescopePreset(
         key="lofar",
         label="LOFAR",
