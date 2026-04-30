@@ -86,10 +86,21 @@ def _open_your(source_path: Path) -> Iterator[object]:
                 pass
 
 
-def _build_stokes_i(raw: np.ndarray) -> tuple[np.ndarray, int]:
+def _normalise_polarization_order(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text.upper() if text else None
+
+
+def _build_stokes_i(raw: np.ndarray, polarization_order: str | None = None) -> tuple[np.ndarray, int]:
+    normalized_order = _normalise_polarization_order(polarization_order)
     if raw.ndim == 2:
-        return raw.T, 1
+        effective_npol = 2 if normalized_order == "IQUV" else 1
+        return raw.T, effective_npol
     aa = raw[:, 0, :].T
+    if normalized_order == "IQUV" and raw.shape[1] >= 4:
+        return aa, 2
     if raw.shape[1] >= 2:
         bb = raw[:, 1, :].T
         return aa + bb, 2
@@ -578,6 +589,9 @@ class YourFilterbankReader:
             start_mjd = float(start_mjd_raw)
             bw = float(abs(float(_coerce_header_field(header, "bw", path=source_path))))
             header_npol = max(1, int(_coerce_header_field(header, "npol", fallback=1, path=source_path)))
+            polarization_order = _normalise_polarization_order(
+                _decode_source_name(getattr(header, "poln_order", None))
+            )
             fch1 = float(_coerce_header_field(header, "fch1", path=source_path))
             nchans = int(_coerce_header_field(header, "nchans", path=source_path))
             nspectra = int(_coerce_header_field(header, "nspectra", path=source_path))
@@ -599,7 +613,7 @@ class YourFilterbankReader:
                 nread = min(nread, requested_nread)
 
             raw = reader.get_data(nstart, nread, npoln=header_npol)
-            stokes_i, effective_npol = _build_stokes_i(raw)
+            stokes_i, effective_npol = _build_stokes_i(raw, polarization_order=polarization_order)
             effective_npol = (
                 max(1, int(config.npol_override)) if config.npol_override is not None else effective_npol
             )
@@ -629,6 +643,7 @@ class YourFilterbankReader:
             npol=effective_npol,
             freqs_mhz=freqs_mhz,
             header_npol=header_npol,
+            polarization_order=polarization_order,
             telescope_id=filterbank_inspection.telescope_id,
             machine_id=filterbank_inspection.machine_id,
             detected_preset_key=filterbank_inspection.detected_preset_key,

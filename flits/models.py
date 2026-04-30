@@ -563,6 +563,8 @@ class SessionSourceRef:
     data_dir_relative_path: str | None = None
     content_hash_algorithm: str | None = None
     content_hash_sha256: str | None = None
+    header_npol: int | None = None
+    polarization_order: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -575,6 +577,8 @@ class SessionSourceRef:
             "freqres": float(self.freqres),
             "start_mjd": float(self.start_mjd),
             "npol": int(self.npol),
+            "header_npol": None if self.header_npol is None else int(self.header_npol),
+            "polarization_order": self.polarization_order,
             "freq_range_mhz": [float(value) for value in self.freq_range_mhz],
             "file_name": self.file_name,
             "data_dir_relative_path": self.data_dir_relative_path,
@@ -600,6 +604,8 @@ class SessionSourceRef:
             data_dir_relative_path=payload.get("data_dir_relative_path"),
             content_hash_algorithm=payload.get("content_hash_algorithm"),
             content_hash_sha256=payload.get("content_hash_sha256"),
+            header_npol=_int_or_none(payload.get("header_npol")),
+            polarization_order=payload.get("polarization_order"),
         )
 
 
@@ -620,6 +626,7 @@ class FilterbankMetadata:
     machine_id: int | None
     detected_preset_key: str
     detection_basis: str
+    polarization_order: str | None = None
     source_ra_deg: float | None = None
     source_dec_deg: float | None = None
     source_position_frame: str = "icrs"
@@ -643,6 +650,7 @@ class FilterbankMetadata:
             "bandwidth_mhz": self.bandwidth_mhz,
             "npol": self.npol,
             "header_npol": self.header_npol,
+            "polarization_order": self.polarization_order,
             "telescope_id": self.telescope_id,
             "machine_id": self.machine_id,
             "detected_preset_key": self.detected_preset_key,
@@ -674,6 +682,7 @@ class FilterbankMetadata:
             npol=int(payload["npol"]),
             freqs_mhz=_array_1d(payload.get("freqs_mhz"), dtype=float),
             header_npol=int(payload["header_npol"]),
+            polarization_order=payload.get("polarization_order"),
             telescope_id=_int_or_none(payload.get("telescope_id")),
             machine_id=_int_or_none(payload.get("machine_id")),
             detected_preset_key=str(payload["detected_preset_key"]),
