@@ -24,12 +24,20 @@ outputs. They are useful for:
 - sharing a reproducible interactive state
 - archiving the exact crop/mask/selection choices used in an analysis
 
+Use **Save Session** to write the current session next to the source data in a
+`snapshots/` folder. If the session was opened from an existing saved snapshot,
+**Save Session** updates that JSON file. Use **Save Copy** when you want a
+timestamped copy instead. The **Saved Sessions** browser can search stored
+snapshots by source, file name, note text, preset, and DM, then reopen a
+matching session directly.
+
 Snapshots do not embed the raw filterbank data. To share a snapshot with someone
-else, send them the JSON snapshot and make sure they start FLITS with
-`--data-dir` or `FLITS_DATA_DIR` pointing at a directory that contains the same
-source data file. FLITS records the source file name, data-directory-relative
-path when available, file size, SHA-256 content hash, and scientific metadata so
-the import can find moved/copied data and reject the wrong file.
+else, use **Download JSON** or send the saved JSON file and make sure they start
+FLITS with `--data-dir` or `FLITS_DATA_DIR` pointing at a directory that
+contains the same source data file. FLITS records the source file name,
+data-directory-relative path when available, file size, SHA-256 content hash,
+and scientific metadata so the import can find moved/copied data and reject the
+wrong file.
 
 ## Recommended practice
 
