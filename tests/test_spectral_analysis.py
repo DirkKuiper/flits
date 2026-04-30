@@ -243,11 +243,29 @@ class SpectralAnalysisTest(unittest.TestCase):
         self.assertLess(crossover["crossover_frequency_hz_3sigma_low"] or 0.0, crossover["crossover_frequency_hz"] or 0.0)
         self.assertGreater(crossover["crossover_frequency_hz_3sigma_high"] or 0.0, crossover["crossover_frequency_hz"] or 0.0)
 
-        out_of_band = _fit_crossover_frequency(fit, np.geomspace(20.0, 2_000.0, 40))
-        self.assertEqual(out_of_band["crossover_frequency_status"], "out_of_band")
+        above_band = _fit_crossover_frequency(fit, np.geomspace(20.0, 2_000.0, 40))
+        self.assertEqual(above_band["crossover_frequency_status"], "above_band")
+
+        below_band = _fit_crossover_frequency(fit, np.geomspace(20_000.0, 200_000.0, 40))
+        self.assertEqual(below_band["crossover_frequency_status"], "below_band")
 
         unavailable = _fit_crossover_frequency({"fit_status": "underconstrained"}, freq_hz)
         self.assertEqual(unavailable["crossover_frequency_status"], "unavailable")
+
+    def test_bounded_power_law_fit_handles_high_dynamic_range_above_band_crossover(self) -> None:
+        freq_hz = np.geomspace(266.8, 48_828.1, 183)
+        expected_crossover_hz = 83_000.0
+        alpha = 1.9
+        floor = 1.2
+        model_power = floor * (expected_crossover_hz**alpha) * freq_hz ** (-alpha) + floor
+
+        fit = _fit_power_law_model(freq_hz, model_power, 4)
+        crossover = _fit_crossover_frequency(fit, freq_hz)
+
+        self.assertEqual(fit["fit_status"], "ok")
+        self.assertAlmostEqual(fit["power_law_alpha"] or 0.0, alpha, delta=0.05)
+        self.assertEqual(crossover["crossover_frequency_status"], "above_band")
+        self.assertAlmostEqual(crossover["crossover_frequency_hz"] or 0.0, expected_crossover_hz, delta=1500.0)
 
     def test_run_temporal_structure_analysis_reports_minimum_structure_and_psd(self) -> None:
         rng = np.random.default_rng(99)
