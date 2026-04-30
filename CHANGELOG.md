@@ -4,6 +4,13 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [0.4.0](https://github.com/DirkKuiper/flits/compare/flits-v0.3.0...flits-v0.4.0) (2026-04-30)
+
+
+### Features
+
+* **session:** add saved session library and portable snapshots ([89d324f](https://github.com/DirkKuiper/flits/commit/89d324fb6146b706c9c8c59e37906d8f3cccc418))
+
 ## [0.3.0](https://github.com/DirkKuiper/flits/compare/flits-v0.2.1...flits-v0.3.0) (2026-04-23)
 
 
