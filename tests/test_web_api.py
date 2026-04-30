@@ -433,8 +433,19 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("compute_widths", app_js)
         self.assertIn("saveSessionSnapshot", app_js)
         self.assertIn("loadSnapshotLibrary", app_js)
+        self.assertIn("await loadSnapshotLibrary()", app_js)
         self.assertIn("openStoredSession", app_js)
         self.assertIn("renderSnapshotLibrary", app_js)
+        self.assertIn('<option value="">Choose saved session</option>', app_js)
+        self.assertNotIn('state.selectedSnapshotId = snapshots[0]?.id || ""', app_js)
+        self.assertIn(
+            """function setSnapshotLibrary(payload) {
+  state.snapshotLibrary = Array.isArray(payload?.sessions) ? payload.sessions : []
+  state.snapshotLibraryErrors = Array.isArray(payload?.errors) ? payload.errors : []
+  updateControlStates()
+}""",
+            app_js,
+        )
         self.assertIn("downloadSessionSnapshot", app_js)
         self.assertIn("importSessionSnapshot", app_js)
         self.assertIn("dm_phase", app_js)

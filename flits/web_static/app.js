@@ -363,13 +363,12 @@ function bindControls() {
   importSessionInput.addEventListener("change", (event) => importSessionSnapshot(event))
   snapshotDirectorySelect.addEventListener("change", () => {
     state.selectedSnapshotDirectory = snapshotDirectorySelect.value
-    const firstSnapshot = snapshotsForDirectory(state.selectedSnapshotDirectory)[0]
-    state.selectedSnapshotId = firstSnapshot?.id || ""
-    renderSnapshotLibrary()
+    state.selectedSnapshotId = ""
+    updateControlStates()
   })
   snapshotFileSelect.addEventListener("change", () => {
     state.selectedSnapshotId = snapshotFileSelect.value
-    renderSnapshotLibrary()
+    updateControlStates()
   })
   refreshSnapshotsButton.addEventListener("click", () => loadSnapshotLibrary({ refresh: true }))
   openSnapshotButton.addEventListener("click", () => openStoredSession(state.selectedSnapshotId))
@@ -889,7 +888,7 @@ async function openStoredSession(snapshotId) {
 function setSnapshotLibrary(payload) {
   state.snapshotLibrary = Array.isArray(payload?.sessions) ? payload.sessions : []
   state.snapshotLibraryErrors = Array.isArray(payload?.errors) ? payload.errors : []
-  renderSnapshotLibrary()
+  updateControlStates()
 }
 
 async function api(path, options = {}) {
@@ -1554,16 +1553,19 @@ function renderSnapshotLibrary() {
   }
 
   const snapshots = snapshotsForDirectory(state.selectedSnapshotDirectory)
-  if (!snapshots.some((snapshot) => snapshot.id === state.selectedSnapshotId)) {
-    state.selectedSnapshotId = snapshots[0]?.id || ""
+  if (state.selectedSnapshotId && !snapshots.some((snapshot) => snapshot.id === state.selectedSnapshotId)) {
+    state.selectedSnapshotId = ""
   }
 
   snapshotDirectorySelect.innerHTML = groups
     .map((group) => `<option value="${escapeHtml(group.path)}">${escapeHtml(`${group.label} (${group.snapshots.length})`)}</option>`)
     .join("")
   snapshotDirectorySelect.value = state.selectedSnapshotDirectory
-  snapshotFileSelect.innerHTML = snapshots
-    .map((snapshot) => `<option value="${escapeHtml(snapshot.id)}">${escapeHtml(snapshotOptionLabel(snapshot))}</option>`)
+  snapshotFileSelect.innerHTML = [
+    '<option value="">Choose saved session</option>',
+    ...snapshots
+      .map((snapshot) => `<option value="${escapeHtml(snapshot.id)}">${escapeHtml(snapshotOptionLabel(snapshot))}</option>`),
+  ]
     .join("")
   snapshotFileSelect.value = state.selectedSnapshotId
 
