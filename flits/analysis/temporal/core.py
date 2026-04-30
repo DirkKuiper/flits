@@ -34,6 +34,7 @@ MIN_POWER_LAW_BINS = 12
 DEFAULT_SIGNIFICANCE_SIGMA = 5.0
 CROSSOVER_UNCERTAINTY_SIGMA = 3.0
 FWHM_PER_SIGMA = float(2.0 * np.sqrt(2.0 * np.log(2.0)))
+POWER_LAW_ALPHA_BOUNDS = (0.0, 10.0)
 
 
 def _diagnostic_uncertainty_detail(
@@ -355,6 +356,63 @@ def _scan_minimum_structure(
     }
 
 
+def _power_law_failure(status: str, message: str) -> dict[str, Any]:
+    return {
+        "fit_status": status,
+        "fit_message": message,
+        "power_law_a": None,
+        "power_law_alpha": None,
+        "power_law_c": None,
+        "power_law_a_err": None,
+        "power_law_alpha_err": None,
+        "power_law_c_err": None,
+    }
+
+
+def _finite_difference_hessian(function: Callable[[np.ndarray], float], params: np.ndarray) -> np.ndarray | None:
+    params = np.asarray(params, dtype=float)
+    if params.size != 3 or not np.all(np.isfinite(params)):
+        return None
+    base = float(function(params))
+    if not np.isfinite(base):
+        return None
+
+    steps = np.asarray([max(1e-4, abs(value) * 1e-4) for value in params], dtype=float)
+    hessian = np.empty((params.size, params.size), dtype=float)
+    for i in range(params.size):
+        plus = params.copy()
+        minus = params.copy()
+        plus[i] += steps[i]
+        minus[i] -= steps[i]
+        plus_value = float(function(plus))
+        minus_value = float(function(minus))
+        if not np.isfinite(plus_value) or not np.isfinite(minus_value):
+            return None
+        hessian[i, i] = (plus_value - 2.0 * base + minus_value) / (steps[i] ** 2)
+
+    for i in range(params.size):
+        for j in range(i + 1, params.size):
+            pp = params.copy()
+            pm = params.copy()
+            mp = params.copy()
+            mm = params.copy()
+            pp[i] += steps[i]
+            pp[j] += steps[j]
+            pm[i] += steps[i]
+            pm[j] -= steps[j]
+            mp[i] -= steps[i]
+            mp[j] += steps[j]
+            mm[i] -= steps[i]
+            mm[j] -= steps[j]
+            values = [float(function(point)) for point in (pp, pm, mp, mm)]
+            if not all(np.isfinite(value) for value in values):
+                return None
+            hessian[i, j] = hessian[j, i] = (values[0] - values[1] - values[2] + values[3]) / (
+                4.0 * steps[i] * steps[j]
+            )
+    return hessian if np.all(np.isfinite(hessian)) else None
+
+
 def _fit_power_law_model(
     freq_hz: np.ndarray,
     power: np.ndarray,
@@ -365,115 +423,137 @@ def _fit_power_law_model(
     """Fit ``P(f) = a f^-alpha + c`` to a positive averaged PSD.
 
     The fit is carried out in a Poisson-like likelihood on the linear PSD
-    values after seeding the parameters from a log-log linear regression.
+    values using bounded multi-start optimization. Internally the model is
+    evaluated as ``A_ref * (f / f_ref)^-alpha + c`` and converted back to the
+    historical ``a * f^-alpha + c`` parameterization on return.
     """
-    valid_mask = (np.asarray(freq_hz, dtype=float) > 0) & (np.asarray(power, dtype=float) > 0)
+    freq_values = np.asarray(freq_hz, dtype=float)
+    power_values = np.asarray(power, dtype=float)
+    valid_mask = (freq_values > 0) & (power_values > 0)
     valid_count = int(np.count_nonzero(valid_mask))
     if valid_count < min_valid_bins:
-        return {
-            "fit_status": "underconstrained",
-            "fit_message": (
+        return _power_law_failure(
+            "underconstrained",
+            (
                 f"Power-law fit omitted: only {valid_count} positive-power bins are available; "
                 f"need at least {min_valid_bins} for a stable 3-parameter fit."
             ),
-            "power_law_a": None,
-            "power_law_alpha": None,
-            "power_law_c": None,
-            "power_law_a_err": None,
-            "power_law_alpha_err": None,
-            "power_law_c_err": None,
-        }
+        )
 
-    fit_freq = np.asarray(freq_hz[valid_mask], dtype=float)
-    fit_power = np.asarray(power[valid_mask], dtype=float)
-    fit_f = np.log10(fit_freq)
-    fit_p = np.log10(fit_power)
-    try:
-        popt, _pcov = np.polyfit(fit_f, fit_p, 1, cov=True)
-    except Exception as exc:
-        return {
-            "fit_status": "fit_failed",
-            "fit_message": f"Power-law fit failed during initialization: {exc}",
-            "power_law_a": None,
-            "power_law_alpha": None,
-            "power_law_c": None,
-            "power_law_a_err": None,
-            "power_law_alpha_err": None,
-            "power_law_c_err": None,
-        }
-
-    alpha_guess = float(-popt[0])
-    a_guess = float(10 ** float(popt[1]))
+    fit_freq = np.asarray(freq_values[valid_mask], dtype=float)
+    fit_power = np.asarray(power_values[valid_mask], dtype=float)
     f_ref = float(np.exp(np.mean(np.log(fit_freq))))
+    log_freq_ratio = np.log(fit_freq / f_ref)
+    log_power = np.log(fit_power)
+    try:
+        slope, intercept = np.polyfit(log_freq_ratio, log_power, 1)
+    except Exception as exc:
+        return _power_law_failure("fit_failed", f"Power-law fit failed during initialization: {exc}")
 
     tail_count = max(3, int(ceil(valid_count / 4.0)))
     c_guess = float(np.median(fit_power[-tail_count:]))
     if not np.isfinite(c_guess) or c_guess <= 0:
         c_guess = max(float(np.min(fit_power)), np.finfo(float).tiny)
-    a_ref_guess = max(a_guess * (f_ref ** -alpha_guess), np.finfo(float).tiny)
+    alpha_guess = float(np.clip(-float(slope), POWER_LAW_ALPHA_BOUNDS[0], POWER_LAW_ALPHA_BOUNDS[1]))
+    a_ref_guess = max(float(np.exp(intercept)) - c_guess, np.finfo(float).tiny)
     multiplier = float(max(1, int(segment_count)))
+    min_power = max(float(np.min(fit_power)), np.finfo(float).tiny)
+    max_power = max(float(np.max(fit_power)), min_power * (1.0 + np.finfo(float).eps))
+    log_lower = float(np.log(min_power * 1e-8))
+    log_upper = float(np.log(max_power * 1e8))
+    log_c_upper = float(np.log(max_power * 1e5))
+    bounds = [
+        (log_lower, log_upper),
+        POWER_LAW_ALPHA_BOUNDS,
+        (log_lower, log_c_upper),
+    ]
 
     def nll(params: np.ndarray) -> float:
         log_a_ref, alpha_param, log_c = [float(value) for value in params]
-        log_model = log_a_ref - alpha_param * np.log(fit_freq / f_ref)
-        model = np.exp(np.clip(log_model, -100, 100)) + np.exp(np.clip(log_c, -100, 100))
+        if not (bounds[0][0] <= log_a_ref <= bounds[0][1] and bounds[1][0] <= alpha_param <= bounds[1][1]):
+            return np.inf
+        if not bounds[2][0] <= log_c <= bounds[2][1]:
+            return np.inf
+        log_model = log_a_ref - alpha_param * log_freq_ratio
+        model = np.exp(np.clip(log_model, -700, 700)) + np.exp(np.clip(log_c, -700, 700))
+        if not np.all(np.isfinite(model)) or np.any(model <= 0):
+            return np.inf
         return float(np.sum(fit_power / model + np.log(model)))
 
-    res = minimize(
-        nll,
-        np.asarray([np.log(a_ref_guess), alpha_guess, np.log(c_guess)], dtype=float),
-        method="BFGS",
-    )
-    if not bool(getattr(res, "success", False)) or getattr(res, "x", None) is None or not np.all(np.isfinite(res.x)):
-        return {
-            "fit_status": "fit_failed",
-            "fit_message": "Power-law fit did not converge to a stable solution.",
-            "power_law_a": None,
-            "power_law_alpha": None,
-            "power_law_c": None,
-            "power_law_a_err": None,
-            "power_law_alpha_err": None,
-            "power_law_c_err": None,
-        }
+    starts: list[np.ndarray] = []
+    alpha_starts = sorted({alpha_guess, 0.05, 0.1, 0.5, 1.0, 2.0, 3.0, 5.0})
+    c_scales = (0.1, 0.25, 0.75, 1.0, 1.5, 3.0, 10.0)
+    for alpha_start in alpha_starts:
+        alpha_start = float(np.clip(alpha_start, POWER_LAW_ALPHA_BOUNDS[0], POWER_LAW_ALPHA_BOUNDS[1]))
+        for c_scale in c_scales:
+            c_start = float(np.clip(c_guess * c_scale, np.exp(log_lower), np.exp(log_c_upper)))
+            residual_power = np.maximum(fit_power - c_start, np.finfo(float).tiny)
+            a_start = max(a_ref_guess, float(np.median(residual_power)), np.finfo(float).tiny)
+            starts.append(np.asarray([np.log(a_start), alpha_start, np.log(c_start)], dtype=float))
 
-    cov = np.asarray(getattr(res, "hess_inv", np.empty((0, 0))), dtype=float)
-    if cov.shape != (3, 3) or not np.all(np.isfinite(cov)) or np.any(np.diag(cov) < 0):
-        return {
-            "fit_status": "unstable_covariance",
-            "fit_message": "Power-law fit converged, but the covariance estimate was unstable; uncertainties omitted.",
-            "power_law_a": None,
-            "power_law_alpha": None,
-            "power_law_c": None,
-            "power_law_a_err": None,
-            "power_law_alpha_err": None,
-            "power_law_c_err": None,
-        }
-    cov = cov / multiplier
+    best_result: Any | None = None
+    for start in starts:
+        result = minimize(
+            nll,
+            start,
+            method="L-BFGS-B",
+            bounds=bounds,
+            options={"maxiter": 20_000, "ftol": 1e-10},
+        )
+        if (
+            bool(getattr(result, "success", False))
+            and getattr(result, "x", None) is not None
+            and np.all(np.isfinite(result.x))
+            and np.isfinite(float(getattr(result, "fun", np.inf)))
+        ):
+            if best_result is None or float(result.fun) < float(best_result.fun):
+                best_result = result
 
-    log_a_ref_opt, alpha_opt, log_c_opt = [float(value) for value in res.x]
+    if best_result is None:
+        return _power_law_failure("fit_failed", "Power-law fit did not converge to a stable bounded solution.")
+
+    log_a_ref_opt, alpha_opt, log_c_opt = [float(value) for value in best_result.x]
     a_ref_opt = float(np.exp(log_a_ref_opt))
     a_opt = float(a_ref_opt * (f_ref ** alpha_opt))
     c_opt = float(np.exp(log_c_opt))
-    grad = np.asarray([a_opt, a_opt * np.log(f_ref)], dtype=float)
-    a_err = float(np.sqrt(np.dot(grad, np.dot(cov[:2, :2], grad))))
-    alpha_err = float(np.sqrt(np.diag(cov)[1]))
-    c_err = float(c_opt * np.sqrt(np.diag(cov)[2]))
 
-    if not all(np.isfinite(value) for value in (a_opt, alpha_opt, c_opt, a_err, alpha_err, c_err)):
-        return {
-            "fit_status": "unstable_covariance",
-            "fit_message": "Power-law fit converged, but the parameter covariance was not finite.",
-            "power_law_a": None,
-            "power_law_alpha": None,
-            "power_law_c": None,
-            "power_law_a_err": None,
-            "power_law_alpha_err": None,
-            "power_law_c_err": None,
-        }
+    cov = None
+    hessian = _finite_difference_hessian(nll, np.asarray(best_result.x, dtype=float))
+    if hessian is not None:
+        try:
+            candidate_cov = np.linalg.inv(hessian) / multiplier
+        except np.linalg.LinAlgError:
+            candidate_cov = None
+        if (
+            candidate_cov is not None
+            and candidate_cov.shape == (3, 3)
+            and np.all(np.isfinite(candidate_cov))
+            and np.all(np.diag(candidate_cov) >= 0)
+        ):
+            cov = candidate_cov
+
+    a_err = None
+    alpha_err = None
+    c_err = None
+    fit_message = None
+    if cov is not None:
+        grad = np.asarray([a_opt, a_opt * np.log(f_ref)], dtype=float)
+        a_variance = float(np.dot(grad, np.dot(cov[:2, :2], grad)))
+        alpha_variance = float(cov[1, 1])
+        c_variance = float((c_opt**2) * cov[2, 2])
+        if a_variance >= 0 and alpha_variance >= 0 and c_variance >= 0:
+            a_err = float(np.sqrt(a_variance))
+            alpha_err = float(np.sqrt(alpha_variance))
+            c_err = float(np.sqrt(c_variance))
+        if not all(value is not None and np.isfinite(value) for value in (a_err, alpha_err, c_err)):
+            a_err = alpha_err = c_err = None
+            cov = None
+    if cov is None:
+        fit_message = "Power-law fit converged, but covariance-based uncertainties were unavailable."
 
     return {
         "fit_status": "ok",
-        "fit_message": None,
+        "fit_message": fit_message,
         "power_law_a": a_opt,
         "power_law_alpha": alpha_opt,
         "power_law_c": c_opt,
@@ -548,7 +628,14 @@ def _fit_crossover_frequency(power_law: dict[str, Any], freq_hz: np.ndarray) -> 
     positive_freq = positive_freq[np.isfinite(positive_freq) & (positive_freq > 0)]
     status = "unavailable"
     if positive_freq.size:
-        status = "ok" if float(np.min(positive_freq)) <= crossover_hz <= float(np.max(positive_freq)) else "out_of_band"
+        min_freq = float(np.min(positive_freq))
+        max_freq = float(np.max(positive_freq))
+        if min_freq <= crossover_hz <= max_freq:
+            status = "ok"
+        elif crossover_hz < min_freq:
+            status = "below_band"
+        else:
+            status = "above_band"
 
     return {
         "crossover_frequency_hz": crossover_hz,
