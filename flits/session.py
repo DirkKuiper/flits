@@ -56,7 +56,9 @@ try:
     import jess.channel_masks as _jess_channel_masks
 
     jess = SimpleNamespace(channel_masks=_jess_channel_masks)
-except Exception:  # pragma: no cover - optional dependency
+    _jess_import_error: Exception | None = None
+except Exception as exc:  # pragma: no cover - optional dependency
+    _jess_import_error = exc
     jess = SimpleNamespace(channel_masks=SimpleNamespace(channel_masker=None))
 
 
@@ -1595,6 +1597,9 @@ class BurstSession:
 
     def auto_mask_jess(self, profile: str | None = None) -> None:
         if jess.channel_masks.channel_masker is None:
+            if _jess_import_error is not None:
+                message = f"{type(_jess_import_error).__name__}: {_jess_import_error}"
+                raise RuntimeError(f"Jess is not available in the active environment: {message}") from _jess_import_error
             raise RuntimeError("Jess is not installed in the active environment.")
 
         mask_profile = get_auto_mask_profile(self.config.auto_mask_profile if profile is None else profile)
