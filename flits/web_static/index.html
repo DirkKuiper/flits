@@ -123,11 +123,35 @@
             <h2>Session</h2>
             <span class="panel-badge" id="sessionBadge">Not loaded</span>
           </div>
-          <div class="button-grid two">
-            <button class="ghost-button" id="exportSessionButton">Export Session</button>
-            <label class="file-button" for="importSessionInput">Import Session</label>
+          <div class="session-save-status" id="sessionSaveStatus">No live session</div>
+          <div class="session-action-grid">
+            <button class="primary-button" id="saveSessionButton">Save Session</button>
+            <button class="ghost-button" id="saveSessionCopyButton">Save Copy</button>
+            <button class="ghost-button" id="exportSessionButton">Download JSON</button>
+            <label class="file-button" for="importSessionInput">Upload JSON</label>
             <input id="importSessionInput" type="file" accept="application/json" hidden>
           </div>
+          <details class="details-card snapshot-library" open>
+            <summary>Saved Sessions</summary>
+            <div class="snapshot-library-body">
+              <label class="field">
+                <span>Snapshot folder</span>
+                <select id="snapshotDirectorySelect"></select>
+              </label>
+              <label class="field">
+                <span>Saved session</span>
+                <select id="snapshotFileSelect"></select>
+              </label>
+              <div class="snapshot-library-actions">
+                <button class="ghost-button" id="refreshSnapshotsButton">Refresh</button>
+                <button class="primary-button" id="openSnapshotButton">Open</button>
+              </div>
+              <div class="snapshot-library-meta" id="snapshotLibraryMeta">Loading saved sessions.</div>
+              <div class="snapshot-preview" id="snapshotPreview">
+                <div class="empty-state compact">Choose a saved session to preview it.</div>
+              </div>
+            </div>
+          </details>
           <div class="session-summary" id="sessionSummary">
             <div class="summary-card"><span>Profile</span><strong>Not loaded</strong></div>
             <div class="summary-card"><span>Detection</span><strong>-</strong></div>

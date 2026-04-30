@@ -2,10 +2,22 @@ from __future__ import annotations
 
 import unittest
 
-from flits.settings import detect_preset
+from flits.settings import ObservationConfig, detect_preset, get_preset
 
 
 class DetectPresetCascadeTest(unittest.TestCase):
+    def test_nrt_preset_defaults_to_full_file_read(self) -> None:
+        preset = get_preset("nrt")
+
+        self.assertEqual(preset.read_start_sec, 0.0)
+        self.assertIsNone(preset.read_end_sec)
+
+    def test_nrt_observation_config_defaults_to_full_file_read(self) -> None:
+        config = ObservationConfig.from_preset(dm=0.0, preset_key="nrt")
+
+        self.assertEqual(config.read_start_sec, 0.0)
+        self.assertIsNone(config.read_end_sec)
+
     def test_telescope_id_wins_over_other_hints(self) -> None:
         # telescope_id=6 is GBT; other hints would point at CHIME if consulted.
         preset_key, basis = detect_preset(

@@ -12,6 +12,12 @@ class TelescopeDetectionTest(unittest.TestCase):
         self.assertEqual(preset_key, "gbt")
         self.assertEqual(detection_basis, "matched telescope_id=6")
 
+    def test_detects_stockert_from_telescope_id(self) -> None:
+        preset_key, detection_basis = detect_preset(16, 8)
+
+        self.assertEqual(preset_key, "stockert")
+        self.assertEqual(detection_basis, "matched telescope_id=16")
+
     def test_detects_lofar_from_machine_id_when_telescope_is_missing(self) -> None:
         preset_key, detection_basis = detect_preset(None, 11)
 

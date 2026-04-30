@@ -20,6 +20,12 @@ const state = {
   dmUserEditedForPath: null,
   busyAction: null,
   knownFileDirectories: [],
+  snapshotLibrary: [],
+  snapshotLibraryErrors: [],
+  selectedSnapshotDirectory: "",
+  selectedSnapshotId: "",
+  activeSnapshot: null,
+  sessionDirty: false,
 }
 
 const modeLabels = {
@@ -124,8 +130,17 @@ const exportPreviewMeta = document.getElementById("exportPreviewMeta")
 const exportPreviewThumbs = document.getElementById("exportPreviewThumbs")
 const exportPreviewContent = document.getElementById("exportPreviewContent")
 const exportManifestContent = document.getElementById("exportManifestContent")
+const sessionSaveStatus = document.getElementById("sessionSaveStatus")
+const saveSessionButton = document.getElementById("saveSessionButton")
+const saveSessionCopyButton = document.getElementById("saveSessionCopyButton")
 const exportSessionButton = document.getElementById("exportSessionButton")
 const importSessionInput = document.getElementById("importSessionInput")
+const snapshotDirectorySelect = document.getElementById("snapshotDirectorySelect")
+const snapshotFileSelect = document.getElementById("snapshotFileSelect")
+const refreshSnapshotsButton = document.getElementById("refreshSnapshotsButton")
+const openSnapshotButton = document.getElementById("openSnapshotButton")
+const snapshotLibraryMeta = document.getElementById("snapshotLibraryMeta")
+const snapshotPreview = document.getElementById("snapshotPreview")
 const notesInput = document.getElementById("notesInput")
 const saveNotesButton = document.getElementById("saveNotesButton")
 const setDmButton = document.getElementById("setDmButton")
@@ -215,6 +230,8 @@ const sessionControls = [
   exportWindowFil,
   exportWindowNative,
   exportWindowView,
+  saveSessionButton,
+  saveSessionCopyButton,
   exportSessionButton,
   saveNotesButton,
   resetViewButton,
@@ -254,6 +271,10 @@ const busyLockControls = [
   observatoryHeightInput,
   autoMaskProfileInput,
   dmMetricInput,
+  snapshotDirectorySelect,
+  snapshotFileSelect,
+  refreshSnapshotsButton,
+  openSnapshotButton,
   notesInput,
   dmHalfRangeInput,
   dmStepInput,
@@ -271,6 +292,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadPresets()
   await loadAutoMaskProfiles()
   await loadFiles()
+  await loadSnapshotLibrary()
   // Removed auto-loading logic. Waiting for explicit user action.
 })
 
@@ -335,8 +357,21 @@ function bindControls() {
   updateTimingButton.addEventListener("click", () => {
     postAction("set_timing_metadata", timingMetadataPayload())
   })
+  saveSessionButton.addEventListener("click", () => saveSessionSnapshot(false))
+  saveSessionCopyButton.addEventListener("click", () => saveSessionSnapshot(true))
   exportSessionButton.addEventListener("click", () => downloadSessionSnapshot())
   importSessionInput.addEventListener("change", (event) => importSessionSnapshot(event))
+  snapshotDirectorySelect.addEventListener("change", () => {
+    state.selectedSnapshotDirectory = snapshotDirectorySelect.value
+    state.selectedSnapshotId = ""
+    updateControlStates()
+  })
+  snapshotFileSelect.addEventListener("change", () => {
+    state.selectedSnapshotId = snapshotFileSelect.value
+    updateControlStates()
+  })
+  refreshSnapshotsButton.addEventListener("click", () => loadSnapshotLibrary({ refresh: true }))
+  openSnapshotButton.addEventListener("click", () => openStoredSession(state.selectedSnapshotId))
   dmMetricInput.addEventListener("change", () => {
     if (state.view) {
       renderDmOptimization(state.view)
@@ -733,6 +768,8 @@ async function importSessionSnapshot(event) {
       body: JSON.stringify({ snapshot }),
     })
     state.sessionId = payload.session_id
+    state.activeSnapshot = null
+    state.sessionDirty = false
     state.exportManifest = null
     resetExportSelection()
     applyView(payload.view)
@@ -752,6 +789,106 @@ async function importSessionSnapshot(event) {
     importSessionInput.value = ""
     setBusy(null)
   }
+}
+
+async function loadSnapshotLibrary(options = {}) {
+  const { refresh = false, silent = false } = options
+  if (!silent) {
+    snapshotLibraryMeta.textContent = refresh ? "Refreshing saved sessions." : "Loading saved sessions."
+  }
+  if (refresh) {
+    setBusy("refresh_snapshots")
+  }
+  try {
+    const payload = await api(refresh ? "/api/session-snapshots/refresh" : "/api/session-snapshots", {
+      method: refresh ? "POST" : "GET",
+    })
+    setSnapshotLibrary(payload)
+    if (refresh) {
+      showToast("Saved sessions refreshed", "success")
+    }
+  } catch (error) {
+    snapshotLibraryMeta.textContent = error.message
+    showToast(error.message, "error")
+  } finally {
+    if (refresh) {
+      setBusy(null)
+    }
+  }
+}
+
+async function saveSessionSnapshot(saveAs = false) {
+  if (!state.sessionId) {
+    setStatus("Load a session first", "error")
+    showToast("Load a session first", "error")
+    return
+  }
+
+  setBusy(saveAs ? "save_session_copy" : "save_session")
+  setStatus(saveAs ? "Saving copy" : "Saving session", "info")
+  try {
+    const payload = await api(`/api/sessions/${state.sessionId}/snapshot/save`, {
+      method: "POST",
+      body: JSON.stringify({ save_as: Boolean(saveAs) }),
+    })
+    state.activeSnapshot = payload.snapshot || null
+    state.sessionDirty = false
+    state.selectedSnapshotDirectory = snapshotDirectoryForSnapshot(state.activeSnapshot)
+    state.selectedSnapshotId = state.activeSnapshot?.id || state.selectedSnapshotId
+    if (payload.library) {
+      setSnapshotLibrary(payload.library)
+    }
+    renderSessionSaveStatus()
+    setStatus("Session saved", "success")
+    showToast(saveAs ? "Session copy saved" : "Session saved", "success")
+  } catch (error) {
+    setStatus(error.message, "error")
+    showToast(error.message, "error")
+  } finally {
+    setBusy(null)
+  }
+}
+
+async function openStoredSession(snapshotId) {
+  if (!snapshotId) {
+    return
+  }
+
+  const previousSessionId = state.sessionId
+  setBusy("open_snapshot")
+  setStatus("Opening saved session", "info")
+  clearPending()
+  try {
+    const payload = await api(`/api/session-snapshots/${encodeURIComponent(snapshotId)}/open`, { method: "POST" })
+    state.sessionId = payload.session_id
+    state.activeSnapshot = payload.snapshot || null
+    state.sessionDirty = false
+    state.selectedSnapshotDirectory = snapshotDirectoryForSnapshot(state.activeSnapshot)
+    state.selectedSnapshotId = state.activeSnapshot?.id || snapshotId
+    state.exportManifest = null
+    resetExportSelection()
+    applyView(payload.view)
+    if (previousSessionId && previousSessionId !== payload.session_id) {
+      try {
+        await api(`/api/sessions/${previousSessionId}`, { method: "DELETE" })
+      } catch (cleanupError) {
+        console.warn("Failed to delete previous session", cleanupError)
+      }
+    }
+    setStatus("Saved session opened", "success")
+    showToast("Saved session opened", "success")
+  } catch (error) {
+    setStatus(error.message, "error")
+    showToast(error.message, "error")
+  } finally {
+    setBusy(null)
+  }
+}
+
+function setSnapshotLibrary(payload) {
+  state.snapshotLibrary = Array.isArray(payload?.sessions) ? payload.sessions : []
+  state.snapshotLibraryErrors = Array.isArray(payload?.errors) ? payload.errors : []
+  updateControlStates()
 }
 
 async function api(path, options = {}) {
@@ -1066,6 +1203,8 @@ async function loadSession(options = {}) {
       }),
     })
     state.sessionId = payload.session_id
+    state.activeSnapshot = null
+    state.sessionDirty = false
     state.exportManifest = null
     resetExportSelection()
     applyView(payload.view)
@@ -1135,6 +1274,9 @@ async function postAction(type, payload = {}) {
       markExportPreviewStale()
     }
     applyView(response.view)
+    if (actionChangesSessionSnapshot(type)) {
+      markSessionDirty()
+    }
     setStatus("Ready", "success")
     const message = type === "auto_mask_jess"
       ? autoMaskToastText(response.view.state.last_auto_mask)
@@ -1181,6 +1323,7 @@ function applyView(view) {
     `Refine the event window, off-pulse windows, component regions, masking, and spectral window directly in the viewer.`
   renderHero(view)
   renderSessionFacts(view)
+  renderSessionSaveStatus()
   renderPrepare(view)
   renderDmOptimization(view)
   renderFitting(view)
@@ -1314,6 +1457,7 @@ function renderSessionFacts(view) {
     ["Auto mask profile", view.meta.auto_mask_profile_label],
     ["npol", view.meta.npol === null || view.meta.npol === undefined ? "missing" : String(view.meta.npol)],
     ["Header npol", view.meta.header_npol === null || view.meta.header_npol === undefined ? "missing" : String(view.meta.header_npol)],
+    ["Polarization order", view.meta.polarization_order === null || view.meta.polarization_order === undefined ? "missing" : String(view.meta.polarization_order)],
     ["npol override", view.meta.npol_override === null || view.meta.npol_override === undefined ? "none" : String(view.meta.npol_override)],
     ["Telescope ID", view.meta.telescope_id === null ? "missing" : String(view.meta.telescope_id)],
     ["Machine ID", view.meta.machine_id === null ? "missing" : String(view.meta.machine_id)],
@@ -1338,6 +1482,7 @@ function renderSessionFacts(view) {
     ["Peaks", view.state.peak_ms.length ? view.state.peak_ms.map((value) => `${fmt(value, 2)} ms`).join(", ") : "auto"],
     ["Last auto mask", formatAutoMaskSummary(view.state.last_auto_mask)],
     ["Notes", view.state.notes || "none"],
+    ["Saved snapshot", state.activeSnapshot?.path || "not saved to library"],
     ["Masked channels", compactList(view.state.masked_channels)],
   ]
 
@@ -1347,6 +1492,202 @@ function renderSessionFacts(view) {
         `<div class="kv-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`,
     )
     .join("")
+}
+
+function renderSessionSaveStatus() {
+  if (!sessionSaveStatus) {
+    return
+  }
+  if (!state.sessionId) {
+    sessionSaveStatus.textContent = "No live session"
+    sessionSaveStatus.dataset.tone = "neutral"
+    sessionSaveStatus.title = ""
+    return
+  }
+  if (state.activeSnapshot && state.sessionDirty) {
+    sessionSaveStatus.textContent = "Unsaved changes"
+    sessionSaveStatus.dataset.tone = "warning"
+    sessionSaveStatus.title = state.activeSnapshot.path || ""
+    return
+  }
+  if (state.activeSnapshot) {
+    sessionSaveStatus.textContent = `Saved: ${state.activeSnapshot.file_name || "session snapshot"}`
+    sessionSaveStatus.dataset.tone = "success"
+    sessionSaveStatus.title = state.activeSnapshot.path || ""
+    return
+  }
+  sessionSaveStatus.textContent = state.sessionDirty ? "Unsaved new session" : "Not saved to library"
+  sessionSaveStatus.dataset.tone = state.sessionDirty ? "warning" : "neutral"
+  sessionSaveStatus.title = ""
+}
+
+function markSessionDirty() {
+  if (!state.sessionId) {
+    return
+  }
+  state.sessionDirty = true
+  renderSessionSaveStatus()
+}
+
+function actionChangesSessionSnapshot(action) {
+  return action !== "export_results"
+}
+
+function renderSnapshotLibrary() {
+  const groups = snapshotDirectoryGroups()
+  const total = state.snapshotLibrary.length
+  const errorCount = state.snapshotLibraryErrors.length
+
+  if (!groups.length) {
+    state.selectedSnapshotDirectory = ""
+    state.selectedSnapshotId = ""
+    snapshotDirectorySelect.innerHTML = '<option value="">No snapshot folders found</option>'
+    snapshotFileSelect.innerHTML = '<option value="">No saved sessions found</option>'
+    snapshotLibraryMeta.textContent = errorCount ? `${errorCount} index errors` : "No saved sessions found"
+    snapshotPreview.innerHTML = '<div class="empty-state compact">Save a session or refresh after adding snapshots.</div>'
+    return
+  }
+
+  if (!groups.some((group) => group.path === state.selectedSnapshotDirectory)) {
+    state.selectedSnapshotDirectory = snapshotDirectoryForSnapshot(state.activeSnapshot) || groups[0].path
+  }
+
+  const snapshots = snapshotsForDirectory(state.selectedSnapshotDirectory)
+  if (state.selectedSnapshotId && !snapshots.some((snapshot) => snapshot.id === state.selectedSnapshotId)) {
+    state.selectedSnapshotId = ""
+  }
+
+  snapshotDirectorySelect.innerHTML = groups
+    .map((group) => `<option value="${escapeHtml(group.path)}">${escapeHtml(`${group.label} (${group.snapshots.length})`)}</option>`)
+    .join("")
+  snapshotDirectorySelect.value = state.selectedSnapshotDirectory
+  snapshotFileSelect.innerHTML = [
+    '<option value="">Choose saved session</option>',
+    ...snapshots
+      .map((snapshot) => `<option value="${escapeHtml(snapshot.id)}">${escapeHtml(snapshotOptionLabel(snapshot))}</option>`),
+  ]
+    .join("")
+  snapshotFileSelect.value = state.selectedSnapshotId
+
+  snapshotLibraryMeta.textContent = total
+    ? `${groups.length} folders / ${total} saved sessions${errorCount ? `, ${errorCount} index errors` : ""}`
+    : (errorCount ? `${errorCount} index errors` : "No saved sessions found")
+
+  const selected = selectedSnapshot()
+  snapshotPreview.innerHTML = selected
+    ? renderSnapshotPreview(selected)
+    : '<div class="empty-state compact">Choose a saved session to preview it.</div>'
+}
+
+function snapshotDirectoryGroups() {
+  const grouped = new Map()
+  for (const snapshot of state.snapshotLibrary) {
+    const directory = snapshotDirectoryForSnapshot(snapshot)
+    if (!grouped.has(directory)) {
+      grouped.set(directory, [])
+    }
+    grouped.get(directory).push(snapshot)
+  }
+  return Array.from(grouped.entries())
+    .map(([path, snapshots]) => ({
+      path,
+      label: snapshotDirectoryLabel(path),
+      snapshots: snapshots.slice().sort(compareSnapshotsByFile),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+}
+
+function snapshotsForDirectory(directory) {
+  return state.snapshotLibrary
+    .filter((snapshot) => snapshotDirectoryForSnapshot(snapshot) === directory)
+    .sort(compareSnapshotsByFile)
+}
+
+function selectedSnapshot() {
+  return state.snapshotLibrary.find((snapshot) => snapshot.id === state.selectedSnapshotId) || null
+}
+
+function snapshotDirectoryForSnapshot(snapshot) {
+  if (!snapshot) {
+    return ""
+  }
+  const candidate = snapshot.relative_path || snapshot.path || ""
+  const normalized = String(candidate).replaceAll("\\", "/")
+  const index = normalized.lastIndexOf("/")
+  return index > 0 ? normalized.slice(0, index) : "snapshots"
+}
+
+function snapshotDirectoryLabel(path) {
+  if (!path) {
+    return "Snapshots"
+  }
+  return path
+}
+
+function compareSnapshotsByFile(a, b) {
+  const aName = a.source_file || a.file_name || ""
+  const bName = b.source_file || b.file_name || ""
+  const nameOrder = aName.localeCompare(bName, undefined, { numeric: true })
+  if (nameOrder !== 0) {
+    return nameOrder
+  }
+  return Number(b.saved_mtime_unix || 0) - Number(a.saved_mtime_unix || 0)
+}
+
+function snapshotOptionLabel(snapshot) {
+  const title = snapshot.source_file || snapshot.file_name || "Saved session"
+  const sourceName = snapshot.source_name ? ` / ${snapshot.source_name}` : ""
+  return `${title}${sourceName}`
+}
+
+function renderSnapshotPreview(snapshot) {
+  const title = snapshot.source_name || snapshot.source_file || snapshot.file_name || "Saved session"
+  const eventLabel = Array.isArray(snapshot.event_ms) && snapshot.event_ms.length === 2
+    ? `${fmt(snapshot.event_ms[0], 2)}-${fmt(snapshot.event_ms[1], 2)} ms`
+    : "event unknown"
+  const flags = [
+    snapshot.has_results ? "results" : null,
+    snapshot.has_dm_optimization ? "DM" : null,
+    snapshot.has_temporal_structure ? "temporal" : null,
+  ].filter(Boolean).join(" / ") || "state only"
+  const sourceTone = snapshot.source_exists ? "success" : "warning"
+  const sourceLabel = snapshot.source_exists ? "source found" : "source missing"
+  const active = state.activeSnapshot?.id === snapshot.id
+  return `
+    <div class="snapshot-preview-panel${active ? " is-active" : ""}">
+      <div class="snapshot-preview-main">
+        <strong>${escapeHtml(title)}</strong>
+        <span>${escapeHtml(snapshot.source_file || snapshot.file_name || "")}</span>
+        ${snapshot.notes_excerpt ? `<em>${escapeHtml(snapshot.notes_excerpt)}</em>` : ""}
+      </div>
+      <div class="snapshot-preview-meta">
+        <span>${escapeHtml(snapshot.preset_label || snapshot.preset_key || "preset")}</span>
+        <span>DM ${escapeHtml(fmt(snapshot.dm, 4))}</span>
+        <span>${escapeHtml(eventLabel)}</span>
+        <span>${escapeHtml(`${snapshot.masked_channel_count || 0} masked`)}</span>
+        <span>${escapeHtml(flags)}</span>
+        <span data-tone="${sourceTone}">${escapeHtml(sourceLabel)}</span>
+        <span>${escapeHtml(formatSnapshotTime(snapshot.saved_at_utc))}</span>
+      </div>
+    </div>
+  `
+}
+
+function formatSnapshotTime(value) {
+  if (!value) {
+    return "time unknown"
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return String(value)
+  }
+  return date.toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
 }
 
 function referenceToaCardData(results) {
@@ -4341,6 +4682,9 @@ function updateControlStates() {
   setDmButton.disabled = !hasSession || isBusy || !hasRequiredDm
   optimizeDmButton.disabled = !hasSession || isBusy || !hasRequiredDm
   applyBestDmButton.disabled = !hasSession || isBusy || !hasBestDm
+  snapshotDirectorySelect.disabled = isBusy || state.snapshotLibrary.length === 0
+  snapshotFileSelect.disabled = isBusy || snapshotsForDirectory(state.selectedSnapshotDirectory).length === 0
+  openSnapshotButton.disabled = isBusy || !state.selectedSnapshotId
   workspaceHeader.classList.toggle("is-loaded", hasSession)
 
   if (!hasSession) {
@@ -4350,6 +4694,8 @@ function updateControlStates() {
     dmOptimizeBadge.dataset.tone = "neutral"
   }
 
+  renderSessionSaveStatus()
+  renderSnapshotLibrary()
   syncBusyButtons()
 }
 
@@ -4372,8 +4718,12 @@ function syncBusyButtons() {
 
 function busyButtonForAction(action) {
   if (action === "load") return loadButton
+  if (action === "save_session") return saveSessionButton
+  if (action === "save_session_copy") return saveSessionCopyButton
   if (action === "export_session") return exportSessionButton
   if (action === "import_session") return exportSessionButton
+  if (action === "refresh_snapshots") return refreshSnapshotsButton
+  if (action === "open_snapshot") return openSnapshotButton
   if (action === "compute_properties") return computeButton
   if (action === "auto_mask_jess") return jessButton
   if (action === "optimize_dm") return optimizeDmButton
@@ -4390,8 +4740,12 @@ function busyButtonForAction(action) {
 
 function busyButtonText(action) {
   if (action === "load") return "Loading..."
+  if (action === "save_session") return "Saving..."
+  if (action === "save_session_copy") return "Saving Copy..."
   if (action === "export_session") return "Exporting..."
   if (action === "import_session") return "Importing..."
+  if (action === "refresh_snapshots") return "Refreshing..."
+  if (action === "open_snapshot") return "Opening..."
   if (action === "compute_properties") return "Computing..."
   if (action === "auto_mask_jess") return "Masking..."
   if (action === "optimize_dm") return "Sweeping DM..."
