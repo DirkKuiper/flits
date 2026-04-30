@@ -514,6 +514,10 @@ class BurstSession:
         return self.metadata.header_npol
 
     @property
+    def polarization_order(self) -> str | None:
+        return self.metadata.polarization_order
+
+    @property
     def freqs(self) -> np.ndarray:
         return self.metadata.freqs_mhz
 
@@ -1328,6 +1332,7 @@ class BurstSession:
                 "freqres_mhz": self.freqres,
                 "npol": self.npol,
                 "header_npol": self.header_npol,
+                "polarization_order": self.polarization_order,
                 "distance_mpc": self.config.distance_mpc,
                 "redshift": self.config.redshift,
                 "sefd_fractional_uncertainty": self.config.sefd_fractional_uncertainty,
@@ -2169,6 +2174,8 @@ class BurstSession:
             freqres=float(self.freqres),
             start_mjd=float(self.start_mjd),
             npol=int(self.npol),
+            header_npol=int(self.header_npol),
+            polarization_order=self.polarization_order,
             freq_range_mhz=[float(freq_lo), float(freq_hi)],
             file_name=source_path.name,
             data_dir_relative_path=_data_dir_relative_path(source_path),
@@ -2196,9 +2203,16 @@ class BurstSession:
             ("freq_range_mhz[0]", current.freq_range_mhz[0], float(source.freq_range_mhz[0])),
             ("freq_range_mhz[1]", current.freq_range_mhz[1], float(source.freq_range_mhz[1])),
         ]
+        if source.header_npol is not None:
+            comparisons.append(("header_npol", float(current.header_npol or 0), float(source.header_npol)))
         for label, current_value, saved_value in comparisons:
             if not np.isclose(current_value, saved_value):
                 raise ValueError(f"Session source metadata mismatch for {label}.")
+        if source.polarization_order is not None:
+            current_order = "" if current.polarization_order is None else str(current.polarization_order).upper()
+            saved_order = str(source.polarization_order).upper()
+            if current_order != saved_order:
+                raise ValueError("Session source metadata mismatch for polarization_order.")
 
     def to_snapshot(self) -> AnalysisSessionSnapshot:
         return AnalysisSessionSnapshot(

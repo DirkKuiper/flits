@@ -14,15 +14,25 @@ from flits.settings import ObservationConfig, get_auto_mask_profile
 from flits.signal import normalize
 
 
-def _mock_reader(raw: np.ndarray, *, tsamp: float = 1e-3, fch1: float = 1000.0, foff: float = -1.0, npol: int = 1) -> SimpleNamespace:
+def _mock_reader(
+    raw: np.ndarray,
+    *,
+    tsamp: float = 1e-3,
+    fch1: float = 1000.0,
+    foff: float = -1.0,
+    npol: int = 1,
+    poln_order: str | None = None,
+) -> SimpleNamespace:
+    nchan = raw.shape[-1] if raw.ndim == 3 else raw.shape[1]
     header = SimpleNamespace(
         tsamp=tsamp,
         foff=foff,
         tstart=60000.0,
-        bw=abs(foff) * raw.shape[1],
+        bw=abs(foff) * nchan,
         npol=npol,
+        poln_order=poln_order,
         fch1=fch1,
-        nchans=raw.shape[1],
+        nchans=nchan,
         nspectra=raw.shape[0],
     )
     return SimpleNamespace(
@@ -96,6 +106,80 @@ class ViewerAndMaskingTest(unittest.TestCase):
 
         self.assertEqual(metadata.header_npol, 2)
         self.assertEqual(metadata.npol, 1)
+
+    @patch("flits.io.your_reader.your.Your")
+    def test_load_filterbank_data_uses_stokes_i_plane_for_iquv(self, mock_your: object) -> None:
+        stokes_i = np.array(
+            [
+                [10.0, 20.0, 30.0],
+                [11.0, 18.0, 31.0],
+                [10.0, 19.0, 32.0],
+                [10.0, 20.0, 33.0],
+                [12.0, 22.0, 34.0],
+                [12.0, 21.0, 35.0],
+                [11.0, 22.0, 36.0],
+                [10.0, 23.0, 37.0],
+            ],
+            dtype=float,
+        )
+        raw = np.zeros((stokes_i.shape[0], 4, stokes_i.shape[1]), dtype=float)
+        raw[:, 0, :] = stokes_i
+        raw[:, 1, :] = 100.0 + np.arange(stokes_i.size, dtype=float).reshape(stokes_i.shape)
+        raw[:, 2, :] = -5.0
+        raw[:, 3, :] = 2.0
+        mock_your.return_value = _mock_reader(raw, npol=4, poln_order="IQUV")
+        config = ObservationConfig.from_preset(dm=0.0, preset_key="generic", sefd_jy=1.0)
+
+        data, metadata = load_filterbank_data(
+            "synthetic-iquv.fil",
+            config,
+            inspection=_synthetic_inspection("synthetic-iquv.fil"),
+        )
+
+        stokes_i_channels_time = stokes_i.T
+        tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
+        offpulse_start = min(stokes_i_channels_time.shape[1] - 1, int((1 - tail_fraction) * stokes_i_channels_time.shape[1]))
+        expected = normalize(stokes_i_channels_time, stokes_i_channels_time[:, offpulse_start:])
+        old_i_plus_q = (raw[:, 0, :] + raw[:, 1, :]).T
+        old_expected = normalize(old_i_plus_q, old_i_plus_q[:, offpulse_start:])
+        np.testing.assert_allclose(data, expected)
+        self.assertFalse(np.allclose(data, old_expected))
+        self.assertEqual(metadata.header_npol, 4)
+        self.assertEqual(metadata.npol, 2)
+        self.assertEqual(metadata.polarization_order, "IQUV")
+
+    @patch("flits.io.your_reader.your.Your")
+    def test_load_filterbank_data_preserves_non_iquv_first_two_plane_sum(self, mock_your: object) -> None:
+        raw = np.array(
+            [
+                [[1.0, 2.0, 3.0], [10.0, 20.0, 30.0], [100.0, 200.0, 300.0], [5.0, 5.0, 5.0]],
+                [[2.0, 3.0, 4.0], [11.0, 21.0, 31.0], [101.0, 201.0, 301.0], [5.0, 5.0, 5.0]],
+                [[3.0, 4.0, 5.0], [12.0, 22.0, 32.0], [102.0, 202.0, 302.0], [5.0, 5.0, 5.0]],
+                [[4.0, 5.0, 6.0], [13.0, 23.0, 33.0], [103.0, 203.0, 303.0], [5.0, 5.0, 5.0]],
+                [[5.0, 6.0, 7.0], [14.0, 24.0, 34.0], [104.0, 204.0, 304.0], [5.0, 5.0, 5.0]],
+                [[6.0, 7.0, 8.0], [15.0, 25.0, 35.0], [105.0, 205.0, 305.0], [5.0, 5.0, 5.0]],
+                [[7.0, 8.0, 9.0], [16.0, 26.0, 36.0], [106.0, 206.0, 306.0], [5.0, 5.0, 5.0]],
+                [[8.0, 9.0, 10.0], [17.0, 27.0, 37.0], [107.0, 207.0, 307.0], [5.0, 5.0, 5.0]],
+            ],
+            dtype=float,
+        )
+        mock_your.return_value = _mock_reader(raw, npol=4, poln_order="AABB")
+        config = ObservationConfig.from_preset(dm=0.0, preset_key="generic", sefd_jy=1.0)
+
+        data, metadata = load_filterbank_data(
+            "synthetic-aabb.fil",
+            config,
+            inspection=_synthetic_inspection("synthetic-aabb.fil"),
+        )
+
+        summed = (raw[:, 0, :] + raw[:, 1, :]).T
+        tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
+        offpulse_start = min(summed.shape[1] - 1, int((1 - tail_fraction) * summed.shape[1]))
+        expected = normalize(summed, summed[:, offpulse_start:])
+        np.testing.assert_allclose(data, expected)
+        self.assertEqual(metadata.header_npol, 4)
+        self.assertEqual(metadata.npol, 2)
+        self.assertEqual(metadata.polarization_order, "AABB")
 
     def test_view_flattens_static_channel_offsets_for_display(self) -> None:
         config = ObservationConfig.from_preset(dm=0.0, preset_key="generic")
