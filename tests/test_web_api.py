@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 import os
 import sys
@@ -22,7 +23,9 @@ from flits.web.app import (
     DetectFilterbankRequest,
     ImportSessionRequest,
     SESSIONS,
+    SESSION_SNAPSHOT_PATHS,
     STATIC_DIR,
+    SaveSessionSnapshotRequest,
     auto_mask_profiles,
     create_session,
     data_dir,
@@ -33,9 +36,13 @@ from flits.web.app import (
     list_filterbank_directories,
     list_filterbank_files,
     main,
+    open_session_snapshot,
+    refresh_session_snapshots,
     resolve_burst_path,
+    save_session_snapshot,
     session_action,
     session_snapshot,
+    session_snapshots,
 )
 
 
@@ -94,6 +101,18 @@ def _synthetic_session(*, auto_mask_profile: str = "auto") -> BurstSession:
         spec_ex_hi=freqs.size - 1,
         channel_mask=np.zeros(freqs.size, dtype=bool),
     )
+
+
+def _synthetic_session_with_source(source_path: Path) -> BurstSession:
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_bytes(b"synthetic-filterbank-source")
+    session = _synthetic_session()
+    session.metadata = replace(
+        session.metadata,
+        source_path=source_path,
+        source_name=source_path.stem,
+    )
+    return session
 
 
 class WebApiTest(unittest.TestCase):
@@ -343,8 +362,15 @@ class WebApiTest(unittest.TestCase):
         self.assertIn('data-mode="offpulse"', index_html)
         self.assertIn('data-mode="region"', index_html)
         self.assertIn('id="clearOffpulseButton"', index_html)
+        self.assertIn('id="saveSessionButton"', index_html)
+        self.assertIn('id="saveSessionCopyButton"', index_html)
         self.assertIn('id="exportSessionButton"', index_html)
         self.assertIn('id="importSessionInput"', index_html)
+        self.assertIn('id="snapshotDirectorySelect"', index_html)
+        self.assertIn('id="snapshotFileSelect"', index_html)
+        self.assertIn('id="refreshSnapshotsButton"', index_html)
+        self.assertIn('id="openSnapshotButton"', index_html)
+        self.assertIn('id="snapshotPreview"', index_html)
         self.assertIn('id="notesInput"', index_html)
         self.assertIn('id="dmMetricInput"', index_html)
         self.assertIn('id="sourceRaInput"', index_html)
@@ -405,6 +431,10 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("preview_export_results", app_js)
         self.assertIn("renderExportPlanner", app_js)
         self.assertIn("compute_widths", app_js)
+        self.assertIn("saveSessionSnapshot", app_js)
+        self.assertIn("loadSnapshotLibrary", app_js)
+        self.assertIn("openStoredSession", app_js)
+        self.assertIn("renderSnapshotLibrary", app_js)
         self.assertIn("downloadSessionSnapshot", app_js)
         self.assertIn("importSessionSnapshot", app_js)
         self.assertIn("dm_phase", app_js)
@@ -800,7 +830,7 @@ class WebApiTest(unittest.TestCase):
             wavelet_sigma=np.array([1.8, 4.9, 3.0], dtype=float),
             wavelet_threshold_sigma=5.0,
             crossover_frequency_hz=92.0,
-            crossover_frequency_status="out_of_band",
+            crossover_frequency_status="above_band",
             crossover_frequency_hz_3sigma_low=80.0,
             crossover_frequency_hz_3sigma_high=105.0,
             noise_psd_freq_hz=np.array([62.5, 125.0], dtype=float),
@@ -845,7 +875,7 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(temporal["averaged_psd_power"], [1.5, 0.75])
         self.assertEqual(temporal["matched_filter_scales_ms"], [1.0, 2.0, 4.0])
         self.assertEqual(temporal["power_law_fit_status"], "underconstrained")
-        self.assertEqual(temporal["crossover_frequency_status"], "out_of_band")
+        self.assertEqual(temporal["crossover_frequency_status"], "above_band")
         self.assertEqual(temporal["noise_psd_freq_hz"], [62.5, 125.0])
         self.assertEqual(temporal["noise_psd_segment_count"], 3)
         self.assertEqual(temporal["uncertainty_details"]["crossover_frequency_hz"]["classification"], "diagnostic_only")
@@ -889,6 +919,73 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("crop_bins", payload)
         self.assertIn("noise_settings", payload)
         self.assertIn("width_settings", payload)
+
+    def test_save_session_snapshot_writes_default_path_overwrites_and_saves_copy(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            data_root = Path(tmpdir) / "data"
+            source_path = data_root / "source.fil"
+            session_id = "synthetic-save-snapshot"
+            session = _synthetic_session_with_source(source_path)
+            session.set_notes("first")
+            SESSIONS[session_id] = session
+            try:
+                with patch.dict("os.environ", {"FLITS_DATA_DIR": str(data_root)}):
+                    first = save_session_snapshot(session_id, SaveSessionSnapshotRequest(save_as=False))
+                    first_path = Path(first["path"])
+                    self.assertEqual(first_path, (data_root / "snapshots" / "source_flits_session.json").resolve())
+                    self.assertTrue(first_path.exists())
+                    self.assertEqual(json.loads(first_path.read_text(encoding="utf-8"))["notes"], "first")
+
+                    session.set_notes("second")
+                    second = save_session_snapshot(session_id, SaveSessionSnapshotRequest(save_as=False))
+                    self.assertEqual(Path(second["path"]), first_path)
+                    self.assertEqual(json.loads(first_path.read_text(encoding="utf-8"))["notes"], "second")
+
+                    copied = save_session_snapshot(session_id, SaveSessionSnapshotRequest(save_as=True))
+                    copied_path = Path(copied["path"])
+                    self.assertNotEqual(copied_path, first_path)
+                    self.assertTrue(copied_path.name.startswith("source_"))
+                    self.assertTrue(copied_path.name.endswith("_flits_session.json"))
+                    self.assertTrue(copied_path.exists())
+                    self.assertEqual(SESSION_SNAPSHOT_PATHS[session_id], copied_path)
+            finally:
+                SESSIONS.pop(session_id, None)
+                SESSION_SNAPSHOT_PATHS.pop(session_id, None)
+
+    @patch("flits.web.app.BurstSession.from_snapshot")
+    def test_snapshot_library_lists_and_opens_saved_snapshot(self, mock_from_snapshot: object) -> None:
+        with TemporaryDirectory() as tmpdir:
+            existing_sessions = set(SESSIONS)
+            data_root = Path(tmpdir) / "data"
+            source_path = data_root / "source.fil"
+            session_id = "synthetic-library-source"
+            session = _synthetic_session_with_source(source_path)
+            session.compute_properties()
+            SESSIONS[session_id] = session
+            mock_from_snapshot.return_value = _synthetic_session_with_source(source_path)
+            try:
+                with patch.dict("os.environ", {"FLITS_DATA_DIR": str(data_root)}):
+                    saved = save_session_snapshot(session_id, SaveSessionSnapshotRequest(save_as=False))
+                    listed = session_snapshots()
+                    self.assertEqual(len(listed["sessions"]), 1)
+                    summary = listed["sessions"][0]
+                    self.assertEqual(summary["id"], saved["snapshot"]["id"])
+                    self.assertEqual(summary["source_file"], "source.fil")
+                    self.assertTrue(summary["source_exists"])
+                    self.assertTrue(summary["has_results"])
+
+                    refreshed = refresh_session_snapshots()
+                    self.assertEqual(refreshed["sessions"][0]["id"], summary["id"])
+
+                    opened = open_session_snapshot(summary["id"])
+                    self.assertIn("session_id", opened)
+                    self.assertEqual(SESSION_SNAPSHOT_PATHS[opened["session_id"]], Path(saved["path"]))
+                    mock_from_snapshot.assert_called_once()
+            finally:
+                for active_id in list(SESSIONS):
+                    if active_id not in existing_sessions:
+                        SESSIONS.pop(active_id, None)
+                SESSION_SNAPSHOT_PATHS.clear()
 
     @patch("flits.web.app.BurstSession.from_snapshot")
     def test_import_session_endpoint_creates_session_from_snapshot(self, mock_from_snapshot: object) -> None:

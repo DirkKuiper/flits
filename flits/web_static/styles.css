@@ -542,6 +542,35 @@ button.is-busy::after {
   gap: 10px;
 }
 
+.session-save-status {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(24, 33, 38, 0.08);
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.session-save-status[data-tone="success"] {
+  color: var(--accent-alt-strong);
+  border-color: rgba(50, 124, 188, 0.22);
+  background: rgba(50, 124, 188, 0.08);
+}
+
+.session-save-status[data-tone="warning"] {
+  color: var(--accent-strong);
+  border-color: rgba(114, 53, 162, 0.22);
+  background: rgba(114, 53, 162, 0.08);
+}
+
+.session-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .summary-card {
   display: grid;
   gap: 5px;
@@ -596,6 +625,93 @@ button.is-busy::after {
 .details-card .kv-list,
 .details-card .results-fit-panel {
   padding: 12px 14px 14px;
+}
+
+.snapshot-library-body {
+  display: grid;
+  gap: 12px;
+  padding: 12px 14px 14px;
+}
+
+.snapshot-library-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.snapshot-library-meta {
+  min-height: 18px;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.78rem;
+}
+
+.snapshot-preview {
+  display: grid;
+  gap: 8px;
+}
+
+.snapshot-preview-panel {
+  display: grid;
+  gap: 10px;
+  align-items: start;
+  padding: 11px;
+  border-radius: 12px;
+  border: 1px solid rgba(24, 33, 38, 0.08);
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.snapshot-preview-panel.is-active {
+  border-color: rgba(50, 124, 188, 0.28);
+  background: rgba(50, 124, 188, 0.08);
+}
+
+.snapshot-preview-main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.snapshot-preview-main strong,
+.snapshot-preview-main span,
+.snapshot-preview-main em {
+  overflow-wrap: anywhere;
+}
+
+.snapshot-preview-main span,
+.snapshot-preview-main em {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.snapshot-preview-main em {
+  font-style: normal;
+}
+
+.snapshot-preview-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.snapshot-preview-meta span {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: rgba(24, 33, 38, 0.05);
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.68rem;
+}
+
+.snapshot-preview-meta span[data-tone="success"] {
+  color: var(--accent-alt-strong);
+  background: rgba(50, 124, 188, 0.1);
+}
+
+.snapshot-preview-meta span[data-tone="warning"] {
+  color: var(--alert);
+  background: var(--alert-soft);
 }
 
 .load-details {
@@ -1759,7 +1875,9 @@ button.is-busy::after {
 
   .button-grid,
   .field-row,
-  .workspace-load {
+  .workspace-load,
+  .session-action-grid,
+  .snapshot-library-actions {
     grid-template-columns: 1fr;
   }
 

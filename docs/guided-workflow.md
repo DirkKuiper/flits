@@ -109,12 +109,14 @@ Expected checks:
 
 ## 6. Export the session for reproducibility
 
-Use **Export Session** in the sidebar after the event window, off-pulse windows,
+Use **Save Session** in the sidebar after the event window, off-pulse windows,
 spectral window, mask state, measurements, and DM sweep are where you want them.
 
-The downloaded JSON snapshot stores the interactive session state, not just the
-final values. Keep it next to any result tables or plots so the analysis can be
-reopened later with **Import Session** and inspected from the same crop,
-selection, masking, calibration, notes, and analysis state.
+The saved JSON snapshot stores the interactive session state, not just the final
+values. FLITS writes it into a `snapshots/` folder next to the source data so the
+analysis can be reopened later from **Saved Sessions** and inspected from the
+same crop, selection, masking, calibration, notes, and analysis state. Use
+**Download JSON** only when you need a portable copy outside the snapshot
+library.
 
-![Session panel with Export Session and Import Session controls.](assets/guided-workflow/session-reproducibility.png)
+![Session panel with save, JSON, and saved-session controls.](assets/guided-workflow/session-reproducibility.png)

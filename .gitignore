@@ -8,6 +8,7 @@ site/
 __pycache__/
 *.pyc
 .DS_Store
+.flits/
 *.fil
 *.npz
 burst_properties.csv
