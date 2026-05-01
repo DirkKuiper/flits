@@ -96,10 +96,6 @@ class FitburstRequestConfig:
         Number of consecutive fitburst optimizer runs. After each successful
         run, the next run is initialized from the previous best-fit
         parameters.
-    bounds
-        Optional serialized bounds payload. This field is preserved in request
-        dictionaries for API compatibility, but the current adapter does not
-        apply it to ``LSFitter``.
 
     Notes
     -----
@@ -113,7 +109,6 @@ class FitburstRequestConfig:
     weighted_fit: bool = False
     weight_range: list[int] | None = None
     iterations: int = 1
-    bounds: dict[str, list[tuple[float, float]]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible request payload."""
@@ -124,7 +119,6 @@ class FitburstRequestConfig:
             "weighted_fit": bool(self.weighted_fit),
             "weight_range": None if self.weight_range is None else [int(value) for value in self.weight_range],
             "iterations": _coerce_iterations(self.iterations),
-            "bounds": self.bounds,
         }
 
     @classmethod
@@ -143,7 +137,6 @@ class FitburstRequestConfig:
             weighted_fit=_coerce_bool(payload.get("weighted_fit"), default=False),
             weight_range=_coerce_weight_range(payload.get("weight_range")),
             iterations=_coerce_iterations(payload.get("iterations")),
-            bounds=payload.get("bounds"),
         )
 
 
