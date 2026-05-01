@@ -1336,6 +1336,7 @@ class ScatteringFitDiagnostics:
     fit_profile: str | None = None
     initial_parameter_source: str | None = None
     fixed_parameters: list[str] = field(default_factory=list)
+    scintillation: bool | None = None
     weighted_fit: bool | None = None
     weight_range: list[int] | None = None
     weight_range_basis: str | None = None
@@ -1386,6 +1387,7 @@ class ScatteringFitDiagnostics:
             "fit_profile": self.fit_profile,
             "initial_parameter_source": self.initial_parameter_source,
             "fixed_parameters": self.fixed_parameters,
+            "scintillation": _bool_or_none(self.scintillation),
             "weighted_fit": _bool_or_none(self.weighted_fit),
             "weight_range": None if self.weight_range is None else [int(value) for value in self.weight_range],
             "weight_range_basis": self.weight_range_basis,
@@ -1426,6 +1428,7 @@ class ScatteringFitDiagnostics:
             fit_profile=payload.get("fit_profile"),
             initial_parameter_source=payload.get("initial_parameter_source"),
             fixed_parameters=[str(value) for value in payload.get("fixed_parameters", [])],
+            scintillation=_bool_or_none(payload.get("scintillation")),
             weighted_fit=_bool_or_none(payload.get("weighted_fit")),
             weight_range=(
                 None
