@@ -99,6 +99,13 @@ class FitburstRequestConfig:
         Number of consecutive fitburst optimizer runs. After each successful
         run, the next run is initialized from the previous best-fit
         parameters.
+    factor_time_upsample, factor_freq_upsample
+        Fitburst model upsampling factors. Defaults keep the current FLITS
+        behavior of evaluating on the native selected grid.
+    ref_freq_mhz
+        Optional reference-frequency override in MHz. When omitted, FLITS uses
+        the minimum selected frequency, matching the historical adapter
+        behavior.
 
     Notes
     -----
@@ -112,10 +119,16 @@ class FitburstRequestConfig:
     weighted_fit: bool = False
     weight_range: list[int] | None = None
     iterations: int = 1
+    factor_time_upsample: int = 1
+    factor_freq_upsample: int = 1
+    ref_freq_mhz: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "fixed_parameters", _validate_fixed_parameters(self.fixed_parameters))
         object.__setattr__(self, "iterations", _coerce_iterations(self.iterations))
+        object.__setattr__(self, "factor_time_upsample", _coerce_positive_int(self.factor_time_upsample))
+        object.__setattr__(self, "factor_freq_upsample", _coerce_positive_int(self.factor_freq_upsample))
+        object.__setattr__(self, "ref_freq_mhz", _coerce_ref_freq_mhz(self.ref_freq_mhz))
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible request payload."""
@@ -126,6 +139,9 @@ class FitburstRequestConfig:
             "weighted_fit": bool(self.weighted_fit),
             "weight_range": None if self.weight_range is None else [int(value) for value in self.weight_range],
             "iterations": _coerce_iterations(self.iterations),
+            "factor_time_upsample": _coerce_positive_int(self.factor_time_upsample),
+            "factor_freq_upsample": _coerce_positive_int(self.factor_freq_upsample),
+            "ref_freq_mhz": _coerce_ref_freq_mhz(self.ref_freq_mhz),
         }
 
     @classmethod
@@ -144,6 +160,9 @@ class FitburstRequestConfig:
             weighted_fit=_coerce_bool(payload.get("weighted_fit"), default=False),
             weight_range=_coerce_weight_range(payload.get("weight_range")),
             iterations=_coerce_iterations(payload.get("iterations")),
+            factor_time_upsample=_coerce_positive_int(payload.get("factor_time_upsample")),
+            factor_freq_upsample=_coerce_positive_int(payload.get("factor_freq_upsample")),
+            ref_freq_mhz=_coerce_ref_freq_mhz(payload.get("ref_freq_mhz")),
         )
 
 
@@ -331,6 +350,11 @@ def fit_scattering_selected_band(
             overrides=config.initial_parameters,
             num_components=config.num_components,
         )
+    ref_freq_mhz = _coerce_ref_freq_mhz(config.ref_freq_mhz)
+    effective_ref_freq_mhz = float(ref_freq_mhz if ref_freq_mhz is not None else np.min(freqs))
+    initial_parameters["ref_freq"] = [effective_ref_freq_mhz] * config.num_components
+    factor_time_upsample = _coerce_positive_int(config.factor_time_upsample)
+    factor_freq_upsample = _coerce_positive_int(config.factor_freq_upsample)
 
     fit_data = np.array(normalized_data[:, event_rel_start:event_rel_end], dtype=float, copy=True)
     fit_time_axis_ms = time_axis_ms[event_rel_start:event_rel_end]
@@ -354,6 +378,8 @@ def fit_scattering_selected_band(
         freqs,
         times_sec,
         dm_incoherent=0.0,
+        factor_freq_upsample=factor_freq_upsample,
+        factor_time_upsample=factor_time_upsample,
         num_components=config.num_components,
         is_dedispersed=True,
     )
@@ -398,6 +424,9 @@ def fit_scattering_selected_band(
                 weight_range_basis=weight_range_basis,
                 fit_iterations_requested=fit_iterations,
                 fit_iterations_completed=completed_iterations,
+                factor_time_upsample=factor_time_upsample,
+                factor_freq_upsample=factor_freq_upsample,
+                ref_freq_mhz=effective_ref_freq_mhz,
                 failure_stdout=_sanitize_fitburst_log(stdout_buffer.getvalue()),
                 failure_stderr=_sanitize_fitburst_log(stderr_buffer.getvalue()),
                 failure_exception=_sanitize_fitburst_log(f"{type(exc).__name__}: {exc}"),
@@ -422,6 +451,9 @@ def fit_scattering_selected_band(
                 weight_range_basis=weight_range_basis,
                 fit_iterations_requested=fit_iterations,
                 fit_iterations_completed=completed_iterations,
+                factor_time_upsample=factor_time_upsample,
+                factor_freq_upsample=factor_freq_upsample,
+                ref_freq_mhz=effective_ref_freq_mhz,
                 failure_stdout=_sanitize_fitburst_log(stdout_buffer.getvalue()),
                 failure_stderr=_sanitize_fitburst_log(stderr_buffer.getvalue()),
             )
@@ -446,6 +478,9 @@ def fit_scattering_selected_band(
             weight_range_basis=weight_range_basis,
             fit_iterations_requested=fit_iterations,
             fit_iterations_completed=completed_iterations,
+            factor_time_upsample=factor_time_upsample,
+            factor_freq_upsample=factor_freq_upsample,
+            ref_freq_mhz=effective_ref_freq_mhz,
         )
 
     full_best_parameters = current_parameters
@@ -497,6 +532,9 @@ def fit_scattering_selected_band(
         weight_range_basis=weight_range_basis,
         fit_iterations_requested=fit_iterations,
         fit_iterations_completed=completed_iterations,
+        factor_time_upsample=factor_time_upsample,
+        factor_freq_upsample=factor_freq_upsample,
+        ref_freq_mhz=effective_ref_freq_mhz,
         initial_parameters=initial_parameters,
         bestfit_parameters=full_best_parameters,
         bestfit_uncertainties=bestfit_uncertainties,
@@ -682,6 +720,26 @@ def _coerce_iterations(value: Any) -> int:
     return max(1, iterations)
 
 
+def _coerce_positive_int(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, parsed)
+
+
+def _coerce_ref_freq_mhz(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(parsed) or parsed <= 0.0:
+        return None
+    return parsed
+
+
 def _validate_fixed_parameters(values: Any) -> list[str]:
     if values is None:
         return list(FIXED_PARAMETERS)
@@ -859,6 +917,9 @@ def _failed_result(
     weight_range_basis: str | None = None,
     fit_iterations_requested: int | None = None,
     fit_iterations_completed: int | None = None,
+    factor_time_upsample: int | None = None,
+    factor_freq_upsample: int | None = None,
+    ref_freq_mhz: float | None = None,
     failure_stdout: str | None = None,
     failure_stderr: str | None = None,
     failure_exception: str | None = None,
@@ -876,6 +937,9 @@ def _failed_result(
         weight_range_basis=weight_range_basis,
         fit_iterations_requested=fit_iterations_requested,
         fit_iterations_completed=fit_iterations_completed,
+        factor_time_upsample=factor_time_upsample,
+        factor_freq_upsample=factor_freq_upsample,
+        ref_freq_mhz=ref_freq_mhz,
         failure_stdout=failure_stdout,
         failure_stderr=failure_stderr,
         failure_exception=failure_exception,
