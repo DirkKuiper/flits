@@ -1342,6 +1342,9 @@ class ScatteringFitDiagnostics:
     failure_stdout: str | None = None
     failure_stderr: str | None = None
     failure_exception: str | None = None
+    factor_time_upsample: int | None = None
+    factor_freq_upsample: int | None = None
+    ref_freq_mhz: float | None = None
     initial_parameters: dict[str, list[float] | None] = field(default_factory=dict)
     bestfit_parameters: dict[str, list[float] | None] = field(default_factory=dict)
     bestfit_uncertainties: dict[str, list[float] | None] = field(default_factory=dict)
@@ -1387,6 +1390,9 @@ class ScatteringFitDiagnostics:
             "failure_stdout": self.failure_stdout,
             "failure_stderr": self.failure_stderr,
             "failure_exception": self.failure_exception,
+            "factor_time_upsample": _int_or_none(self.factor_time_upsample),
+            "factor_freq_upsample": _int_or_none(self.factor_freq_upsample),
+            "ref_freq_mhz": _float_or_none(self.ref_freq_mhz),
             "initial_parameters": _jsonable_parameter_dict(self.initial_parameters),
             "bestfit_parameters": _jsonable_parameter_dict(self.bestfit_parameters),
             "bestfit_uncertainties": _jsonable_parameter_dict(self.bestfit_uncertainties),
@@ -1426,6 +1432,9 @@ class ScatteringFitDiagnostics:
             failure_stdout=payload.get("failure_stdout"),
             failure_stderr=payload.get("failure_stderr"),
             failure_exception=payload.get("failure_exception"),
+            factor_time_upsample=_int_or_none(payload.get("factor_time_upsample")),
+            factor_freq_upsample=_int_or_none(payload.get("factor_freq_upsample")),
+            ref_freq_mhz=_float_or_none(payload.get("ref_freq_mhz")),
             initial_parameters={str(key): value for key, value in payload.get("initial_parameters", {}).items()},
             bestfit_parameters={str(key): value for key, value in payload.get("bestfit_parameters", {}).items()},
             bestfit_uncertainties={str(key): value for key, value in payload.get("bestfit_uncertainties", {}).items()},

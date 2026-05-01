@@ -124,19 +124,26 @@ def _synthetic_scattering_dispatch_session() -> BurstSession:
 
 
 class _FakeSpectrumModeler:
+    instances: list["_FakeSpectrumModeler"] = []
+
     def __init__(
         self,
         freqs_mhz: np.ndarray,
         times_sec: np.ndarray,
         *,
         dm_incoherent: float,
-        num_components: int,
-        is_dedispersed: bool,
+        factor_freq_upsample: int = 1,
+        factor_time_upsample: int = 1,
+        num_components: int = 1,
+        is_dedispersed: bool = False,
     ) -> None:
         self.freqs_mhz = np.asarray(freqs_mhz, dtype=float)
         self.times_sec = np.asarray(times_sec, dtype=float)
+        self.factor_freq_upsample = int(factor_freq_upsample)
+        self.factor_time_upsample = int(factor_time_upsample)
         self.parameters: dict[str, list[float] | None] = {}
         self.update_history: list[dict[str, list[float] | None]] = []
+        type(self).instances.append(self)
 
     def update_parameters(self, parameters: dict[str, list[float] | None]) -> None:
         self.parameters = {
@@ -213,13 +220,19 @@ class _FakeLSFitter:
         }
 
 
-def _run_fake_fitburst_fit(*, iterations: int, fitter_class: type[_FakeLSFitter] = _FakeLSFitter) -> FitburstScatteringResult:
+def _run_fake_fitburst_fit(
+    *,
+    iterations: int,
+    fitter_class: type[_FakeLSFitter] = _FakeLSFitter,
+    config: FitburstRequestConfig | None = None,
+) -> FitburstScatteringResult:
     rng = np.random.default_rng(7)
     data = rng.normal(0.0, 1.0, size=(6, 48))
     data[:, 20:26] += 6.0
 
     _FakeLSFitter.instances = []
     _FakeLSFitter.fit_calls = 0
+    _FakeSpectrumModeler.instances = []
     fitter_class.instances = []
     fitter_class.fit_calls = 0
     with (
@@ -236,7 +249,7 @@ def _run_fake_fitburst_fit(*, iterations: int, fitter_class: type[_FakeLSFitter]
             tsamp_ms=1.0,
             peak_rel_bin=23,
             width_guess_ms=1.5,
-            config=FitburstRequestConfig(iterations=iterations),
+            config=config if config is not None else FitburstRequestConfig(iterations=iterations),
         )
 
 
@@ -284,6 +297,9 @@ class FitScatteringTest(unittest.TestCase):
         self.assertEqual(results.diagnostics.scattering_fit.weight_range_basis, "unweighted")
         self.assertEqual(results.diagnostics.scattering_fit.fit_iterations_requested, 1)
         self.assertEqual(results.diagnostics.scattering_fit.fit_iterations_completed, 1)
+        self.assertEqual(results.diagnostics.scattering_fit.factor_time_upsample, 1)
+        self.assertEqual(results.diagnostics.scattering_fit.factor_freq_upsample, 1)
+        self.assertAlmostEqual(results.diagnostics.scattering_fit.ref_freq_mhz or 0.0, 1250.0)
 
     def test_weighted_fit_records_offpulse_weighting_diagnostics(self) -> None:
         unweighted_session, _, _ = _synthetic_scattering_session()
@@ -312,6 +328,9 @@ class FitburstRequestConfigTest(unittest.TestCase):
                 "weighted_fit": True,
                 "weight_range": [3.2, 19.8],
                 "iterations": "3",
+                "factor_time_upsample": "4",
+                "factor_freq_upsample": 2,
+                "ref_freq_mhz": "1375.5",
             }
         )
 
@@ -319,13 +338,32 @@ class FitburstRequestConfigTest(unittest.TestCase):
         self.assertTrue(config.weighted_fit)
         self.assertEqual(config.weight_range, [3, 20])
         self.assertEqual(config.iterations, 3)
+        self.assertEqual(config.factor_time_upsample, 4)
+        self.assertEqual(config.factor_freq_upsample, 2)
+        self.assertEqual(config.ref_freq_mhz, 1375.5)
         self.assertEqual(config.to_dict()["weighted_fit"], True)
         self.assertEqual(config.to_dict()["weight_range"], [3, 20])
         self.assertEqual(config.to_dict()["iterations"], 3)
+        self.assertEqual(config.to_dict()["factor_time_upsample"], 4)
+        self.assertEqual(config.to_dict()["factor_freq_upsample"], 2)
+        self.assertEqual(config.to_dict()["ref_freq_mhz"], 1375.5)
 
     def test_invalid_iteration_count_falls_back_to_one(self) -> None:
         self.assertEqual(FitburstRequestConfig.from_dict({"iterations": "bad"}).iterations, 1)
         self.assertEqual(FitburstRequestConfig.from_dict({"iterations": 0}).iterations, 1)
+
+    def test_invalid_model_controls_fall_back_to_defaults(self) -> None:
+        config = FitburstRequestConfig.from_dict(
+            {
+                "factor_time_upsample": 0,
+                "factor_freq_upsample": "bad",
+                "ref_freq_mhz": -1.0,
+            }
+        )
+
+        self.assertEqual(config.factor_time_upsample, 1)
+        self.assertEqual(config.factor_freq_upsample, 1)
+        self.assertIsNone(config.ref_freq_mhz)
 
     def test_legacy_bounds_payload_is_ignored_and_not_serialized(self) -> None:
         config = FitburstRequestConfig.from_dict(
@@ -403,6 +441,26 @@ class FitburstIterationAdapterTest(unittest.TestCase):
         self.assertEqual(_FakeLSFitter.instances[1].model_parameters_at_init["burst_width"], [0.0011])
         self.assertAlmostEqual(result.diagnostics.bestfit_parameters["burst_width"][0], 0.0012)
         self.assertAlmostEqual(result.width_ms_model or 0.0, 1.2)
+
+    def test_model_controls_reach_spectrum_modeler_and_diagnostics(self) -> None:
+        result = _run_fake_fitburst_fit(
+            iterations=1,
+            config=FitburstRequestConfig(
+                iterations=1,
+                factor_time_upsample=4,
+                factor_freq_upsample=3,
+                ref_freq_mhz=1400.0,
+            ),
+        )
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(len(_FakeSpectrumModeler.instances), 1)
+        self.assertEqual(_FakeSpectrumModeler.instances[0].factor_time_upsample, 4)
+        self.assertEqual(_FakeSpectrumModeler.instances[0].factor_freq_upsample, 3)
+        self.assertEqual(result.diagnostics.factor_time_upsample, 4)
+        self.assertEqual(result.diagnostics.factor_freq_upsample, 3)
+        self.assertEqual(result.diagnostics.ref_freq_mhz, 1400.0)
+        self.assertEqual(result.diagnostics.bestfit_parameters["ref_freq"], [1400.0])
 
     def test_failed_intermediate_iteration_returns_completed_bestfit_diagnostics(self) -> None:
         class FailingSecondFit(_FakeLSFitter):
@@ -591,12 +649,24 @@ class FitScatteringDispatchTest(unittest.TestCase):
             ),
         )
 
-        session.fit_scattering({"weighted_fit": True, "weight_range": [2, 20], "iterations": 3})
+        session.fit_scattering(
+            {
+                "weighted_fit": True,
+                "weight_range": [2, 20],
+                "iterations": 3,
+                "factor_time_upsample": 2,
+                "factor_freq_upsample": 4,
+                "ref_freq_mhz": 1333.0,
+            }
+        )
 
         config = mock_fit.call_args.kwargs["config"]
         self.assertTrue(config.weighted_fit)
         self.assertEqual(config.weight_range, [2, 20])
         self.assertEqual(config.iterations, 3)
+        self.assertEqual(config.factor_time_upsample, 2)
+        self.assertEqual(config.factor_freq_upsample, 4)
+        self.assertEqual(config.ref_freq_mhz, 1333.0)
 
     @patch("flits.session.fit_scattering_selected_band")
     def test_failed_refit_preserves_previous_successful_fit_values(self, mock_fit: object) -> None:
