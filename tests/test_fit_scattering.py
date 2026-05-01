@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sys
 from types import SimpleNamespace
 import unittest
 from pathlib import Path
@@ -188,6 +190,8 @@ class _FakeLSFitter:
         type(self).fit_calls += 1
         call_index = type(self).fit_calls
         if type(self).fail_on_call == call_index:
+            print("fitburst stdout before failure " + ("x" * 5000))
+            print("fitburst stderr before failure \x00\x01" + ("y" * 5000), file=sys.stderr)
             self.results = SimpleNamespace(success=False, message=f"failed iteration {call_index}")
             self.fit_statistics = {"chisq_initial": 10.0, "num_fit_parameters": len(self.fit_parameters)}
             return
@@ -411,7 +415,32 @@ class FitburstIterationAdapterTest(unittest.TestCase):
         self.assertEqual(result.diagnostics.fit_iterations_requested, 3)
         self.assertEqual(result.diagnostics.fit_iterations_completed, 1)
         self.assertEqual(result.diagnostics.bestfit_parameters["burst_width"], [0.0011])
+        self.assertLessEqual(len(result.diagnostics.failure_stdout or ""), fitburst_adapter.MAX_FITBURST_LOG_CHARS)
+        self.assertLessEqual(len(result.diagnostics.failure_stderr or ""), fitburst_adapter.MAX_FITBURST_LOG_CHARS)
+        self.assertNotIn("\x00", result.diagnostics.failure_stderr or "")
+        self.assertIn("fitburst diagnostic output truncated", result.diagnostics.failure_stdout or "")
+        json.dumps(result.diagnostics.to_dict())
+        round_tripped = ScatteringFitDiagnostics.from_dict(result.diagnostics.to_dict())
+        self.assertEqual(round_tripped.failure_stdout, result.diagnostics.failure_stdout)
         self.assertIsNone(result.width_ms_model)
+
+    def test_fitburst_exception_records_sanitized_failure_diagnostics(self) -> None:
+        class RaisingFit(_FakeLSFitter):
+            def fit(self) -> None:
+                print("stdout before exception " + ("a" * 5000))
+                print("stderr before exception \x00" + ("b" * 5000), file=sys.stderr)
+                raise RuntimeError("optimizer exploded")
+
+        result = _run_fake_fitburst_fit(iterations=2, fitter_class=RaisingFit)
+
+        self.assertEqual(result.status, "fit_failed")
+        self.assertEqual(result.message, "fitburst raised an exception during fitting.")
+        self.assertIn("RuntimeError: optimizer exploded", result.diagnostics.failure_exception or "")
+        self.assertLessEqual(len(result.diagnostics.failure_stdout or ""), fitburst_adapter.MAX_FITBURST_LOG_CHARS)
+        self.assertLessEqual(len(result.diagnostics.failure_stderr or ""), fitburst_adapter.MAX_FITBURST_LOG_CHARS)
+        self.assertLessEqual(len(result.diagnostics.failure_exception or ""), fitburst_adapter.MAX_FITBURST_LOG_CHARS)
+        self.assertNotIn("\x00", result.diagnostics.failure_stderr or "")
+        json.dumps(result.diagnostics.to_dict())
 
 class FitScatteringDispatchTest(unittest.TestCase):
     def test_fitburst_guess_uses_component_regions(self) -> None:

@@ -33,6 +33,7 @@ except Exception:  # pragma: no cover - optional runtime dependency
 MIN_FIT_CHANNELS = 4
 MIN_FIT_TIME_BINS = 16
 MIN_WEIGHT_BINS = 8
+MAX_FITBURST_LOG_CHARS = 4000
 FIT_PARAMETERS = ("amplitude", "arrival_time", "burst_width", "scattering_timescale")
 FIXED_PARAMETERS = ("dm", "dm_index", "scattering_index", "spectral_index", "spectral_running")
 FIXABLE_PARAMETERS = FIT_PARAMETERS + FIXED_PARAMETERS
@@ -366,18 +367,41 @@ def fit_scattering_selected_band(
 
     for _iteration_index in range(fit_iterations):
         model.update_parameters(current_parameters)
-        fitter = LSFitter(
-            fit_data,
-            model,
-            good_freq=good_freq,
-            weighted_fit=weighted_fit and custom_weights is None,
-            weight_range=weight_range if weighted_fit and custom_weights is None else None,
-        )
-        if custom_weights is not None:
-            fitter.weights = custom_weights
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            fitter.fix_parameter(config.fixed_parameters)
-            fitter.fit()
+        stdout_buffer = io.StringIO()
+        stderr_buffer = io.StringIO()
+        fitter = None
+        try:
+            with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+                fitter = LSFitter(
+                    fit_data,
+                    model,
+                    good_freq=good_freq,
+                    weighted_fit=weighted_fit and custom_weights is None,
+                    weight_range=weight_range if weighted_fit and custom_weights is None else None,
+                )
+                if custom_weights is not None:
+                    fitter.weights = custom_weights
+                fitter.fix_parameter(config.fixed_parameters)
+                fitter.fit()
+        except Exception as exc:
+            return _failed_result(
+                status="fit_failed",
+                message="fitburst raised an exception during fitting.",
+                initial_parameters=initial_parameters,
+                bestfit_parameters=current_parameters if completed_iterations > 0 else {},
+                fit_statistics=getattr(fitter, "fit_statistics", {}) if fitter is not None else {},
+                fit_parameters=list(getattr(fitter, "fit_parameters", fit_parameters)) if fitter is not None else fit_parameters,
+                fixed_parameters=config.fixed_parameters,
+                component_count=config.num_components,
+                weighted_fit=weighted_fit,
+                weight_range=weight_range,
+                weight_range_basis=weight_range_basis,
+                fit_iterations_requested=fit_iterations,
+                fit_iterations_completed=completed_iterations,
+                failure_stdout=_sanitize_fitburst_log(stdout_buffer.getvalue()),
+                failure_stderr=_sanitize_fitburst_log(stderr_buffer.getvalue()),
+                failure_exception=_sanitize_fitburst_log(f"{type(exc).__name__}: {exc}"),
+            )
 
         results = getattr(fitter, "results", None)
         if results is None or not getattr(results, "success", False):
@@ -398,6 +422,8 @@ def fit_scattering_selected_band(
                 weight_range_basis=weight_range_basis,
                 fit_iterations_requested=fit_iterations,
                 fit_iterations_completed=completed_iterations,
+                failure_stdout=_sanitize_fitburst_log(stdout_buffer.getvalue()),
+                failure_stderr=_sanitize_fitburst_log(stderr_buffer.getvalue()),
             )
 
         fit_statistics = dict(getattr(fitter, "fit_statistics", {}))
@@ -795,6 +821,29 @@ def _sanitize_fit_statistics(
     return payload
 
 
+def _sanitize_fitburst_log(value: object) -> str | None:
+    """Return a bounded, JSON-safe fitburst diagnostic string."""
+    if value is None:
+        return None
+    text = str(value)
+    if not text:
+        return None
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    sanitized = "".join(
+        char
+        if char == "\n" or char == "\t" or ord(char) >= 32
+        else " "
+        for char in text
+    )
+    sanitized = "\n".join(line.rstrip() for line in sanitized.splitlines()).strip()
+    if not sanitized:
+        return None
+    if len(sanitized) <= MAX_FITBURST_LOG_CHARS:
+        return sanitized
+    suffix = "\n[fitburst diagnostic output truncated]"
+    return sanitized[: MAX_FITBURST_LOG_CHARS - len(suffix)] + suffix
+
+
 def _failed_result(
     *,
     status: str,
@@ -810,6 +859,9 @@ def _failed_result(
     weight_range_basis: str | None = None,
     fit_iterations_requested: int | None = None,
     fit_iterations_completed: int | None = None,
+    failure_stdout: str | None = None,
+    failure_stderr: str | None = None,
+    failure_exception: str | None = None,
 ) -> FitburstScatteringResult:
     """Return a structured failure result with empty diagnostic arrays."""
     diagnostics = ScatteringFitDiagnostics(
@@ -824,6 +876,9 @@ def _failed_result(
         weight_range_basis=weight_range_basis,
         fit_iterations_requested=fit_iterations_requested,
         fit_iterations_completed=fit_iterations_completed,
+        failure_stdout=failure_stdout,
+        failure_stderr=failure_stderr,
+        failure_exception=failure_exception,
         initial_parameters=initial_parameters or {},
         bestfit_parameters=bestfit_parameters or {},
         bestfit_uncertainties={},
