@@ -38,6 +38,21 @@ FIT_PARAMETERS = ("amplitude", "arrival_time", "burst_width", "scattering_timesc
 FIXED_PARAMETERS = ("dm", "dm_index", "scattering_index", "spectral_index", "spectral_running")
 FIXABLE_PARAMETERS = FIT_PARAMETERS + FIXED_PARAMETERS
 NON_FITTABLE_PARAMETERS = ("ref_freq",)
+FIT_PROFILE_FLITS_SCATTERING = "flits_scattering"
+FIT_PROFILE_ADVANCED_FITBURST_LIKE = "advanced_fitburst_like"
+FIT_PROFILES = (FIT_PROFILE_FLITS_SCATTERING, FIT_PROFILE_ADVANCED_FITBURST_LIKE)
+FIT_PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
+    FIT_PROFILE_FLITS_SCATTERING: {
+        "fixed_parameters": list(FIXED_PARAMETERS),
+        "weighted_fit": False,
+        "iterations": 1,
+    },
+    FIT_PROFILE_ADVANCED_FITBURST_LIKE: {
+        "fixed_parameters": ["dm_index", "scattering_index"],
+        "weighted_fit": True,
+        "iterations": 3,
+    },
+}
 
 
 def _fitburst_uncertainty_detail(
@@ -78,6 +93,11 @@ class FitburstRequestConfig:
     ----------
     num_components
         Number of burst components to pass to fitburst.
+    fit_profile
+        Named FLITS profile used to choose request defaults. The default
+        ``flits_scattering`` profile preserves the historical behavior. The
+        ``advanced_fitburst_like`` profile opts into weighted, iterative
+        fitting and leaves spectral-shape terms free.
     fixed_parameters
         Fitburst parameter names that should be held fixed during the
         optimizer run. By default the adapter varies amplitude, arrival time,
@@ -114,6 +134,7 @@ class FitburstRequestConfig:
     """
 
     num_components: int = 1
+    fit_profile: str = FIT_PROFILE_FLITS_SCATTERING
     fixed_parameters: list[str] = field(default_factory=lambda: ["dm", "dm_index", "scattering_index", "spectral_index", "spectral_running"])
     initial_parameters: dict[str, list[float]] | None = None
     weighted_fit: bool = False
@@ -124,6 +145,7 @@ class FitburstRequestConfig:
     ref_freq_mhz: float | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "fit_profile", _coerce_fit_profile(self.fit_profile))
         object.__setattr__(self, "fixed_parameters", _validate_fixed_parameters(self.fixed_parameters))
         object.__setattr__(self, "iterations", _coerce_iterations(self.iterations))
         object.__setattr__(self, "factor_time_upsample", _coerce_positive_int(self.factor_time_upsample))
@@ -134,6 +156,7 @@ class FitburstRequestConfig:
         """Return a JSON-compatible request payload."""
         return {
             "num_components": int(self.num_components),
+            "fit_profile": _coerce_fit_profile(self.fit_profile),
             "fixed_parameters": list(self.fixed_parameters),
             "initial_parameters": self.initial_parameters,
             "weighted_fit": bool(self.weighted_fit),
@@ -153,13 +176,16 @@ class FitburstRequestConfig:
             num_components = int(payload.get("num_components", 1))
         except (TypeError, ValueError):
             num_components = 1
+        fit_profile = _coerce_fit_profile(payload.get("fit_profile", payload.get("profile")))
+        profile_defaults = FIT_PROFILE_DEFAULTS[fit_profile]
         return cls(
             num_components=max(1, num_components),
-            fixed_parameters=payload.get("fixed_parameters", list(FIXED_PARAMETERS)),
+            fit_profile=fit_profile,
+            fixed_parameters=payload.get("fixed_parameters", profile_defaults["fixed_parameters"]),
             initial_parameters=payload.get("initial_parameters"),
-            weighted_fit=_coerce_bool(payload.get("weighted_fit"), default=False),
+            weighted_fit=_coerce_bool(payload.get("weighted_fit"), default=bool(profile_defaults["weighted_fit"])),
             weight_range=_coerce_weight_range(payload.get("weight_range")),
-            iterations=_coerce_iterations(payload.get("iterations")),
+            iterations=_coerce_iterations(payload.get("iterations", profile_defaults["iterations"])),
             factor_time_upsample=_coerce_positive_int(payload.get("factor_time_upsample")),
             factor_freq_upsample=_coerce_positive_int(payload.get("factor_freq_upsample")),
             ref_freq_mhz=_coerce_ref_freq_mhz(payload.get("ref_freq_mhz")),
@@ -272,6 +298,7 @@ def fit_scattering_selected_band(
             status="fitburst_unavailable",
             message="fitburst is not available in the active Python environment.",
             component_count=config.num_components,
+            fit_profile=config.fit_profile,
             fixed_parameters=config.fixed_parameters,
             fit_iterations_requested=fit_iterations,
             fit_iterations_completed=0,
@@ -287,6 +314,7 @@ def fit_scattering_selected_band(
             status="insufficient_data",
             message="No selected-band data are available for fitting.",
             component_count=config.num_components,
+            fit_profile=config.fit_profile,
             fixed_parameters=config.fixed_parameters,
             fit_iterations_requested=fit_iterations,
             fit_iterations_completed=0,
@@ -296,6 +324,7 @@ def fit_scattering_selected_band(
             status="insufficient_time_bins",
             message=f"At least {MIN_FIT_TIME_BINS} time bins are required for scattering fits.",
             component_count=config.num_components,
+            fit_profile=config.fit_profile,
             fixed_parameters=config.fixed_parameters,
             fit_iterations_requested=fit_iterations,
             fit_iterations_completed=0,
@@ -308,6 +337,7 @@ def fit_scattering_selected_band(
             status="insufficient_channels",
             message=f"At least {MIN_FIT_CHANNELS} unmasked channels are required for scattering fits.",
             component_count=config.num_components,
+            fit_profile=config.fit_profile,
             fixed_parameters=config.fixed_parameters,
             fit_iterations_requested=fit_iterations,
             fit_iterations_completed=0,
@@ -323,6 +353,7 @@ def fit_scattering_selected_band(
             status="insufficient_signal",
             message="The selected event window does not contain a stable signal for fitting.",
             component_count=config.num_components,
+            fit_profile=config.fit_profile,
             fixed_parameters=config.fixed_parameters,
             fit_iterations_requested=fit_iterations,
             fit_iterations_completed=0,
@@ -417,6 +448,7 @@ def fit_scattering_selected_band(
                 bestfit_parameters=current_parameters if completed_iterations > 0 else {},
                 fit_statistics=getattr(fitter, "fit_statistics", {}) if fitter is not None else {},
                 fit_parameters=list(getattr(fitter, "fit_parameters", fit_parameters)) if fitter is not None else fit_parameters,
+                fit_profile=config.fit_profile,
                 fixed_parameters=config.fixed_parameters,
                 component_count=config.num_components,
                 weighted_fit=weighted_fit,
@@ -444,6 +476,7 @@ def fit_scattering_selected_band(
                 bestfit_parameters=current_parameters if completed_iterations > 0 else {},
                 fit_statistics=getattr(fitter, "fit_statistics", {}),
                 fit_parameters=list(getattr(fitter, "fit_parameters", [])),
+                fit_profile=config.fit_profile,
                 fixed_parameters=config.fixed_parameters,
                 component_count=config.num_components,
                 weighted_fit=weighted_fit,
@@ -471,6 +504,7 @@ def fit_scattering_selected_band(
             message="fitburst could not converge for the current selection.",
             initial_parameters=initial_parameters,
             fit_parameters=fit_parameters,
+            fit_profile=config.fit_profile,
             fixed_parameters=config.fixed_parameters,
             component_count=config.num_components,
             weighted_fit=weighted_fit,
@@ -526,6 +560,7 @@ def fit_scattering_selected_band(
         fitter="fitburst",
         component_count=config.num_components,
         fit_parameters=fit_parameters,
+        fit_profile=config.fit_profile,
         fixed_parameters=config.fixed_parameters,
         weighted_fit=weighted_fit,
         weight_range=weight_range,
@@ -710,6 +745,15 @@ def _coerce_bool(value: Any, *, default: bool = False) -> bool:
             return False
         return bool(default)
     return bool(value)
+
+
+def _coerce_fit_profile(value: Any) -> str:
+    if value is None:
+        return FIT_PROFILE_FLITS_SCATTERING
+    profile = str(value).strip().lower().replace("-", "_")
+    if profile in FIT_PROFILES:
+        return profile
+    return FIT_PROFILE_FLITS_SCATTERING
 
 
 def _coerce_iterations(value: Any) -> int:
@@ -910,6 +954,7 @@ def _failed_result(
     bestfit_parameters: dict[str, list[float] | None] | None = None,
     fit_statistics: dict[str, object] | None = None,
     fit_parameters: list[str] | None = None,
+    fit_profile: str | None = None,
     fixed_parameters: list[str] | None = None,
     component_count: int = 1,
     weighted_fit: bool | None = None,
@@ -931,6 +976,7 @@ def _failed_result(
         fitter="fitburst" if SpectrumModeler is not None and LSFitter is not None else None,
         component_count=component_count,
         fit_parameters=list(FIT_PARAMETERS if fit_parameters is None else fit_parameters),
+        fit_profile=_coerce_fit_profile(fit_profile),
         fixed_parameters=list(FIXED_PARAMETERS if fixed_parameters is None else fixed_parameters),
         weighted_fit=weighted_fit,
         weight_range=weight_range,

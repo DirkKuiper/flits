@@ -103,8 +103,11 @@ const fittingSpectrumPlot = document.getElementById("fittingSpectrumPlot")
 const fittingProfilePlot = document.getElementById("fittingProfilePlot")
 const fitGuessContent = document.getElementById("fitGuessContent")
 const fitGuessPlot = document.getElementById("fitGuessPlot")
+const fitProfileSelect = document.getElementById("fitProfileSelect")
+const fitProfileSummary = document.getElementById("fitProfileSummary")
 const fitComponentsInput = document.getElementById("fitComponentsInput")
 const fitFixedParamsContainer = document.getElementById("fitFixedParamsContainer")
+const fitParameterSummary = document.getElementById("fitParameterSummary")
 const spectralContent = document.getElementById("spectralContent")
 const acfPlot = document.getElementById("acfPlot")
 const temporalScalePlot = document.getElementById("temporalScalePlot")
@@ -209,6 +212,42 @@ const plotTheme = Object.freeze({
     [1.0, "#7235a2"],
   ],
 })
+const FIT_PARAMETER_ORDER = [
+  "amplitude",
+  "arrival_time",
+  "burst_width",
+  "scattering_timescale",
+  "dm",
+  "dm_index",
+  "scattering_index",
+  "spectral_index",
+  "spectral_running",
+]
+const FIT_PARAMETER_LABELS = Object.freeze({
+  amplitude: "Amplitude",
+  arrival_time: "Arrival Time",
+  burst_width: "Intrinsic Width",
+  scattering_timescale: "Shared Scattering Tau",
+  dm: "Shared DM",
+  dm_index: "Shared DM Index",
+  scattering_index: "Shared Scattering Index",
+  spectral_index: "Spectral Index",
+  spectral_running: "Spectral Running",
+})
+const FIT_PROFILES = Object.freeze({
+  flits_scattering: {
+    label: "FLITS scattering",
+    fixedParameters: ["dm", "dm_index", "scattering_index", "spectral_index", "spectral_running"],
+    weightedFit: false,
+    iterations: 1,
+  },
+  advanced_fitburst_like: {
+    label: "Advanced fitburst-like",
+    fixedParameters: ["dm_index", "scattering_index"],
+    weightedFit: true,
+    iterations: 3,
+  },
+})
 const modeButtons = Array.from(document.querySelectorAll(".mode-button"))
 const analysisTabButtons = Array.from(document.querySelectorAll("[data-analysis-tab]"))
 const analysisPanels = Array.from(document.querySelectorAll("[data-tab-panel]"))
@@ -216,6 +255,7 @@ const sessionControls = [
   setDmButton,
   optimizeDmButton,
   applyBestDmButton,
+  fitProfileSelect,
   fitScatteringButton,
   runSpectralButton,
   buildExportButton,
@@ -278,6 +318,7 @@ const busyLockControls = [
   notesInput,
   dmHalfRangeInput,
   dmStepInput,
+  fitProfileSelect,
   spectralSegmentInput,
   fitComponentsInput,
 ]
@@ -285,6 +326,7 @@ const busyLockControls = [
 document.addEventListener("DOMContentLoaded", async () => {
   rememberButtonLabels()
   bindControls()
+  applyFitProfileDefaults(currentFitProfileKey())
   setMode(state.mode)
   setAnalysisTab(initialAnalysisTab())
   setStatus("Idle", "neutral")
@@ -415,10 +457,19 @@ function bindControls() {
       return
     }
     postAction("fit_scattering", {
+      fit_profile: currentFitProfileKey(),
       fixed_parameters: fixedParams,
       num_components: componentGuesses.length,
       component_guesses: componentGuesses,
     });
+  })
+  fitProfileSelect.addEventListener("change", () => {
+    applyFitProfileDefaults(fitProfileSelect.value)
+    updateControlStates()
+  })
+  fitFixedParamsContainer.addEventListener("change", () => {
+    updateFitParameterSummary()
+    updateControlStates()
   })
   fitComponentsInput.addEventListener("change", () => {
     if (state.view) {
@@ -2234,11 +2285,14 @@ function renderFitting(view) {
   ]
   const fitMetaTiles = [
     resultTile("Fitter", scatteringFit.fitter || "n/a", "secondary"),
+    resultTile("Profile", fitProfileLabel(scatteringFit.fit_profile), "secondary"),
+    resultTile("Iterations", scatteringFit.fit_iterations_completed === null || scatteringFit.fit_iterations_completed === undefined ? "n/a" : `${scatteringFit.fit_iterations_completed}/${scatteringFit.fit_iterations_requested || scatteringFit.fit_iterations_completed}`, "secondary"),
+    resultTile("Weighting", scatteringFit.weighted_fit ? "weighted" : "unweighted", "secondary"),
     resultTile("Fit S/N", fitStatistics.snr === null || fitStatistics.snr === undefined ? "n/a" : fmt(fitStatistics.snr, 3), "secondary"),
     resultTile("Good Channels", fitStatistics.num_freq_good === null || fitStatistics.num_freq_good === undefined ? "n/a" : String(fitStatistics.num_freq_good), "secondary"),
     resultTile("Observations", fitStatistics.num_observations === null || fitStatistics.num_observations === undefined ? "n/a" : String(fitStatistics.num_observations), "secondary"),
-    resultTile("Fitted Parameters", Array.isArray(scatteringFit.fit_parameters) && scatteringFit.fit_parameters.length ? scatteringFit.fit_parameters.join(", ") : "n/a", "secondary"),
-    resultTile("Fixed Parameters", Array.isArray(scatteringFit.fixed_parameters) && scatteringFit.fixed_parameters.length ? scatteringFit.fixed_parameters.join(", ") : "n/a", "secondary"),
+    resultTile("Fitted Parameters", fitParameterListLabel(scatteringFit.fit_parameters), "secondary"),
+    resultTile("Fixed Parameters", fitParameterListLabel(scatteringFit.fixed_parameters), "secondary"),
   ]
 
   fittingContent.innerHTML = `
@@ -2397,6 +2451,61 @@ function fitGuessSourceLabel(source) {
   if (source === "manual_peaks") return "Manual peaks"
   if (source === "automatic") return "Automatic"
   return "Unavailable"
+}
+
+function currentFitProfileKey() {
+  const selected = String(fitProfileSelect.value || "").trim()
+  return Object.prototype.hasOwnProperty.call(FIT_PROFILES, selected) ? selected : "flits_scattering"
+}
+
+function applyFitProfileDefaults(profileKey) {
+  const profile = FIT_PROFILES[profileKey] || FIT_PROFILES.flits_scattering
+  fitProfileSelect.value = Object.prototype.hasOwnProperty.call(FIT_PROFILES, profileKey)
+    ? profileKey
+    : "flits_scattering"
+  const fixed = new Set(profile.fixedParameters)
+  fitFixedParamsContainer.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+    checkbox.checked = fixed.has(checkbox.value)
+  })
+  updateFitParameterSummary()
+}
+
+function fitProfileLabel(profileKey) {
+  return (FIT_PROFILES[profileKey] || FIT_PROFILES.flits_scattering).label
+}
+
+function fitParameterLabel(parameter) {
+  return FIT_PARAMETER_LABELS[parameter] || parameter
+}
+
+function fitParameterListLabel(parameters) {
+  if (!Array.isArray(parameters) || !parameters.length) {
+    return "n/a"
+  }
+  return parameters.map((parameter) => fitParameterLabel(parameter)).join(", ")
+}
+
+function currentFixedFitParameterSet() {
+  return new Set(Array.from(fitFixedParamsContainer.querySelectorAll("input[type='checkbox']:checked")).map((input) => input.value))
+}
+
+function hasFreeFitParameters() {
+  const fixed = currentFixedFitParameterSet()
+  return FIT_PARAMETER_ORDER.some((parameter) => !fixed.has(parameter))
+}
+
+function updateFitParameterSummary() {
+  const profile = FIT_PROFILES[currentFitProfileKey()] || FIT_PROFILES.flits_scattering
+  const fixed = currentFixedFitParameterSet()
+  const fitted = FIT_PARAMETER_ORDER.filter((parameter) => !fixed.has(parameter))
+  const fixedLabels = FIT_PARAMETER_ORDER.filter((parameter) => fixed.has(parameter)).map((parameter) => fitParameterLabel(parameter))
+  const fittedLabels = fitted.map((parameter) => fitParameterLabel(parameter))
+  fitProfileSummary.textContent = `${profile.label}: ${profile.weightedFit ? "weighted" : "unweighted"}, ${profile.iterations} iteration${profile.iterations === 1 ? "" : "s"}`
+  fitParameterSummary.innerHTML = `
+    <span><strong>Fitted</strong> ${escapeHtml(fittedLabels.join(", ") || "none")}</span>
+    <span><strong>Fixed</strong> ${escapeHtml(fixedLabels.join(", ") || "none")}</span>
+  `
+  fitParameterSummary.dataset.tone = fitted.length ? "neutral" : "error"
 }
 
 function collectFitComponentGuesses() {
@@ -4235,15 +4344,15 @@ function renderResidualTable(optimization) {
 
 function renderScatteringParameterTable(initialParameters, bestfitParameters, uncertainties) {
   const definitions = [
-    ["Arrival Time", "arrival_time", 1e3, "ms"],
-    ["Intrinsic Width", "burst_width", 1e3, "ms"],
-    ["Scattering Tau", "scattering_timescale", 1e3, "ms"],
-    ["Log Amplitude", "amplitude", 1.0, ""],
-    ["DM", "dm", 1.0, "pc/cm³"],
-    ["DM Index", "dm_index", 1.0, ""],
-    ["Spectral Index", "spectral_index", 1.0, ""],
-    ["Spectral Running", "spectral_running", 1.0, ""],
-    ["Scattering Index", "scattering_index", 1.0, ""],
+    ["Arrival Time", "arrival_time", 1e3, "ms", "component"],
+    ["Intrinsic Width", "burst_width", 1e3, "ms", "component"],
+    ["Log Amplitude", "amplitude", 1.0, "", "component"],
+    ["Spectral Index", "spectral_index", 1.0, "", "component"],
+    ["Spectral Running", "spectral_running", 1.0, "", "component"],
+    ["Shared Scattering Tau", "scattering_timescale", 1e3, "ms", "global"],
+    ["Shared DM", "dm", 1.0, "pc/cm³", "global"],
+    ["Shared DM Index", "dm_index", 1.0, "", "global"],
+    ["Shared Scattering Index", "scattering_index", 1.0, "", "global"],
   ]
   const componentCount = Math.max(
     0,
@@ -4253,10 +4362,30 @@ function renderScatteringParameterTable(initialParameters, bestfitParameters, un
     )),
   )
   const rows = []
+  for (const [label, key, scale, unit, scope] of definitions) {
+    if (scope !== "global") {
+      continue
+    }
+    const row = parameterComparisonRow(
+      "Shared",
+      label,
+      initialParameters?.[key]?.[0],
+      bestfitParameters?.[key]?.[0],
+      uncertainties?.[key]?.[0],
+      scale,
+      unit,
+    )
+    if (row) {
+      rows.push(row)
+    }
+  }
   for (let componentIndex = 0; componentIndex < componentCount; componentIndex += 1) {
-    for (const [label, key, scale, unit] of definitions) {
+    for (const [label, key, scale, unit, scope] of definitions) {
+      if (scope === "global") {
+        continue
+      }
       const row = parameterComparisonRow(
-        componentIndex,
+        `Component ${componentIndex + 1}`,
         label,
         initialParameters?.[key]?.[componentIndex],
         bestfitParameters?.[key]?.[componentIndex],
@@ -4297,7 +4426,7 @@ function renderScatteringParameterTable(initialParameters, bestfitParameters, un
   `
 }
 
-function parameterComparisonRow(componentIndex, label, initial, bestfit, uncertainty, scale, unit) {
+function parameterComparisonRow(scopeLabel, label, initial, bestfit, uncertainty, scale, unit) {
   const hasInitial = initial !== null && initial !== undefined && !Number.isNaN(Number(initial))
   const hasBestfit = bestfit !== null && bestfit !== undefined && !Number.isNaN(Number(bestfit))
   if (!hasInitial && !hasBestfit) {
@@ -4310,7 +4439,7 @@ function parameterComparisonRow(componentIndex, label, initial, bestfit, uncerta
     : `±${fmt(Number(uncertainty) * scale, 3)}${unit ? ` ${unit}` : ""}`
   return (
     `<tr>` +
-    `<td>${escapeHtml(`Component ${componentIndex + 1}`)}</td>` +
+    `<td>${escapeHtml(scopeLabel)}</td>` +
     `<td>${escapeHtml(label)}</td>` +
     `<td>${escapeHtml(scaledInitial)}</td>` +
     `<td>${escapeHtml(scaledBestfit)}</td>` +
@@ -4656,6 +4785,7 @@ function updateControlStates() {
   const hasBurstPath = Boolean(fileInput.value.trim() || fileSelect.value)
   const hasBestDm = Number.isFinite(Number(state.view?.dm_optimization?.best_dm))
   const hasRequiredDm = hasRequiredDmValue()
+  const hasFitParameters = hasFreeFitParameters()
 
   for (const control of sessionControls) {
     control.disabled = !hasSession || isBusy
@@ -4681,6 +4811,7 @@ function updateControlStates() {
   loadButton.disabled = isBusy || !hasBurstPath || !hasRequiredDm
   setDmButton.disabled = !hasSession || isBusy || !hasRequiredDm
   optimizeDmButton.disabled = !hasSession || isBusy || !hasRequiredDm
+  fitScatteringButton.disabled = !hasSession || isBusy || !hasFitParameters
   applyBestDmButton.disabled = !hasSession || isBusy || !hasBestDm
   snapshotDirectorySelect.disabled = isBusy || state.snapshotLibrary.length === 0
   snapshotFileSelect.disabled = isBusy || snapshotsForDirectory(state.selectedSnapshotDirectory).length === 0

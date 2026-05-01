@@ -1528,6 +1528,32 @@ button.is-busy::after {
   margin-top: 12px;
 }
 
+.fit-profile-summary,
+.fit-parameter-summary {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.fit-profile-summary {
+  margin-top: 2px;
+}
+
+.fit-parameter-summary {
+  margin-top: 10px;
+}
+
+.fit-parameter-summary strong {
+  color: var(--ink);
+  margin-right: 4px;
+}
+
+.fit-parameter-summary[data-tone="error"] {
+  color: var(--alert);
+}
+
 .fit-guess-panel {
   display: grid;
   gap: 12px;
