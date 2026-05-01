@@ -336,6 +336,57 @@ class FitburstRequestConfigTest(unittest.TestCase):
         self.assertFalse(hasattr(config, "bounds"))
         self.assertNotIn("bounds", config.to_dict())
 
+    def test_valid_ui_fixed_parameter_payload_is_accepted(self) -> None:
+        config = FitburstRequestConfig.from_dict(
+            {
+                "fixed_parameters": [
+                    "dm",
+                    "dm_index",
+                    "scattering_index",
+                    "spectral_index",
+                    "spectral_running",
+                    "burst_width",
+                ],
+            }
+        )
+
+        self.assertEqual(
+            config.fixed_parameters,
+            [
+                "dm",
+                "dm_index",
+                "scattering_index",
+                "spectral_index",
+                "spectral_running",
+                "burst_width",
+            ],
+        )
+
+    def test_unknown_fixed_parameter_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unknown fixed fit parameters: made_up"):
+            FitburstRequestConfig.from_dict({"fixed_parameters": ["dm", "made_up"]})
+
+    def test_duplicate_fixed_parameter_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Duplicate fixed fit parameters: dm"):
+            FitburstRequestConfig.from_dict({"fixed_parameters": ["dm", "dm"]})
+
+    def test_ref_freq_fixed_parameter_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "ref_freq is an initialization/reference parameter"):
+            FitburstRequestConfig.from_dict({"fixed_parameters": ["ref_freq"]})
+
+    def test_all_fit_parameters_fixed_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "At least one fitburst fit parameter must remain free"):
+            FitburstRequestConfig.from_dict(
+                {
+                    "fixed_parameters": [
+                        "amplitude",
+                        "arrival_time",
+                        "burst_width",
+                        "scattering_timescale",
+                    ],
+                }
+            )
+
 
 class FitburstIterationAdapterTest(unittest.TestCase):
     def test_iterations_update_model_with_previous_bestfit_parameters(self) -> None:

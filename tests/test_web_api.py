@@ -685,6 +685,25 @@ class WebApiTest(unittest.TestCase):
 
         session.fit_scattering.assert_called_once_with(payload)
 
+    def test_session_action_fit_scattering_rejects_invalid_fixed_parameters(self) -> None:
+        session_id = "synthetic-fit-invalid-fixed-params"
+        session = _synthetic_session()
+        SESSIONS[session_id] = session
+        try:
+            with self.assertRaises(HTTPException) as context:
+                session_action(
+                    session_id,
+                    ActionRequest(
+                        type="fit_scattering",
+                        payload={"fixed_parameters": ["dm", "ref_freq"]},
+                    ),
+                )
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        self.assertEqual(context.exception.status_code, 400)
+        self.assertIn("ref_freq is an initialization/reference parameter", context.exception.detail)
+
     def test_session_action_compute_properties_returns_uncertainty_details(self) -> None:
         session_id = "synthetic-compute-uncertainty"
         session = _synthetic_session()
