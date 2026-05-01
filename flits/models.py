@@ -1334,6 +1334,9 @@ class ScatteringFitDiagnostics:
     component_count: int
     fit_parameters: list[str] = field(default_factory=list)
     fixed_parameters: list[str] = field(default_factory=list)
+    weighted_fit: bool | None = None
+    weight_range: list[int] | None = None
+    weight_range_basis: str | None = None
     initial_parameters: dict[str, list[float] | None] = field(default_factory=dict)
     bestfit_parameters: dict[str, list[float] | None] = field(default_factory=dict)
     bestfit_uncertainties: dict[str, list[float] | None] = field(default_factory=dict)
@@ -1371,6 +1374,9 @@ class ScatteringFitDiagnostics:
             "component_count": self.component_count,
             "fit_parameters": self.fit_parameters,
             "fixed_parameters": self.fixed_parameters,
+            "weighted_fit": _bool_or_none(self.weighted_fit),
+            "weight_range": None if self.weight_range is None else [int(value) for value in self.weight_range],
+            "weight_range_basis": self.weight_range_basis,
             "initial_parameters": _jsonable_parameter_dict(self.initial_parameters),
             "bestfit_parameters": _jsonable_parameter_dict(self.bestfit_parameters),
             "bestfit_uncertainties": _jsonable_parameter_dict(self.bestfit_uncertainties),
@@ -1398,6 +1404,13 @@ class ScatteringFitDiagnostics:
             component_count=int(payload.get("component_count", 0)),
             fit_parameters=[str(value) for value in payload.get("fit_parameters", [])],
             fixed_parameters=[str(value) for value in payload.get("fixed_parameters", [])],
+            weighted_fit=_bool_or_none(payload.get("weighted_fit")),
+            weight_range=(
+                None
+                if payload.get("weight_range") is None
+                else [int(value) for value in payload.get("weight_range", [])[:2]]
+            ),
+            weight_range_basis=payload.get("weight_range_basis"),
             initial_parameters={str(key): value for key, value in payload.get("initial_parameters", {}).items()},
             bestfit_parameters={str(key): value for key, value in payload.get("bestfit_parameters", {}).items()},
             bestfit_uncertainties={str(key): value for key, value in payload.get("bestfit_uncertainties", {}).items()},

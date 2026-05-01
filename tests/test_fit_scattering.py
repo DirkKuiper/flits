@@ -7,6 +7,7 @@ from unittest.mock import patch
 import numpy as np
 
 from flits.analysis.fitting.fitburst_adapter import SpectrumModeler
+from flits.analysis.fitting.fitburst_adapter import FitburstRequestConfig
 from flits.analysis.fitting.fitburst_adapter import FitburstScatteringResult
 from flits.models import FilterbankMetadata, ScatteringFitDiagnostics
 from flits.session import BurstSession
@@ -157,6 +158,44 @@ class FitScatteringTest(unittest.TestCase):
                 len(results.diagnostics.scattering_fit.time_axis_ms),
             ),
         )
+        self.assertFalse(results.diagnostics.scattering_fit.weighted_fit)
+        self.assertIsNone(results.diagnostics.scattering_fit.weight_range)
+        self.assertEqual(results.diagnostics.scattering_fit.weight_range_basis, "unweighted")
+
+    def test_weighted_fit_records_offpulse_weighting_diagnostics(self) -> None:
+        unweighted_session, _, _ = _synthetic_scattering_session()
+        weighted_session, _, _ = _synthetic_scattering_session()
+
+        unweighted = unweighted_session.fit_scattering({"weighted_fit": False})
+        weighted = weighted_session.fit_scattering({"weighted_fit": True})
+
+        self.assertEqual(unweighted.diagnostics.scattering_fit.status, "ok")
+        self.assertEqual(weighted.diagnostics.scattering_fit.status, "ok")
+        self.assertFalse(unweighted.diagnostics.scattering_fit.weighted_fit)
+        self.assertTrue(weighted.diagnostics.scattering_fit.weighted_fit)
+        self.assertEqual(weighted.diagnostics.scattering_fit.weight_range_basis, "offpulse_bins")
+        self.assertIsNotNone(weighted.diagnostics.scattering_fit.weight_range)
+        self.assertIsNotNone(unweighted.width_ms_model)
+        self.assertIsNotNone(weighted.width_ms_model)
+        self.assertAlmostEqual(weighted.width_ms_model or 0.0, unweighted.width_ms_model or 0.0, delta=0.5)
+
+
+class FitburstRequestConfigTest(unittest.TestCase):
+    def test_weighted_fit_round_trips_through_request_config(self) -> None:
+        config = FitburstRequestConfig.from_dict(
+            {
+                "num_components": 2,
+                "fixed_parameters": ["dm", "dm_index"],
+                "weighted_fit": True,
+                "weight_range": [3.2, 19.8],
+            }
+        )
+
+        self.assertEqual(config.num_components, 2)
+        self.assertTrue(config.weighted_fit)
+        self.assertEqual(config.weight_range, [3, 20])
+        self.assertEqual(config.to_dict()["weighted_fit"], True)
+        self.assertEqual(config.to_dict()["weight_range"], [3, 20])
 
 class FitScatteringDispatchTest(unittest.TestCase):
     def test_fitburst_guess_uses_component_regions(self) -> None:
@@ -287,6 +326,31 @@ class FitScatteringDispatchTest(unittest.TestCase):
         self.assertEqual(config.initial_parameters["burst_width"], [0.0012, 0.0018])
         self.assertEqual(config.initial_parameters["scattering_timescale"], [0.0004, 0.0005])
         self.assertEqual(config.initial_parameters["amplitude"], [0.7, 0.6])
+
+    @patch("flits.session.fit_scattering_selected_band")
+    def test_fit_scattering_passes_weighted_fit_config(self, mock_fit: object) -> None:
+        session = _synthetic_scattering_dispatch_session()
+
+        mock_fit.return_value = FitburstScatteringResult(
+            status="ok",
+            message=None,
+            width_ms_model=1.0,
+            width_uncertainty_ms=0.1,
+            tau_sc_ms=2.0,
+            tau_uncertainty_ms=0.2,
+            diagnostics=ScatteringFitDiagnostics(
+                status="ok",
+                message=None,
+                fitter="fitburst",
+                component_count=1,
+            ),
+        )
+
+        session.fit_scattering({"weighted_fit": True, "weight_range": [2, 20]})
+
+        config = mock_fit.call_args.kwargs["config"]
+        self.assertTrue(config.weighted_fit)
+        self.assertEqual(config.weight_range, [2, 20])
 
 
 if __name__ == "__main__":
