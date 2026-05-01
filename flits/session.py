@@ -2068,25 +2068,38 @@ class BurstSession:
         if fit_result.status == "ok" and "fit" not in updated_flags:
             updated_flags.append("fit")
         updated_uncertainty_details = dict(self.results.uncertainty_details)
-        updated_uncertainty_details.pop("width_ms_model", None)
-        updated_uncertainty_details.pop("tau_sc_ms", None)
-        updated_uncertainty_details.update(
-            {
-                key: value
-                for key, value in fit_result.diagnostics.uncertainty_details.items()
-                if key in {"width_ms_model", "tau_sc_ms"}
-            }
-        )
+        if fit_result.status == "ok":
+            updated_uncertainty_details.pop("width_ms_model", None)
+            updated_uncertainty_details.pop("tau_sc_ms", None)
+            updated_uncertainty_details.update(
+                {
+                    key: value
+                    for key, value in fit_result.diagnostics.uncertainty_details.items()
+                    if key in {"width_ms_model", "tau_sc_ms"}
+                }
+            )
 
         self.results = replace(
             self.results,
-            width_ms_model=fit_result.width_ms_model,
-            tau_sc_ms=fit_result.tau_sc_ms,
+            width_ms_model=(
+                fit_result.width_ms_model
+                if fit_result.status == "ok"
+                else self.results.width_ms_model
+            ),
+            tau_sc_ms=fit_result.tau_sc_ms if fit_result.status == "ok" else self.results.tau_sc_ms,
             measurement_flags=updated_flags,
             uncertainties=replace(
                 self.results.uncertainties,
-                width_ms_model=compatible_scalar_uncertainty(updated_uncertainty_details.get("width_ms_model")),
-                tau_sc_ms=compatible_scalar_uncertainty(updated_uncertainty_details.get("tau_sc_ms")),
+                width_ms_model=(
+                    compatible_scalar_uncertainty(updated_uncertainty_details.get("width_ms_model"))
+                    if fit_result.status == "ok"
+                    else self.results.uncertainties.width_ms_model
+                ),
+                tau_sc_ms=(
+                    compatible_scalar_uncertainty(updated_uncertainty_details.get("tau_sc_ms"))
+                    if fit_result.status == "ok"
+                    else self.results.uncertainties.tau_sc_ms
+                ),
             ),
             uncertainty_details=updated_uncertainty_details,
             diagnostics=replace(
@@ -2094,7 +2107,7 @@ class BurstSession:
                 scattering_fit=fit_result.diagnostics,
             ),
         )
-        if self.temporal_structure is not None:
+        if self.temporal_structure is not None and fit_result.status == "ok":
             updated_widths_ms = self._fitburst_component_widths_ms()
             finite_widths = updated_widths_ms[np.isfinite(updated_widths_ms) & (updated_widths_ms > 0)]
             self.temporal_structure = replace(

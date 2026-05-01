@@ -1337,6 +1337,8 @@ class ScatteringFitDiagnostics:
     weighted_fit: bool | None = None
     weight_range: list[int] | None = None
     weight_range_basis: str | None = None
+    fit_iterations_requested: int | None = None
+    fit_iterations_completed: int | None = None
     initial_parameters: dict[str, list[float] | None] = field(default_factory=dict)
     bestfit_parameters: dict[str, list[float] | None] = field(default_factory=dict)
     bestfit_uncertainties: dict[str, list[float] | None] = field(default_factory=dict)
@@ -1377,6 +1379,8 @@ class ScatteringFitDiagnostics:
             "weighted_fit": _bool_or_none(self.weighted_fit),
             "weight_range": None if self.weight_range is None else [int(value) for value in self.weight_range],
             "weight_range_basis": self.weight_range_basis,
+            "fit_iterations_requested": _int_or_none(self.fit_iterations_requested),
+            "fit_iterations_completed": _int_or_none(self.fit_iterations_completed),
             "initial_parameters": _jsonable_parameter_dict(self.initial_parameters),
             "bestfit_parameters": _jsonable_parameter_dict(self.bestfit_parameters),
             "bestfit_uncertainties": _jsonable_parameter_dict(self.bestfit_uncertainties),
@@ -1411,6 +1415,8 @@ class ScatteringFitDiagnostics:
                 else [int(value) for value in payload.get("weight_range", [])[:2]]
             ),
             weight_range_basis=payload.get("weight_range_basis"),
+            fit_iterations_requested=_int_or_none(payload.get("fit_iterations_requested")),
+            fit_iterations_completed=_int_or_none(payload.get("fit_iterations_completed")),
             initial_parameters={str(key): value for key, value in payload.get("initial_parameters", {}).items()},
             bestfit_parameters={str(key): value for key, value in payload.get("bestfit_parameters", {}).items()},
             bestfit_uncertainties={str(key): value for key, value in payload.get("bestfit_uncertainties", {}).items()},
