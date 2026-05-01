@@ -35,6 +35,8 @@ MIN_FIT_TIME_BINS = 16
 MIN_WEIGHT_BINS = 8
 FIT_PARAMETERS = ("amplitude", "arrival_time", "burst_width", "scattering_timescale")
 FIXED_PARAMETERS = ("dm", "dm_index", "scattering_index", "spectral_index", "spectral_running")
+FIXABLE_PARAMETERS = FIT_PARAMETERS + FIXED_PARAMETERS
+NON_FITTABLE_PARAMETERS = ("ref_freq",)
 
 
 def _fitburst_uncertainty_detail(
@@ -110,6 +112,10 @@ class FitburstRequestConfig:
     weight_range: list[int] | None = None
     iterations: int = 1
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "fixed_parameters", _validate_fixed_parameters(self.fixed_parameters))
+        object.__setattr__(self, "iterations", _coerce_iterations(self.iterations))
+
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible request payload."""
         return {
@@ -132,7 +138,7 @@ class FitburstRequestConfig:
             num_components = 1
         return cls(
             num_components=max(1, num_components),
-            fixed_parameters=[str(flag) for flag in payload.get("fixed_parameters", ["dm", "dm_index", "scattering_index", "spectral_index", "spectral_running"])],
+            fixed_parameters=payload.get("fixed_parameters", list(FIXED_PARAMETERS)),
             initial_parameters=payload.get("initial_parameters"),
             weighted_fit=_coerce_bool(payload.get("weighted_fit"), default=False),
             weight_range=_coerce_weight_range(payload.get("weight_range")),
@@ -648,6 +654,37 @@ def _coerce_iterations(value: Any) -> int:
     except (TypeError, ValueError):
         return 1
     return max(1, iterations)
+
+
+def _validate_fixed_parameters(values: Any) -> list[str]:
+    if values is None:
+        return list(FIXED_PARAMETERS)
+    if isinstance(values, str):
+        raise ValueError("fixed_parameters must be a list of fitburst parameter names.")
+    try:
+        names = [str(value).strip() for value in values]
+    except TypeError as exc:
+        raise ValueError("fixed_parameters must be a list of fitburst parameter names.") from exc
+
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ValueError(f"Duplicate fixed fit parameters: {', '.join(duplicates)}.")
+
+    non_fittable = [name for name in names if name in NON_FITTABLE_PARAMETERS]
+    if non_fittable:
+        raise ValueError(
+            f"{', '.join(non_fittable)} is an initialization/reference parameter, not a fittable fitburst parameter."
+        )
+
+    allowed = set(FIXABLE_PARAMETERS)
+    unknown = sorted({name for name in names if name not in allowed})
+    if unknown:
+        raise ValueError(f"Unknown fixed fit parameters: {', '.join(unknown)}.")
+
+    if all(parameter in names for parameter in FIT_PARAMETERS):
+        raise ValueError("At least one fitburst fit parameter must remain free.")
+
+    return names
 
 
 def _coerce_weight_range(values: Any, num_time: int | None = None) -> list[int] | None:
