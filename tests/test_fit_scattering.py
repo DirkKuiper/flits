@@ -323,6 +323,19 @@ class FitburstRequestConfigTest(unittest.TestCase):
         self.assertEqual(FitburstRequestConfig.from_dict({"iterations": "bad"}).iterations, 1)
         self.assertEqual(FitburstRequestConfig.from_dict({"iterations": 0}).iterations, 1)
 
+    def test_legacy_bounds_payload_is_ignored_and_not_serialized(self) -> None:
+        config = FitburstRequestConfig.from_dict(
+            {
+                "bounds": {
+                    "burst_width": [[0.0, 0.01]],
+                    "scattering_timescale": [[0.0, 0.1]],
+                },
+            }
+        )
+
+        self.assertFalse(hasattr(config, "bounds"))
+        self.assertNotIn("bounds", config.to_dict())
+
 
 class FitburstIterationAdapterTest(unittest.TestCase):
     def test_iterations_update_model_with_previous_bestfit_parameters(self) -> None:
