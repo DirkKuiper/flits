@@ -1334,6 +1334,7 @@ class ScatteringFitDiagnostics:
     component_count: int
     fit_parameters: list[str] = field(default_factory=list)
     fit_profile: str | None = None
+    initial_parameter_source: str | None = None
     fixed_parameters: list[str] = field(default_factory=list)
     weighted_fit: bool | None = None
     weight_range: list[int] | None = None
@@ -1383,6 +1384,7 @@ class ScatteringFitDiagnostics:
             "component_count": self.component_count,
             "fit_parameters": self.fit_parameters,
             "fit_profile": self.fit_profile,
+            "initial_parameter_source": self.initial_parameter_source,
             "fixed_parameters": self.fixed_parameters,
             "weighted_fit": _bool_or_none(self.weighted_fit),
             "weight_range": None if self.weight_range is None else [int(value) for value in self.weight_range],
@@ -1422,6 +1424,7 @@ class ScatteringFitDiagnostics:
             component_count=int(payload.get("component_count", 0)),
             fit_parameters=[str(value) for value in payload.get("fit_parameters", [])],
             fit_profile=payload.get("fit_profile"),
+            initial_parameter_source=payload.get("initial_parameter_source"),
             fixed_parameters=[str(value) for value in payload.get("fixed_parameters", [])],
             weighted_fit=_bool_or_none(payload.get("weighted_fit")),
             weight_range=(
