@@ -106,6 +106,7 @@ const fitGuessPlot = document.getElementById("fitGuessPlot")
 const fitProfileSelect = document.getElementById("fitProfileSelect")
 const fitProfileSummary = document.getElementById("fitProfileSummary")
 const fitSeedPreviousInput = document.getElementById("fitSeedPreviousInput")
+const fitScintillationInput = document.getElementById("fitScintillationInput")
 const fitComponentsInput = document.getElementById("fitComponentsInput")
 const fitFixedParamsContainer = document.getElementById("fitFixedParamsContainer")
 const fitParameterSummary = document.getElementById("fitParameterSummary")
@@ -224,6 +225,7 @@ const FIT_PARAMETER_ORDER = [
   "spectral_index",
   "spectral_running",
 ]
+const FIT_SCINTILLATION_INACTIVE_PARAMETERS = ["amplitude", "spectral_index", "spectral_running"]
 const FIT_PARAMETER_LABELS = Object.freeze({
   amplitude: "Amplitude",
   arrival_time: "Arrival Time",
@@ -258,6 +260,7 @@ const sessionControls = [
   applyBestDmButton,
   fitProfileSelect,
   fitSeedPreviousInput,
+  fitScintillationInput,
   fitScatteringButton,
   runSpectralButton,
   buildExportButton,
@@ -322,6 +325,7 @@ const busyLockControls = [
   dmStepInput,
   fitProfileSelect,
   fitSeedPreviousInput,
+  fitScintillationInput,
   spectralSegmentInput,
   fitComponentsInput,
 ]
@@ -454,7 +458,9 @@ function bindControls() {
   })
   fitScatteringButton.addEventListener("click", () => {
     const checkboxes = document.querySelectorAll("#fitFixedParamsContainer input[type='checkbox']:checked");
-    const fixedParams = Array.from(checkboxes).map((cb) => cb.value);
+    const fixedParams = Array.from(checkboxes)
+      .filter((cb) => !cb.disabled)
+      .map((cb) => cb.value);
     const seedFromPrevious = Boolean(fitSeedPreviousInput.checked && hasPreviousSuccessfulFit())
     let componentGuesses = null
     if (!seedFromPrevious) {
@@ -466,6 +472,7 @@ function bindControls() {
     postAction("fit_scattering", {
       fit_profile: currentFitProfileKey(),
       seed_from_previous_fit: seedFromPrevious,
+      scintillation: Boolean(fitScintillationInput.checked),
       fixed_parameters: fixedParams,
       num_components: seedFromPrevious ? clampFitComponentCount(fitComponentsInput.value, previousFitComponentCount()) : componentGuesses.length,
       ...(seedFromPrevious ? {} : { component_guesses: componentGuesses }),
@@ -476,6 +483,11 @@ function bindControls() {
     updateControlStates()
   })
   fitSeedPreviousInput.addEventListener("change", () => {
+    updateFitParameterSummary()
+    updateControlStates()
+  })
+  fitScintillationInput.addEventListener("change", () => {
+    syncScintillationParameterControls()
     updateFitParameterSummary()
     updateControlStates()
   })
@@ -2301,6 +2313,7 @@ function renderFitting(view) {
     resultTile("Initialization", fitInitialSourceLabel(scatteringFit.initial_parameter_source), "secondary"),
     resultTile("Iterations", scatteringFit.fit_iterations_completed === null || scatteringFit.fit_iterations_completed === undefined ? "n/a" : `${scatteringFit.fit_iterations_completed}/${scatteringFit.fit_iterations_requested || scatteringFit.fit_iterations_completed}`, "secondary"),
     resultTile("Weighting", scatteringFit.weighted_fit ? "weighted" : "unweighted", "secondary"),
+    resultTile("Scintillation", scatteringFit.scintillation ? "enabled" : "disabled", "secondary"),
     resultTile("Fit S/N", fitStatistics.snr === null || fitStatistics.snr === undefined ? "n/a" : fmt(fitStatistics.snr, 3), "secondary"),
     resultTile("Good Channels", fitStatistics.num_freq_good === null || fitStatistics.num_freq_good === undefined ? "n/a" : String(fitStatistics.num_freq_good), "secondary"),
     resultTile("Observations", fitStatistics.num_observations === null || fitStatistics.num_observations === undefined ? "n/a" : String(fitStatistics.num_observations), "secondary"),
@@ -2480,6 +2493,7 @@ function applyFitProfileDefaults(profileKey) {
   fitFixedParamsContainer.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
     checkbox.checked = fixed.has(checkbox.value)
   })
+  syncScintillationParameterControls()
   updateFitParameterSummary()
 }
 
@@ -2509,27 +2523,54 @@ function fitParameterListLabel(parameters) {
 }
 
 function currentFixedFitParameterSet() {
-  return new Set(Array.from(fitFixedParamsContainer.querySelectorAll("input[type='checkbox']:checked")).map((input) => input.value))
+  return new Set(
+    Array.from(fitFixedParamsContainer.querySelectorAll("input[type='checkbox']:checked"))
+      .filter((input) => !input.disabled)
+      .map((input) => input.value),
+  )
+}
+
+function activeFitParameterOrder() {
+  if (!fitScintillationInput.checked) {
+    return FIT_PARAMETER_ORDER
+  }
+  return FIT_PARAMETER_ORDER.filter((parameter) => !FIT_SCINTILLATION_INACTIVE_PARAMETERS.includes(parameter))
 }
 
 function hasFreeFitParameters() {
   const fixed = currentFixedFitParameterSet()
-  return FIT_PARAMETER_ORDER.some((parameter) => !fixed.has(parameter))
+  return activeFitParameterOrder().some((parameter) => !fixed.has(parameter))
 }
 
 function updateFitParameterSummary() {
   const profile = FIT_PROFILES[currentFitProfileKey()] || FIT_PROFILES.flits_scattering
   const fixed = currentFixedFitParameterSet()
-  const fitted = FIT_PARAMETER_ORDER.filter((parameter) => !fixed.has(parameter))
-  const fixedLabels = FIT_PARAMETER_ORDER.filter((parameter) => fixed.has(parameter)).map((parameter) => fitParameterLabel(parameter))
+  const activeParameters = activeFitParameterOrder()
+  const fitted = activeParameters.filter((parameter) => !fixed.has(parameter))
+  const fixedLabels = activeParameters.filter((parameter) => fixed.has(parameter)).map((parameter) => fitParameterLabel(parameter))
   const fittedLabels = fitted.map((parameter) => fitParameterLabel(parameter))
   const previousFitLabel = fitSeedPreviousInput.checked && hasPreviousSuccessfulFit() ? ", previous-fit seed" : ""
-  fitProfileSummary.textContent = `${profile.label}: ${profile.weightedFit ? "weighted" : "unweighted"}, ${profile.iterations} iteration${profile.iterations === 1 ? "" : "s"}${previousFitLabel}`
+  const scintillationLabel = fitScintillationInput.checked
+    ? ", scintillation mode: per-channel amplitude/spectral shape"
+    : ""
+  fitProfileSummary.textContent = `${profile.label}: ${profile.weightedFit ? "weighted" : "unweighted"}, ${profile.iterations} iteration${profile.iterations === 1 ? "" : "s"}${previousFitLabel}${scintillationLabel}`
   fitParameterSummary.innerHTML = `
     <span><strong>Fitted</strong> ${escapeHtml(fittedLabels.join(", ") || "none")}</span>
     <span><strong>Fixed</strong> ${escapeHtml(fixedLabels.join(", ") || "none")}</span>
   `
   fitParameterSummary.dataset.tone = fitted.length ? "neutral" : "error"
+}
+
+function syncScintillationParameterControls() {
+  const inactive = new Set(fitScintillationInput.checked ? FIT_SCINTILLATION_INACTIVE_PARAMETERS : [])
+  fitFixedParamsContainer.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+    if (inactive.has(checkbox.value)) {
+      checkbox.checked = false
+      checkbox.disabled = true
+    } else {
+      checkbox.disabled = false
+    }
+  })
 }
 
 function hasPreviousSuccessfulFit() {
@@ -4838,6 +4879,7 @@ function updateControlStates() {
   fitComponentsInput.disabled = !hasSession || isBusy || (fitGuessFromAnnotations && !fitSeedPreviousInput.checked)
   fitProfileSelect.disabled = !hasSession || isBusy
   fitSeedPreviousInput.disabled = !hasSession || isBusy || !hasPreviousFit
+  fitScintillationInput.disabled = !hasSession || isBusy
   notesInput.disabled = !hasSession || isBusy
   dmMetricInput.disabled = !hasSession || isBusy
   exportPlotPng.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("plots")

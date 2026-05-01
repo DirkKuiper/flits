@@ -38,6 +38,7 @@ FIT_PARAMETERS = ("amplitude", "arrival_time", "burst_width", "scattering_timesc
 FIXED_PARAMETERS = ("dm", "dm_index", "scattering_index", "spectral_index", "spectral_running")
 FIXABLE_PARAMETERS = FIT_PARAMETERS + FIXED_PARAMETERS
 NON_FITTABLE_PARAMETERS = ("ref_freq",)
+SCINTILLATION_INACTIVE_PARAMETERS = ("amplitude", "spectral_index", "spectral_running")
 FIT_PROFILE_FLITS_SCATTERING = "flits_scattering"
 FIT_PROFILE_ADVANCED_FITBURST_LIKE = "advanced_fitburst_like"
 FIT_PROFILES = (FIT_PROFILE_FLITS_SCATTERING, FIT_PROFILE_ADVANCED_FITBURST_LIKE)
@@ -130,6 +131,10 @@ class FitburstRequestConfig:
         Optional reference-frequency override in MHz. When omitted, FLITS uses
         the minimum selected frequency, matching the historical adapter
         behavior.
+    scintillation
+        Enables fitburst's amplitude-independent scintillation model. In this
+        mode fitburst derives per-channel amplitudes from the data, so
+        amplitude and spectral-shape terms are not optimizer parameters.
 
     Notes
     -----
@@ -148,10 +153,12 @@ class FitburstRequestConfig:
     factor_time_upsample: int = 1
     factor_freq_upsample: int = 1
     ref_freq_mhz: float | None = None
+    scintillation: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "fit_profile", _coerce_fit_profile(self.fit_profile))
-        object.__setattr__(self, "fixed_parameters", _validate_fixed_parameters(self.fixed_parameters))
+        object.__setattr__(self, "scintillation", _coerce_bool(self.scintillation, default=False))
+        object.__setattr__(self, "fixed_parameters", _validate_fixed_parameters(self.fixed_parameters, scintillation=self.scintillation))
         object.__setattr__(self, "initial_parameter_source", _coerce_initial_parameter_source(self.initial_parameter_source, self.initial_parameters))
         object.__setattr__(self, "iterations", _coerce_iterations(self.iterations))
         object.__setattr__(self, "factor_time_upsample", _coerce_positive_int(self.factor_time_upsample))
@@ -172,6 +179,7 @@ class FitburstRequestConfig:
             "factor_time_upsample": _coerce_positive_int(self.factor_time_upsample),
             "factor_freq_upsample": _coerce_positive_int(self.factor_freq_upsample),
             "ref_freq_mhz": _coerce_ref_freq_mhz(self.ref_freq_mhz),
+            "scintillation": bool(self.scintillation),
         }
 
     @classmethod
@@ -197,6 +205,7 @@ class FitburstRequestConfig:
             factor_time_upsample=_coerce_positive_int(payload.get("factor_time_upsample")),
             factor_freq_upsample=_coerce_positive_int(payload.get("factor_freq_upsample")),
             ref_freq_mhz=_coerce_ref_freq_mhz(payload.get("ref_freq_mhz")),
+            scintillation=_coerce_bool(payload.get("scintillation"), default=False),
         )
 
 
@@ -309,6 +318,7 @@ def fit_scattering_selected_band(
             fit_profile=config.fit_profile,
             initial_parameter_source=config.initial_parameter_source,
             fixed_parameters=config.fixed_parameters,
+            scintillation=config.scintillation,
             fit_iterations_requested=fit_iterations,
             fit_iterations_completed=0,
         )
@@ -326,6 +336,7 @@ def fit_scattering_selected_band(
             fit_profile=config.fit_profile,
             initial_parameter_source=config.initial_parameter_source,
             fixed_parameters=config.fixed_parameters,
+            scintillation=config.scintillation,
             fit_iterations_requested=fit_iterations,
             fit_iterations_completed=0,
         )
@@ -337,6 +348,7 @@ def fit_scattering_selected_band(
             fit_profile=config.fit_profile,
             initial_parameter_source=config.initial_parameter_source,
             fixed_parameters=config.fixed_parameters,
+            scintillation=config.scintillation,
             fit_iterations_requested=fit_iterations,
             fit_iterations_completed=0,
         )
@@ -351,6 +363,7 @@ def fit_scattering_selected_band(
             fit_profile=config.fit_profile,
             initial_parameter_source=config.initial_parameter_source,
             fixed_parameters=config.fixed_parameters,
+            scintillation=config.scintillation,
             fit_iterations_requested=fit_iterations,
             fit_iterations_completed=0,
         )
@@ -368,6 +381,7 @@ def fit_scattering_selected_band(
             fit_profile=config.fit_profile,
             initial_parameter_source=config.initial_parameter_source,
             fixed_parameters=config.fixed_parameters,
+            scintillation=config.scintillation,
             fit_iterations_requested=fit_iterations,
             fit_iterations_completed=0,
         )
@@ -426,6 +440,7 @@ def fit_scattering_selected_band(
         factor_time_upsample=factor_time_upsample,
         num_components=config.num_components,
         is_dedispersed=True,
+        scintillation=config.scintillation,
     )
     current_parameters = _copy_parameter_dict(initial_parameters)
     completed_iterations = 0
@@ -465,6 +480,7 @@ def fit_scattering_selected_band(
                 initial_parameter_source=config.initial_parameter_source,
                 fixed_parameters=config.fixed_parameters,
                 component_count=config.num_components,
+                scintillation=config.scintillation,
                 weighted_fit=weighted_fit,
                 weight_range=weight_range,
                 weight_range_basis=weight_range_basis,
@@ -494,6 +510,7 @@ def fit_scattering_selected_band(
                 initial_parameter_source=config.initial_parameter_source,
                 fixed_parameters=config.fixed_parameters,
                 component_count=config.num_components,
+                scintillation=config.scintillation,
                 weighted_fit=weighted_fit,
                 weight_range=weight_range,
                 weight_range_basis=weight_range_basis,
@@ -523,6 +540,7 @@ def fit_scattering_selected_band(
             initial_parameter_source=config.initial_parameter_source,
             fixed_parameters=config.fixed_parameters,
             component_count=config.num_components,
+            scintillation=config.scintillation,
             weighted_fit=weighted_fit,
             weight_range=weight_range,
             weight_range_basis=weight_range_basis,
@@ -579,6 +597,7 @@ def fit_scattering_selected_band(
         fit_profile=config.fit_profile,
         initial_parameter_source=config.initial_parameter_source,
         fixed_parameters=config.fixed_parameters,
+        scintillation=config.scintillation,
         weighted_fit=weighted_fit,
         weight_range=weight_range,
         weight_range_basis=weight_range_basis,
@@ -809,15 +828,16 @@ def _coerce_ref_freq_mhz(value: Any) -> float | None:
     return parsed
 
 
-def _validate_fixed_parameters(values: Any) -> list[str]:
+def _validate_fixed_parameters(values: Any, *, scintillation: bool = False) -> list[str]:
     if values is None:
-        return list(FIXED_PARAMETERS)
-    if isinstance(values, str):
-        raise ValueError("fixed_parameters must be a list of fitburst parameter names.")
-    try:
-        names = [str(value).strip() for value in values]
-    except TypeError as exc:
-        raise ValueError("fixed_parameters must be a list of fitburst parameter names.") from exc
+        names = list(FIXED_PARAMETERS)
+    else:
+        if isinstance(values, str):
+            raise ValueError("fixed_parameters must be a list of fitburst parameter names.")
+        try:
+            names = [str(value).strip() for value in values]
+        except TypeError as exc:
+            raise ValueError("fixed_parameters must be a list of fitburst parameter names.") from exc
 
     duplicates = sorted({name for name in names if names.count(name) > 1})
     if duplicates:
@@ -834,7 +854,13 @@ def _validate_fixed_parameters(values: Any) -> list[str]:
     if unknown:
         raise ValueError(f"Unknown fixed fit parameters: {', '.join(unknown)}.")
 
-    if all(parameter in names for parameter in FIT_PARAMETERS):
+    if scintillation:
+        names = [name for name in names if name not in SCINTILLATION_INACTIVE_PARAMETERS]
+
+    active_fit_parameters = [
+        parameter for parameter in FIT_PARAMETERS if not (scintillation and parameter in SCINTILLATION_INACTIVE_PARAMETERS)
+    ]
+    if active_fit_parameters and all(parameter in names for parameter in active_fit_parameters):
         raise ValueError("At least one fitburst fit parameter must remain free.")
 
     return names
@@ -983,6 +1009,7 @@ def _failed_result(
     initial_parameter_source: str | None = None,
     fixed_parameters: list[str] | None = None,
     component_count: int = 1,
+    scintillation: bool | None = None,
     weighted_fit: bool | None = None,
     weight_range: list[int] | None = None,
     weight_range_basis: str | None = None,
@@ -1005,6 +1032,7 @@ def _failed_result(
         fit_profile=_coerce_fit_profile(fit_profile),
         initial_parameter_source=_coerce_initial_parameter_source(initial_parameter_source, initial_parameters),
         fixed_parameters=list(FIXED_PARAMETERS if fixed_parameters is None else fixed_parameters),
+        scintillation=None if scintillation is None else bool(scintillation),
         weighted_fit=weighted_fit,
         weight_range=weight_range,
         weight_range_basis=weight_range_basis,

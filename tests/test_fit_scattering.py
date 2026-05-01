@@ -136,11 +136,13 @@ class _FakeSpectrumModeler:
         factor_time_upsample: int = 1,
         num_components: int = 1,
         is_dedispersed: bool = False,
+        scintillation: bool = False,
     ) -> None:
         self.freqs_mhz = np.asarray(freqs_mhz, dtype=float)
         self.times_sec = np.asarray(times_sec, dtype=float)
         self.factor_freq_upsample = int(factor_freq_upsample)
         self.factor_time_upsample = int(factor_time_upsample)
+        self.scintillation = bool(scintillation)
         self.parameters: dict[str, list[float] | None] = {}
         self.update_history: list[dict[str, list[float] | None]] = []
         type(self).instances.append(self)
@@ -187,11 +189,13 @@ class _FakeLSFitter:
         type(self).instances.append(self)
 
     def fix_parameter(self, fixed_parameters: list[str]) -> None:
-        self.fit_parameters = [
+        fit_parameters = [
             parameter
             for parameter in ("amplitude", "arrival_time", "burst_width", "scattering_timescale")
-            if parameter not in fixed_parameters
         ]
+        if self.model.scintillation:
+            fit_parameters = [parameter for parameter in fit_parameters if parameter != "amplitude"]
+        self.fit_parameters = [parameter for parameter in fit_parameters if parameter not in fixed_parameters]
 
     def fit(self) -> None:
         type(self).fit_calls += 1
@@ -388,6 +392,24 @@ class FitburstRequestConfigTest(unittest.TestCase):
         self.assertEqual(config.iterations, 1)
         self.assertEqual(config.fixed_parameters, ["dm", "dm_index", "scattering_index", "spectral_index"])
 
+    def test_scintillation_filters_non_optimizer_fixed_parameters(self) -> None:
+        config = FitburstRequestConfig.from_dict(
+            {
+                "scintillation": True,
+                "fixed_parameters": [
+                    "amplitude",
+                    "dm",
+                    "spectral_index",
+                    "spectral_running",
+                ],
+            }
+        )
+
+        self.assertTrue(config.scintillation)
+        self.assertEqual(config.fixed_parameters, ["dm"])
+        self.assertTrue(config.to_dict()["scintillation"])
+        self.assertNotIn("amplitude", config.to_dict()["fixed_parameters"])
+
     def test_invalid_iteration_count_falls_back_to_one(self) -> None:
         self.assertEqual(FitburstRequestConfig.from_dict({"iterations": "bad"}).iterations, 1)
         self.assertEqual(FitburstRequestConfig.from_dict({"iterations": 0}).iterations, 1)
@@ -501,6 +523,24 @@ class FitburstIterationAdapterTest(unittest.TestCase):
         self.assertEqual(result.diagnostics.factor_freq_upsample, 3)
         self.assertEqual(result.diagnostics.ref_freq_mhz, 1400.0)
         self.assertEqual(result.diagnostics.bestfit_parameters["ref_freq"], [1400.0])
+
+    def test_scintillation_reaches_modeler_and_excludes_inactive_parameters(self) -> None:
+        result = _run_fake_fitburst_fit(
+            iterations=1,
+            config=FitburstRequestConfig.from_dict(
+                {
+                    "scintillation": True,
+                    "fixed_parameters": ["amplitude", "dm", "spectral_index", "spectral_running"],
+                }
+            ),
+        )
+
+        self.assertEqual(result.status, "ok")
+        self.assertTrue(_FakeSpectrumModeler.instances[0].scintillation)
+        self.assertTrue(result.diagnostics.scintillation)
+        self.assertEqual(result.diagnostics.fixed_parameters, ["dm"])
+        self.assertNotIn("amplitude", result.diagnostics.fit_parameters)
+        self.assertIn("arrival_time", result.diagnostics.fit_parameters)
 
     def test_failed_intermediate_iteration_returns_completed_bestfit_diagnostics(self) -> None:
         class FailingSecondFit(_FakeLSFitter):
