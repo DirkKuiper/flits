@@ -1270,6 +1270,101 @@ class BurstSession:
             "spectral_running": [0.0] * len(rows),
         }
 
+    def _fitburst_initial_parameters_from_previous_fit(
+        self,
+        previous_fit: Any | None,
+        *,
+        defaults: dict[str, list[float]],
+        num_components: int,
+        time_axis_ms: np.ndarray,
+        freqs_mhz: np.ndarray,
+        event_window_ms: tuple[float, float],
+    ) -> dict[str, list[float]] | None:
+        if previous_fit is None or getattr(previous_fit, "status", None) != "ok":
+            return None
+        previous_parameters = getattr(previous_fit, "bestfit_parameters", None) or {}
+        if not previous_parameters:
+            return None
+        if not defaults or "arrival_time" not in defaults:
+            return None
+
+        component_count = max(1, int(num_components))
+        time_axis_ms = np.asarray(time_axis_ms, dtype=float)
+        freqs_mhz = np.asarray(freqs_mhz, dtype=float)
+        if time_axis_ms.size == 0 or freqs_mhz.size == 0:
+            return None
+        base_time_ms = float(time_axis_ms[0])
+        sanitized: dict[str, list[float]] = {}
+        for key, fallback_values in defaults.items():
+            fallback = self._coerce_fitburst_parameter_values(fallback_values, fallback_values, component_count)
+            if key == "ref_freq":
+                sanitized[key] = [float(np.min(freqs_mhz))] * component_count
+                continue
+
+            values = self._coerce_fitburst_parameter_values(
+                previous_parameters.get(key),
+                fallback,
+                component_count,
+            )
+            if key in {"burst_width", "scattering_timescale"}:
+                values = [
+                    value if np.isfinite(value) and value > 0.0 else fallback[index]
+                    for index, value in enumerate(values)
+                ]
+            sanitized[key] = values
+
+        arrivals = self._coerce_fitburst_parameter_values(
+            previous_parameters.get("arrival_time"),
+            defaults.get("arrival_time", []),
+            component_count,
+        )
+        sanitized_arrivals: list[float] = []
+        reused_arrivals = 0
+        for index, arrival_sec in enumerate(arrivals):
+            arrival_ms = base_time_ms + float(arrival_sec) * 1e3
+            if np.isfinite(arrival_ms) and event_window_ms[0] <= arrival_ms <= event_window_ms[1]:
+                sanitized_arrivals.append(float(arrival_sec))
+                reused_arrivals += 1
+            else:
+                fallback_arrivals = defaults.get("arrival_time", [0.0])
+                fallback_index = min(index, len(fallback_arrivals) - 1)
+                sanitized_arrivals.append(float(fallback_arrivals[fallback_index]))
+
+        if reused_arrivals == 0:
+            return None
+        sanitized["arrival_time"] = sanitized_arrivals
+        return sanitized
+
+    @staticmethod
+    def _coerce_fitburst_parameter_values(
+        values: Any,
+        defaults: Any,
+        num_components: int,
+    ) -> list[float]:
+        component_count = max(1, int(num_components))
+        try:
+            default_array = np.asarray(defaults, dtype=float).ravel()
+        except (TypeError, ValueError):
+            default_array = np.zeros(component_count, dtype=float)
+        if default_array.size == 0:
+            default_array = np.zeros(component_count, dtype=float)
+        if default_array.size < component_count:
+            default_array = np.pad(default_array, (0, component_count - default_array.size), mode="edge")
+        default_array = default_array[:component_count]
+
+        try:
+            value_array = np.asarray(values, dtype=float).ravel()
+        except (TypeError, ValueError):
+            return [float(value) for value in default_array]
+        if value_array.size == 0:
+            return [float(value) for value in default_array]
+        if value_array.size < component_count:
+            value_array = np.concatenate([value_array, default_array[value_array.size : component_count]])
+        if value_array.size > component_count:
+            value_array = value_array[:component_count]
+        value_array = np.where(np.isfinite(value_array), value_array, default_array)
+        return [float(value) for value in value_array]
+
     def _dm_component_windows(self) -> list[tuple[str, tuple[int, int]]]:
         components: list[tuple[str, tuple[int, int]]] = []
         if len(self.burst_regions) >= 2:
@@ -2026,6 +2121,39 @@ class BurstSession:
         selected_freqs = np.asarray(grid.freqs_mhz[context.spec_lo : context.spec_hi + 1], dtype=float)
         config_payload = dict(config_data or {})
         component_guesses = config_payload.get("component_guesses")
+        seed_from_previous_fit = bool(config_payload.pop("seed_from_previous_fit", False))
+        if seed_from_previous_fit:
+            target_components = int(config_payload.get("num_components") or 1)
+            if isinstance(component_guesses, list) and component_guesses:
+                target_components = int(config_payload.get("num_components", len(component_guesses)) or len(component_guesses))
+            guess_payload = self._fitburst_guess_payload(grid, context)
+            fallback_parameters = self._fitburst_initial_parameters_from_component_guesses(
+                guess_payload.get("component_guesses", []),
+                time_axis_ms=context.time_axis_ms,
+                freqs_mhz=selected_freqs,
+            )
+            previous_fit = self.results.diagnostics.scattering_fit
+            event_window_ms = self._current_event_window_ms(context, tsamp_ms=grid.effective_tsamp_ms)
+            previous_parameters = self._fitburst_initial_parameters_from_previous_fit(
+                previous_fit,
+                defaults=fallback_parameters,
+                num_components=target_components,
+                time_axis_ms=context.time_axis_ms,
+                freqs_mhz=selected_freqs,
+                event_window_ms=event_window_ms,
+            )
+            if previous_parameters is not None:
+                config_payload["initial_parameters"] = previous_parameters
+                config_payload["initial_parameter_source"] = "previous_fit"
+                config_payload["num_components"] = target_components
+                component_guesses = None
+            elif fallback_parameters and component_guesses is None:
+                config_payload["initial_parameters"] = fallback_parameters
+                config_payload["initial_parameter_source"] = "component_guesses"
+                config_payload["num_components"] = target_components
+            else:
+                config_payload["initial_parameter_source"] = "component_guesses" if component_guesses is not None else "adapter_default"
+
         if component_guesses is not None:
             if not isinstance(component_guesses, list):
                 raise ValueError("component_guesses must be a list of per-component guess objects.")
@@ -2041,6 +2169,7 @@ class BurstSession:
                 event_window_ms=event_window_ms,
             )
             config_payload["num_components"] = len(component_guesses)
+            config_payload["initial_parameter_source"] = config_payload.get("initial_parameter_source", "component_guesses")
         config = FitburstRequestConfig.from_dict(config_payload) if config_payload else None
 
         peak_rel_bin = _primary_peak_bin(

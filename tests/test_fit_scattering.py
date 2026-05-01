@@ -351,6 +351,17 @@ class FitburstRequestConfigTest(unittest.TestCase):
         self.assertEqual(config.to_dict()["factor_freq_upsample"], 2)
         self.assertEqual(config.to_dict()["ref_freq_mhz"], 1375.5)
 
+    def test_initial_parameter_source_round_trips(self) -> None:
+        config = FitburstRequestConfig.from_dict(
+            {
+                "initial_parameters": {"arrival_time": [0.01]},
+                "initial_parameter_source": "previous_fit",
+            }
+        )
+
+        self.assertEqual(config.initial_parameter_source, "previous_fit")
+        self.assertEqual(config.to_dict()["initial_parameter_source"], "previous_fit")
+
     def test_advanced_fit_profile_applies_profile_defaults(self) -> None:
         config = FitburstRequestConfig.from_dict({"fit_profile": "advanced_fitburst_like"})
 
@@ -698,6 +709,109 @@ class FitScatteringDispatchTest(unittest.TestCase):
         self.assertEqual(config.factor_time_upsample, 2)
         self.assertEqual(config.factor_freq_upsample, 4)
         self.assertEqual(config.ref_freq_mhz, 1333.0)
+
+    @patch("flits.session.fit_scattering_selected_band")
+    def test_fit_scattering_can_seed_from_previous_successful_fit(self, mock_fit: object) -> None:
+        session = _synthetic_scattering_dispatch_session()
+        previous_arrival_ms = session.bin_to_ms(260)
+        mock_fit.side_effect = [
+            FitburstScatteringResult(
+                status="ok",
+                message=None,
+                width_ms_model=1.2,
+                width_uncertainty_ms=None,
+                tau_sc_ms=2.4,
+                tau_uncertainty_ms=None,
+                diagnostics=ScatteringFitDiagnostics(
+                    status="ok",
+                    message=None,
+                    fitter="fitburst",
+                    component_count=2,
+                    bestfit_parameters={
+                        "amplitude": [0.9, 0.8],
+                        "arrival_time": [previous_arrival_ms / 1e3, session.bin_to_ms(280) / 1e3],
+                        "burst_width": [0.0012, 0.0014],
+                        "dm": [0.0, 0.0],
+                        "dm_index": [-2.0, -2.0],
+                        "ref_freq": [1250.0, 1250.0],
+                        "scattering_timescale": [0.0024, 0.0026],
+                        "scattering_index": [-4.0, -4.0],
+                        "spectral_index": [0.2, 0.1],
+                        "spectral_running": [0.0, 0.0],
+                    },
+                ),
+            ),
+            FitburstScatteringResult(
+                status="ok",
+                message=None,
+                width_ms_model=1.1,
+                width_uncertainty_ms=None,
+                tau_sc_ms=2.1,
+                tau_uncertainty_ms=None,
+                diagnostics=ScatteringFitDiagnostics(
+                    status="ok",
+                    message=None,
+                    fitter="fitburst",
+                    component_count=1,
+                ),
+            ),
+        ]
+
+        session.fit_scattering()
+        session.fit_scattering({"seed_from_previous_fit": True, "num_components": 1})
+
+        config = mock_fit.call_args.kwargs["config"]
+        self.assertEqual(config.initial_parameter_source, "previous_fit")
+        self.assertEqual(config.num_components, 1)
+        self.assertEqual(config.initial_parameters["arrival_time"], [previous_arrival_ms / 1e3])
+        self.assertEqual(config.initial_parameters["burst_width"], [0.0012])
+        self.assertEqual(config.initial_parameters["ref_freq"], [1250.0])
+
+    @patch("flits.session.fit_scattering_selected_band")
+    def test_incompatible_previous_fit_seed_falls_back_to_current_guesses(self, mock_fit: object) -> None:
+        session = _synthetic_scattering_dispatch_session()
+        mock_fit.side_effect = [
+            FitburstScatteringResult(
+                status="ok",
+                message=None,
+                width_ms_model=1.2,
+                width_uncertainty_ms=None,
+                tau_sc_ms=2.4,
+                tau_uncertainty_ms=None,
+                diagnostics=ScatteringFitDiagnostics(
+                    status="ok",
+                    message=None,
+                    fitter="fitburst",
+                    component_count=1,
+                    bestfit_parameters={
+                        "arrival_time": [0.001],
+                        "burst_width": [0.0012],
+                    },
+                ),
+            ),
+            FitburstScatteringResult(
+                status="ok",
+                message=None,
+                width_ms_model=1.1,
+                width_uncertainty_ms=None,
+                tau_sc_ms=2.1,
+                tau_uncertainty_ms=None,
+                diagnostics=ScatteringFitDiagnostics(
+                    status="ok",
+                    message=None,
+                    fitter="fitburst",
+                    component_count=1,
+                ),
+            ),
+        ]
+
+        session.fit_scattering()
+        session.fit_scattering({"seed_from_previous_fit": True, "num_components": 1})
+
+        config = mock_fit.call_args.kwargs["config"]
+        self.assertEqual(config.initial_parameter_source, "component_guesses")
+        self.assertIsNotNone(config.initial_parameters)
+        self.assertNotEqual(config.initial_parameters["arrival_time"], [0.001])
 
     @patch("flits.session.fit_scattering_selected_band")
     def test_failed_refit_preserves_previous_successful_fit_values(self, mock_fit: object) -> None:

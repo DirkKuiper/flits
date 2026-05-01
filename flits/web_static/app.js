@@ -105,6 +105,7 @@ const fitGuessContent = document.getElementById("fitGuessContent")
 const fitGuessPlot = document.getElementById("fitGuessPlot")
 const fitProfileSelect = document.getElementById("fitProfileSelect")
 const fitProfileSummary = document.getElementById("fitProfileSummary")
+const fitSeedPreviousInput = document.getElementById("fitSeedPreviousInput")
 const fitComponentsInput = document.getElementById("fitComponentsInput")
 const fitFixedParamsContainer = document.getElementById("fitFixedParamsContainer")
 const fitParameterSummary = document.getElementById("fitParameterSummary")
@@ -256,6 +257,7 @@ const sessionControls = [
   optimizeDmButton,
   applyBestDmButton,
   fitProfileSelect,
+  fitSeedPreviousInput,
   fitScatteringButton,
   runSpectralButton,
   buildExportButton,
@@ -319,6 +321,7 @@ const busyLockControls = [
   dmHalfRangeInput,
   dmStepInput,
   fitProfileSelect,
+  fitSeedPreviousInput,
   spectralSegmentInput,
   fitComponentsInput,
 ]
@@ -452,19 +455,28 @@ function bindControls() {
   fitScatteringButton.addEventListener("click", () => {
     const checkboxes = document.querySelectorAll("#fitFixedParamsContainer input[type='checkbox']:checked");
     const fixedParams = Array.from(checkboxes).map((cb) => cb.value);
-    const componentGuesses = collectFitComponentGuesses()
-    if (!componentGuesses) {
-      return
+    const seedFromPrevious = Boolean(fitSeedPreviousInput.checked && hasPreviousSuccessfulFit())
+    let componentGuesses = null
+    if (!seedFromPrevious) {
+      componentGuesses = collectFitComponentGuesses()
+      if (!componentGuesses) {
+        return
+      }
     }
     postAction("fit_scattering", {
       fit_profile: currentFitProfileKey(),
+      seed_from_previous_fit: seedFromPrevious,
       fixed_parameters: fixedParams,
-      num_components: componentGuesses.length,
-      component_guesses: componentGuesses,
+      num_components: seedFromPrevious ? clampFitComponentCount(fitComponentsInput.value, previousFitComponentCount()) : componentGuesses.length,
+      ...(seedFromPrevious ? {} : { component_guesses: componentGuesses }),
     });
   })
   fitProfileSelect.addEventListener("change", () => {
     applyFitProfileDefaults(fitProfileSelect.value)
+    updateControlStates()
+  })
+  fitSeedPreviousInput.addEventListener("change", () => {
+    updateFitParameterSummary()
     updateControlStates()
   })
   fitFixedParamsContainer.addEventListener("change", () => {
@@ -2286,6 +2298,7 @@ function renderFitting(view) {
   const fitMetaTiles = [
     resultTile("Fitter", scatteringFit.fitter || "n/a", "secondary"),
     resultTile("Profile", fitProfileLabel(scatteringFit.fit_profile), "secondary"),
+    resultTile("Initialization", fitInitialSourceLabel(scatteringFit.initial_parameter_source), "secondary"),
     resultTile("Iterations", scatteringFit.fit_iterations_completed === null || scatteringFit.fit_iterations_completed === undefined ? "n/a" : `${scatteringFit.fit_iterations_completed}/${scatteringFit.fit_iterations_requested || scatteringFit.fit_iterations_completed}`, "secondary"),
     resultTile("Weighting", scatteringFit.weighted_fit ? "weighted" : "unweighted", "secondary"),
     resultTile("Fit S/N", fitStatistics.snr === null || fitStatistics.snr === undefined ? "n/a" : fmt(fitStatistics.snr, 3), "secondary"),
@@ -2474,6 +2487,16 @@ function fitProfileLabel(profileKey) {
   return (FIT_PROFILES[profileKey] || FIT_PROFILES.flits_scattering).label
 }
 
+function fitInitialSourceLabel(source) {
+  const labels = {
+    adapter_default: "Adapter default",
+    component_guesses: "Current guesses",
+    previous_fit: "Previous fit",
+    request: "API request",
+  }
+  return labels[source] || "Adapter default"
+}
+
 function fitParameterLabel(parameter) {
   return FIT_PARAMETER_LABELS[parameter] || parameter
 }
@@ -2500,12 +2523,22 @@ function updateFitParameterSummary() {
   const fitted = FIT_PARAMETER_ORDER.filter((parameter) => !fixed.has(parameter))
   const fixedLabels = FIT_PARAMETER_ORDER.filter((parameter) => fixed.has(parameter)).map((parameter) => fitParameterLabel(parameter))
   const fittedLabels = fitted.map((parameter) => fitParameterLabel(parameter))
-  fitProfileSummary.textContent = `${profile.label}: ${profile.weightedFit ? "weighted" : "unweighted"}, ${profile.iterations} iteration${profile.iterations === 1 ? "" : "s"}`
+  const previousFitLabel = fitSeedPreviousInput.checked && hasPreviousSuccessfulFit() ? ", previous-fit seed" : ""
+  fitProfileSummary.textContent = `${profile.label}: ${profile.weightedFit ? "weighted" : "unweighted"}, ${profile.iterations} iteration${profile.iterations === 1 ? "" : "s"}${previousFitLabel}`
   fitParameterSummary.innerHTML = `
     <span><strong>Fitted</strong> ${escapeHtml(fittedLabels.join(", ") || "none")}</span>
     <span><strong>Fixed</strong> ${escapeHtml(fixedLabels.join(", ") || "none")}</span>
   `
   fitParameterSummary.dataset.tone = fitted.length ? "neutral" : "error"
+}
+
+function hasPreviousSuccessfulFit() {
+  return state.view?.results?.diagnostics?.scattering_fit?.status === "ok"
+}
+
+function previousFitComponentCount() {
+  const count = Number(state.view?.results?.diagnostics?.scattering_fit?.component_count)
+  return Number.isFinite(count) && count > 0 ? count : 1
 }
 
 function collectFitComponentGuesses() {
@@ -4786,6 +4819,7 @@ function updateControlStates() {
   const hasBestDm = Number.isFinite(Number(state.view?.dm_optimization?.best_dm))
   const hasRequiredDm = hasRequiredDmValue()
   const hasFitParameters = hasFreeFitParameters()
+  const hasPreviousFit = hasPreviousSuccessfulFit()
 
   for (const control of sessionControls) {
     control.disabled = !hasSession || isBusy
@@ -4797,7 +4831,13 @@ function updateControlStates() {
 
   const fitGuessSource = state.view?.fitburst_guess?.source
   const fitGuessFromAnnotations = fitGuessSource === "component_regions" || fitGuessSource === "manual_peaks"
-  fitComponentsInput.disabled = !hasSession || isBusy || fitGuessFromAnnotations
+  if (!hasPreviousFit && fitSeedPreviousInput.checked) {
+    fitSeedPreviousInput.checked = false
+    updateFitParameterSummary()
+  }
+  fitComponentsInput.disabled = !hasSession || isBusy || (fitGuessFromAnnotations && !fitSeedPreviousInput.checked)
+  fitProfileSelect.disabled = !hasSession || isBusy
+  fitSeedPreviousInput.disabled = !hasSession || isBusy || !hasPreviousFit
   notesInput.disabled = !hasSession || isBusy
   dmMetricInput.disabled = !hasSession || isBusy
   exportPlotPng.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("plots")
