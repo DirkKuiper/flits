@@ -373,14 +373,22 @@
             <section class="analysis-panel" id="analysisFittingPanel" data-tab-panel="fitting" role="tabpanel" hidden>
               <div class="analysis-panel-head">
                 <h4>Model Fitting</h4>
-                <p>Run a fitburst-backed 2D model fit on the current crop, event window, mask, and spectral window.</p>
+                <p>Run a fitburst-backed 2D model fit on the current selected event window, crop, mask, and spectral window.</p>
               </div>
               <div class="field-row">
+                <label class="field">
+                  <span>Fit Profile <span class="tooltip-icon" data-tooltip="FLITS scattering preserves the default selected-event scattering fit. Advanced fitburst-like enables weighted iterative fitting and leaves spectral terms free.">?</span></span>
+                  <select id="fitProfileSelect">
+                    <option value="flits_scattering">FLITS scattering</option>
+                    <option value="advanced_fitburst_like">Advanced fitburst-like</option>
+                  </select>
+                </label>
                 <label class="field">
                   <span>Components <span class="tooltip-icon" data-tooltip="Number of gaussian components to model in this fit.">?</span></span>
                   <input id="fitComponentsInput" type="number" min="1" max="10" step="1" value="1">
                 </label>
               </div>
+              <div id="fitProfileSummary" class="fit-profile-summary"></div>
               <div id="fitGuessContent" class="fit-guess-content">
                 <div class="empty-state">Load a session to inspect fitburst initial guesses.</div>
               </div>
@@ -416,6 +424,7 @@
                     <input type="checkbox" name="fixed_param" value="scattering_timescale"> Scattering Timescale
                   </label>
                 </div>
+                <div id="fitParameterSummary" class="fit-parameter-summary"></div>
               </div>
               <div class="export-actions">
                 <button class="primary-button" id="fitScatteringButton">Run 2D Model Fit</button>

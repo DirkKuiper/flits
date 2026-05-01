@@ -295,6 +295,7 @@ class FitScatteringTest(unittest.TestCase):
         self.assertFalse(results.diagnostics.scattering_fit.weighted_fit)
         self.assertIsNone(results.diagnostics.scattering_fit.weight_range)
         self.assertEqual(results.diagnostics.scattering_fit.weight_range_basis, "unweighted")
+        self.assertEqual(results.diagnostics.scattering_fit.fit_profile, "flits_scattering")
         self.assertEqual(results.diagnostics.scattering_fit.fit_iterations_requested, 1)
         self.assertEqual(results.diagnostics.scattering_fit.fit_iterations_completed, 1)
         self.assertEqual(results.diagnostics.scattering_fit.factor_time_upsample, 1)
@@ -335,6 +336,7 @@ class FitburstRequestConfigTest(unittest.TestCase):
         )
 
         self.assertEqual(config.num_components, 2)
+        self.assertEqual(config.fit_profile, "flits_scattering")
         self.assertTrue(config.weighted_fit)
         self.assertEqual(config.weight_range, [3, 20])
         self.assertEqual(config.iterations, 3)
@@ -342,11 +344,38 @@ class FitburstRequestConfigTest(unittest.TestCase):
         self.assertEqual(config.factor_freq_upsample, 2)
         self.assertEqual(config.ref_freq_mhz, 1375.5)
         self.assertEqual(config.to_dict()["weighted_fit"], True)
+        self.assertEqual(config.to_dict()["fit_profile"], "flits_scattering")
         self.assertEqual(config.to_dict()["weight_range"], [3, 20])
         self.assertEqual(config.to_dict()["iterations"], 3)
         self.assertEqual(config.to_dict()["factor_time_upsample"], 4)
         self.assertEqual(config.to_dict()["factor_freq_upsample"], 2)
         self.assertEqual(config.to_dict()["ref_freq_mhz"], 1375.5)
+
+    def test_advanced_fit_profile_applies_profile_defaults(self) -> None:
+        config = FitburstRequestConfig.from_dict({"fit_profile": "advanced_fitburst_like"})
+
+        self.assertEqual(config.fit_profile, "advanced_fitburst_like")
+        self.assertTrue(config.weighted_fit)
+        self.assertEqual(config.iterations, 3)
+        self.assertEqual(config.fixed_parameters, ["dm_index", "scattering_index"])
+        self.assertNotIn("scattering_timescale", config.fixed_parameters)
+        self.assertNotIn("spectral_index", config.fixed_parameters)
+        self.assertNotIn("spectral_running", config.fixed_parameters)
+
+    def test_explicit_profile_payload_overrides_profile_defaults(self) -> None:
+        config = FitburstRequestConfig.from_dict(
+            {
+                "fit_profile": "advanced_fitburst_like",
+                "fixed_parameters": ["dm", "dm_index", "scattering_index", "spectral_index"],
+                "weighted_fit": False,
+                "iterations": 1,
+            }
+        )
+
+        self.assertEqual(config.fit_profile, "advanced_fitburst_like")
+        self.assertFalse(config.weighted_fit)
+        self.assertEqual(config.iterations, 1)
+        self.assertEqual(config.fixed_parameters, ["dm", "dm_index", "scattering_index", "spectral_index"])
 
     def test_invalid_iteration_count_falls_back_to_one(self) -> None:
         self.assertEqual(FitburstRequestConfig.from_dict({"iterations": "bad"}).iterations, 1)
@@ -651,6 +680,7 @@ class FitScatteringDispatchTest(unittest.TestCase):
 
         session.fit_scattering(
             {
+                "fit_profile": "advanced_fitburst_like",
                 "weighted_fit": True,
                 "weight_range": [2, 20],
                 "iterations": 3,
@@ -661,6 +691,7 @@ class FitScatteringDispatchTest(unittest.TestCase):
         )
 
         config = mock_fit.call_args.kwargs["config"]
+        self.assertEqual(config.fit_profile, "advanced_fitburst_like")
         self.assertTrue(config.weighted_fit)
         self.assertEqual(config.weight_range, [2, 20])
         self.assertEqual(config.iterations, 3)
