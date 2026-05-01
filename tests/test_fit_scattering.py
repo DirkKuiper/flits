@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 
+from flits.analysis.fitting import fitburst_adapter
 from flits.analysis.fitting.fitburst_adapter import SpectrumModeler
 from flits.analysis.fitting.fitburst_adapter import FitburstRequestConfig
 from flits.analysis.fitting.fitburst_adapter import FitburstScatteringResult
@@ -119,6 +121,121 @@ def _synthetic_scattering_dispatch_session() -> BurstSession:
     )
 
 
+class _FakeSpectrumModeler:
+    def __init__(
+        self,
+        freqs_mhz: np.ndarray,
+        times_sec: np.ndarray,
+        *,
+        dm_incoherent: float,
+        num_components: int,
+        is_dedispersed: bool,
+    ) -> None:
+        self.freqs_mhz = np.asarray(freqs_mhz, dtype=float)
+        self.times_sec = np.asarray(times_sec, dtype=float)
+        self.parameters: dict[str, list[float] | None] = {}
+        self.update_history: list[dict[str, list[float] | None]] = []
+
+    def update_parameters(self, parameters: dict[str, list[float] | None]) -> None:
+        self.parameters = {
+            key: None if values is None else [float(value) for value in np.asarray(values, dtype=float).ravel()]
+            for key, values in parameters.items()
+        }
+        self.update_history.append(self.parameters)
+
+    def compute_model(self, data: np.ndarray | None = None) -> np.ndarray:
+        if data is not None:
+            return np.zeros_like(data, dtype=float)
+        return np.zeros((self.freqs_mhz.size, self.times_sec.size), dtype=float)
+
+
+class _FakeLSFitter:
+    instances: list["_FakeLSFitter"] = []
+    fit_calls = 0
+    fail_on_call: int | None = None
+
+    def __init__(
+        self,
+        data: np.ndarray,
+        model: _FakeSpectrumModeler,
+        *,
+        good_freq: np.ndarray,
+        weighted_fit: bool,
+        weight_range: list[int] | None,
+    ) -> None:
+        self.data = np.asarray(data, dtype=float)
+        self.model = model
+        self.good_freq = np.asarray(good_freq, dtype=bool)
+        self.weighted_fit = bool(weighted_fit)
+        self.weight_range = weight_range
+        self.model_parameters_at_init = {
+            key: None if values is None else list(values)
+            for key, values in model.parameters.items()
+        }
+        self.fit_parameters: list[str] = []
+        self.fit_statistics: dict[str, object] = {}
+        self.results: SimpleNamespace | None = None
+        type(self).instances.append(self)
+
+    def fix_parameter(self, fixed_parameters: list[str]) -> None:
+        self.fit_parameters = [
+            parameter
+            for parameter in ("amplitude", "arrival_time", "burst_width", "scattering_timescale")
+            if parameter not in fixed_parameters
+        ]
+
+    def fit(self) -> None:
+        type(self).fit_calls += 1
+        call_index = type(self).fit_calls
+        if type(self).fail_on_call == call_index:
+            self.results = SimpleNamespace(success=False, message=f"failed iteration {call_index}")
+            self.fit_statistics = {"chisq_initial": 10.0, "num_fit_parameters": len(self.fit_parameters)}
+            return
+        self.results = SimpleNamespace(success=True, message=f"ok iteration {call_index}")
+        self.fit_statistics = {
+            "chisq_initial": 10.0,
+            "chisq_final": float(10.0 / call_index),
+            "num_fit_parameters": len(self.fit_parameters),
+            "bestfit_parameters": {
+                "amplitude": [float(call_index)],
+                "arrival_time": [0.018],
+                "burst_width": [0.001 + 0.0001 * call_index],
+                "scattering_timescale": [0.002 + 0.0001 * call_index],
+            },
+            "bestfit_uncertainties": {
+                "burst_width": [0.00001],
+                "scattering_timescale": [0.00002],
+            },
+        }
+
+
+def _run_fake_fitburst_fit(*, iterations: int, fitter_class: type[_FakeLSFitter] = _FakeLSFitter) -> FitburstScatteringResult:
+    rng = np.random.default_rng(7)
+    data = rng.normal(0.0, 1.0, size=(6, 48))
+    data[:, 20:26] += 6.0
+
+    _FakeLSFitter.instances = []
+    _FakeLSFitter.fit_calls = 0
+    fitter_class.instances = []
+    fitter_class.fit_calls = 0
+    with (
+        patch.object(fitburst_adapter, "SpectrumModeler", _FakeSpectrumModeler),
+        patch.object(fitburst_adapter, "LSFitter", fitter_class),
+    ):
+        return fitburst_adapter.fit_scattering_selected_band(
+            selected_band=data,
+            freqs_mhz=np.linspace(1450.0, 1250.0, data.shape[0]),
+            time_axis_ms=np.arange(data.shape[1], dtype=float),
+            event_rel_start=18,
+            event_rel_end=30,
+            offpulse_bins=np.r_[0:12, 36:48],
+            tsamp_ms=1.0,
+            peak_rel_bin=23,
+            width_guess_ms=1.5,
+            config=FitburstRequestConfig(iterations=iterations),
+        )
+
+
 @unittest.skipUnless(SpectrumModeler is not None, "fitburst is not installed")
 class FitScatteringTest(unittest.TestCase):
     def test_fit_scattering_recovers_intrinsic_width_and_scattering_time(self) -> None:
@@ -161,6 +278,8 @@ class FitScatteringTest(unittest.TestCase):
         self.assertFalse(results.diagnostics.scattering_fit.weighted_fit)
         self.assertIsNone(results.diagnostics.scattering_fit.weight_range)
         self.assertEqual(results.diagnostics.scattering_fit.weight_range_basis, "unweighted")
+        self.assertEqual(results.diagnostics.scattering_fit.fit_iterations_requested, 1)
+        self.assertEqual(results.diagnostics.scattering_fit.fit_iterations_completed, 1)
 
     def test_weighted_fit_records_offpulse_weighting_diagnostics(self) -> None:
         unweighted_session, _, _ = _synthetic_scattering_session()
@@ -181,21 +300,54 @@ class FitScatteringTest(unittest.TestCase):
 
 
 class FitburstRequestConfigTest(unittest.TestCase):
-    def test_weighted_fit_round_trips_through_request_config(self) -> None:
+    def test_advanced_fit_options_round_trip_through_request_config(self) -> None:
         config = FitburstRequestConfig.from_dict(
             {
                 "num_components": 2,
                 "fixed_parameters": ["dm", "dm_index"],
                 "weighted_fit": True,
                 "weight_range": [3.2, 19.8],
+                "iterations": "3",
             }
         )
 
         self.assertEqual(config.num_components, 2)
         self.assertTrue(config.weighted_fit)
         self.assertEqual(config.weight_range, [3, 20])
+        self.assertEqual(config.iterations, 3)
         self.assertEqual(config.to_dict()["weighted_fit"], True)
         self.assertEqual(config.to_dict()["weight_range"], [3, 20])
+        self.assertEqual(config.to_dict()["iterations"], 3)
+
+    def test_invalid_iteration_count_falls_back_to_one(self) -> None:
+        self.assertEqual(FitburstRequestConfig.from_dict({"iterations": "bad"}).iterations, 1)
+        self.assertEqual(FitburstRequestConfig.from_dict({"iterations": 0}).iterations, 1)
+
+
+class FitburstIterationAdapterTest(unittest.TestCase):
+    def test_iterations_update_model_with_previous_bestfit_parameters(self) -> None:
+        result = _run_fake_fitburst_fit(iterations=2)
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.diagnostics.fit_iterations_requested, 2)
+        self.assertEqual(result.diagnostics.fit_iterations_completed, 2)
+        self.assertEqual(len(_FakeLSFitter.instances), 2)
+        self.assertEqual(_FakeLSFitter.instances[1].model_parameters_at_init["burst_width"], [0.0011])
+        self.assertAlmostEqual(result.diagnostics.bestfit_parameters["burst_width"][0], 0.0012)
+        self.assertAlmostEqual(result.width_ms_model or 0.0, 1.2)
+
+    def test_failed_intermediate_iteration_returns_completed_bestfit_diagnostics(self) -> None:
+        class FailingSecondFit(_FakeLSFitter):
+            fail_on_call = 2
+
+        result = _run_fake_fitburst_fit(iterations=3, fitter_class=FailingSecondFit)
+
+        self.assertEqual(result.status, "fit_failed")
+        self.assertEqual(result.message, "failed iteration 2")
+        self.assertEqual(result.diagnostics.fit_iterations_requested, 3)
+        self.assertEqual(result.diagnostics.fit_iterations_completed, 1)
+        self.assertEqual(result.diagnostics.bestfit_parameters["burst_width"], [0.0011])
+        self.assertIsNone(result.width_ms_model)
 
 class FitScatteringDispatchTest(unittest.TestCase):
     def test_fitburst_guess_uses_component_regions(self) -> None:
@@ -328,7 +480,7 @@ class FitScatteringDispatchTest(unittest.TestCase):
         self.assertEqual(config.initial_parameters["amplitude"], [0.7, 0.6])
 
     @patch("flits.session.fit_scattering_selected_band")
-    def test_fit_scattering_passes_weighted_fit_config(self, mock_fit: object) -> None:
+    def test_fit_scattering_passes_advanced_fit_config(self, mock_fit: object) -> None:
         session = _synthetic_scattering_dispatch_session()
 
         mock_fit.return_value = FitburstScatteringResult(
@@ -346,11 +498,56 @@ class FitScatteringDispatchTest(unittest.TestCase):
             ),
         )
 
-        session.fit_scattering({"weighted_fit": True, "weight_range": [2, 20]})
+        session.fit_scattering({"weighted_fit": True, "weight_range": [2, 20], "iterations": 3})
 
         config = mock_fit.call_args.kwargs["config"]
         self.assertTrue(config.weighted_fit)
         self.assertEqual(config.weight_range, [2, 20])
+        self.assertEqual(config.iterations, 3)
+
+    @patch("flits.session.fit_scattering_selected_band")
+    def test_failed_refit_preserves_previous_successful_fit_values(self, mock_fit: object) -> None:
+        session = _synthetic_scattering_dispatch_session()
+        mock_fit.side_effect = [
+            FitburstScatteringResult(
+                status="ok",
+                message=None,
+                width_ms_model=1.0,
+                width_uncertainty_ms=None,
+                tau_sc_ms=2.0,
+                tau_uncertainty_ms=None,
+                diagnostics=ScatteringFitDiagnostics(
+                    status="ok",
+                    message=None,
+                    fitter="fitburst",
+                    component_count=1,
+                ),
+            ),
+            FitburstScatteringResult(
+                status="fit_failed",
+                message="failed iteration 2",
+                width_ms_model=None,
+                width_uncertainty_ms=None,
+                tau_sc_ms=None,
+                tau_uncertainty_ms=None,
+                diagnostics=ScatteringFitDiagnostics(
+                    status="fit_failed",
+                    message="failed iteration 2",
+                    fitter="fitburst",
+                    component_count=1,
+                    fit_iterations_requested=3,
+                    fit_iterations_completed=1,
+                ),
+            ),
+        ]
+
+        session.fit_scattering()
+        results = session.fit_scattering({"iterations": 3})
+
+        self.assertEqual(results.width_ms_model, 1.0)
+        self.assertEqual(results.tau_sc_ms, 2.0)
+        self.assertEqual(results.diagnostics.scattering_fit.status, "fit_failed")
+        self.assertEqual(results.diagnostics.scattering_fit.fit_iterations_completed, 1)
 
 
 if __name__ == "__main__":

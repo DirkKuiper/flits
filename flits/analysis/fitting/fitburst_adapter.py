@@ -92,6 +92,10 @@ class FitburstRequestConfig:
         estimate per-channel weights from the fitted data window. When
         ``weighted_fit`` is true and this is omitted, the adapter derives
         weights from the current off-pulse bins.
+    iterations
+        Number of consecutive fitburst optimizer runs. After each successful
+        run, the next run is initialized from the previous best-fit
+        parameters.
     bounds
         Optional serialized bounds payload. This field is preserved in request
         dictionaries for API compatibility, but the current adapter does not
@@ -108,6 +112,7 @@ class FitburstRequestConfig:
     initial_parameters: dict[str, list[float]] | None = None
     weighted_fit: bool = False
     weight_range: list[int] | None = None
+    iterations: int = 1
     bounds: dict[str, list[tuple[float, float]]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -118,6 +123,7 @@ class FitburstRequestConfig:
             "initial_parameters": self.initial_parameters,
             "weighted_fit": bool(self.weighted_fit),
             "weight_range": None if self.weight_range is None else [int(value) for value in self.weight_range],
+            "iterations": _coerce_iterations(self.iterations),
             "bounds": self.bounds,
         }
 
@@ -136,6 +142,7 @@ class FitburstRequestConfig:
             initial_parameters=payload.get("initial_parameters"),
             weighted_fit=_coerce_bool(payload.get("weighted_fit"), default=False),
             weight_range=_coerce_weight_range(payload.get("weight_range")),
+            iterations=_coerce_iterations(payload.get("iterations")),
             bounds=payload.get("bounds"),
         )
 
@@ -237,10 +244,18 @@ def fit_scattering_selected_band(
     For multi-component fits, inspect ``diagnostics.bestfit_parameters`` for
     the full fitburst parameter arrays.
     """
+    if config is None:
+        config = FitburstRequestConfig()
+    fit_iterations = _coerce_iterations(config.iterations)
+
     if SpectrumModeler is None or LSFitter is None:
         return _failed_result(
             status="fitburst_unavailable",
             message="fitburst is not available in the active Python environment.",
+            component_count=config.num_components,
+            fixed_parameters=config.fixed_parameters,
+            fit_iterations_requested=fit_iterations,
+            fit_iterations_completed=0,
         )
 
     data = np.asarray(selected_band, dtype=float)
@@ -249,11 +264,22 @@ def fit_scattering_selected_band(
     offpulse_bins = np.asarray(offpulse_bins, dtype=int)
 
     if data.ndim != 2 or data.shape[0] == 0 or data.shape[1] == 0:
-        return _failed_result(status="insufficient_data", message="No selected-band data are available for fitting.")
+        return _failed_result(
+            status="insufficient_data",
+            message="No selected-band data are available for fitting.",
+            component_count=config.num_components,
+            fixed_parameters=config.fixed_parameters,
+            fit_iterations_requested=fit_iterations,
+            fit_iterations_completed=0,
+        )
     if data.shape[1] < MIN_FIT_TIME_BINS:
         return _failed_result(
             status="insufficient_time_bins",
             message=f"At least {MIN_FIT_TIME_BINS} time bins are required for scattering fits.",
+            component_count=config.num_components,
+            fixed_parameters=config.fixed_parameters,
+            fit_iterations_requested=fit_iterations,
+            fit_iterations_completed=0,
         )
 
     normalized_data, good_freq = _normalize_dynamic_spectrum(data, offpulse_bins)
@@ -262,6 +288,10 @@ def fit_scattering_selected_band(
         return _failed_result(
             status="insufficient_channels",
             message=f"At least {MIN_FIT_CHANNELS} unmasked channels are required for scattering fits.",
+            component_count=config.num_components,
+            fixed_parameters=config.fixed_parameters,
+            fit_iterations_requested=fit_iterations,
+            fit_iterations_completed=0,
         )
 
 
@@ -273,14 +303,15 @@ def fit_scattering_selected_band(
         return _failed_result(
             status="insufficient_signal",
             message="The selected event window does not contain a stable signal for fitting.",
+            component_count=config.num_components,
+            fixed_parameters=config.fixed_parameters,
+            fit_iterations_requested=fit_iterations,
+            fit_iterations_completed=0,
         )
 
     if peak_rel_bin is None:
         peak_rel_bin = int(event_rel_start + np.nanargmax(event_slice))
     peak_rel_bin = max(0, min(int(peak_rel_bin), data.shape[1] - 1))
-
-    if config is None:
-        config = FitburstRequestConfig()
 
     initial_parameters = _initial_parameters(
         normalized_data=normalized_data,
@@ -326,41 +357,73 @@ def fit_scattering_selected_band(
         num_components=config.num_components,
         is_dedispersed=True,
     )
-    model.update_parameters(initial_parameters)
-    fitter = LSFitter(
-        fit_data,
-        model,
-        good_freq=good_freq,
-        weighted_fit=weighted_fit and custom_weights is None,
-        weight_range=weight_range if weighted_fit and custom_weights is None else None,
-    )
-    if custom_weights is not None:
-        fitter.weights = custom_weights
-    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-        fitter.fix_parameter(config.fixed_parameters)
-        fitter.fit()
+    current_parameters = _copy_parameter_dict(initial_parameters)
+    completed_iterations = 0
+    fitter: Any | None = None
+    results: Any | None = None
+    fit_statistics: dict[str, object] = {}
+    bestfit_uncertainties: dict[str, list[float] | None] = {}
+    fit_parameters: list[str] = []
 
-    results = getattr(fitter, "results", None)
-    if results is None or not getattr(results, "success", False):
-        message = None
-        if results is not None:
-            message = str(getattr(results, "message", "") or "").strip() or None
+    for _iteration_index in range(fit_iterations):
+        model.update_parameters(current_parameters)
+        fitter = LSFitter(
+            fit_data,
+            model,
+            good_freq=good_freq,
+            weighted_fit=weighted_fit and custom_weights is None,
+            weight_range=weight_range if weighted_fit and custom_weights is None else None,
+        )
+        if custom_weights is not None:
+            fitter.weights = custom_weights
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            fitter.fix_parameter(config.fixed_parameters)
+            fitter.fit()
+
+        results = getattr(fitter, "results", None)
+        if results is None or not getattr(results, "success", False):
+            message = None
+            if results is not None:
+                message = str(getattr(results, "message", "") or "").strip() or None
+            return _failed_result(
+                status="fit_failed",
+                message=message or "fitburst could not converge for the current selection.",
+                initial_parameters=initial_parameters,
+                bestfit_parameters=current_parameters if completed_iterations > 0 else {},
+                fit_statistics=getattr(fitter, "fit_statistics", {}),
+                fit_parameters=list(getattr(fitter, "fit_parameters", [])),
+                fixed_parameters=config.fixed_parameters,
+                component_count=config.num_components,
+                weighted_fit=weighted_fit,
+                weight_range=weight_range,
+                weight_range_basis=weight_range_basis,
+                fit_iterations_requested=fit_iterations,
+                fit_iterations_completed=completed_iterations,
+            )
+
+        fit_statistics = dict(getattr(fitter, "fit_statistics", {}))
+        bestfit_parameters = dict(fit_statistics.get("bestfit_parameters") or {})
+        bestfit_uncertainties = _copy_parameter_dict(dict(fit_statistics.get("bestfit_uncertainties") or {}))
+        fit_parameters = list(getattr(fitter, "fit_parameters", []))
+        current_parameters = _merge_parameter_dicts(current_parameters, bestfit_parameters)
+        completed_iterations += 1
+
+    if results is None:
         return _failed_result(
             status="fit_failed",
-            message=message or "fitburst could not converge for the current selection.",
+            message="fitburst could not converge for the current selection.",
             initial_parameters=initial_parameters,
-            fit_statistics=getattr(fitter, "fit_statistics", {}),
+            fit_parameters=fit_parameters,
+            fixed_parameters=config.fixed_parameters,
+            component_count=config.num_components,
             weighted_fit=weighted_fit,
             weight_range=weight_range,
             weight_range_basis=weight_range_basis,
+            fit_iterations_requested=fit_iterations,
+            fit_iterations_completed=completed_iterations,
         )
 
-    fit_statistics = dict(getattr(fitter, "fit_statistics", {}))
-    bestfit_parameters = dict(fit_statistics.get("bestfit_parameters") or {})
-    bestfit_uncertainties = dict(fit_statistics.get("bestfit_uncertainties") or {})
-    fit_parameters = list(getattr(fitter, "fit_parameters", []))
-    full_best_parameters = dict(initial_parameters)
-    full_best_parameters.update(bestfit_parameters)
+    full_best_parameters = current_parameters
     
     model.update_parameters(full_best_parameters)
     model_dynamic_spectrum = np.asarray(model.compute_model(data=fit_data), dtype=float)
@@ -407,6 +470,8 @@ def fit_scattering_selected_band(
         weighted_fit=weighted_fit,
         weight_range=weight_range,
         weight_range_basis=weight_range_basis,
+        fit_iterations_requested=fit_iterations,
+        fit_iterations_completed=completed_iterations,
         initial_parameters=initial_parameters,
         bestfit_parameters=full_best_parameters,
         bestfit_uncertainties=bestfit_uncertainties,
@@ -584,6 +649,14 @@ def _coerce_bool(value: Any, *, default: bool = False) -> bool:
     return bool(value)
 
 
+def _coerce_iterations(value: Any) -> int:
+    try:
+        iterations = int(value)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, iterations)
+
+
 def _coerce_weight_range(values: Any, num_time: int | None = None) -> list[int] | None:
     if values is None:
         return None
@@ -630,6 +703,32 @@ def _offpulse_channel_weights(
     return weights, [int(bins[0]), int(bins[-1] + 1)]
 
 
+def _copy_parameter_dict(
+    parameters: dict[str, Any],
+) -> dict[str, list[float] | None]:
+    copied: dict[str, list[float] | None] = {}
+    for key, values in parameters.items():
+        if values is None:
+            copied[str(key)] = None
+            continue
+        try:
+            value_array = np.asarray(values, dtype=float).ravel()
+        except (TypeError, ValueError):
+            copied[str(key)] = []
+            continue
+        copied[str(key)] = [float(value) for value in value_array]
+    return copied
+
+
+def _merge_parameter_dicts(
+    base: dict[str, Any],
+    updates: dict[str, Any],
+) -> dict[str, list[float] | None]:
+    merged = _copy_parameter_dict(base)
+    merged.update(_copy_parameter_dict(updates))
+    return merged
+
+
 def _parameter_value(parameters: dict[str, list[float] | None], key: str) -> float | None:
     values = parameters.get(key)
     if not values:
@@ -671,24 +770,32 @@ def _failed_result(
     status: str,
     message: str | None,
     initial_parameters: dict[str, list[float]] | None = None,
+    bestfit_parameters: dict[str, list[float] | None] | None = None,
     fit_statistics: dict[str, object] | None = None,
+    fit_parameters: list[str] | None = None,
+    fixed_parameters: list[str] | None = None,
+    component_count: int = 1,
     weighted_fit: bool | None = None,
     weight_range: list[int] | None = None,
     weight_range_basis: str | None = None,
+    fit_iterations_requested: int | None = None,
+    fit_iterations_completed: int | None = None,
 ) -> FitburstScatteringResult:
     """Return a structured failure result with empty diagnostic arrays."""
     diagnostics = ScatteringFitDiagnostics(
         status=status,
         message=message,
         fitter="fitburst" if SpectrumModeler is not None and LSFitter is not None else None,
-        component_count=1,
-        fit_parameters=list(FIT_PARAMETERS),
-        fixed_parameters=list(FIXED_PARAMETERS),
+        component_count=component_count,
+        fit_parameters=list(FIT_PARAMETERS if fit_parameters is None else fit_parameters),
+        fixed_parameters=list(FIXED_PARAMETERS if fixed_parameters is None else fixed_parameters),
         weighted_fit=weighted_fit,
         weight_range=weight_range,
         weight_range_basis=weight_range_basis,
+        fit_iterations_requested=fit_iterations_requested,
+        fit_iterations_completed=fit_iterations_completed,
         initial_parameters=initial_parameters or {},
-        bestfit_parameters={},
+        bestfit_parameters=bestfit_parameters or {},
         bestfit_uncertainties={},
         fit_statistics=_sanitize_fit_statistics(fit_statistics or {}),
         freq_axis_mhz=np.array([], dtype=float),
