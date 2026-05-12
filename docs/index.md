@@ -4,7 +4,7 @@ FLITS, the Fast-Look Interactive Transient Suite, is browser-based software for
 interactive FRB burst analysis. It brings burst inspection, masking,
 measurement, DM optimization, temporal/spectral diagnostics, optional
 model-based fitting, and export into one workflow-oriented tool. Input
-formats include SIGPROC filterbank (`.fil`), search-mode PSRFITS
+formats include SIGPROC filterbank (`.fil`), PSRFITS search/fold data
 (`.fits`, `.sf`), and CHIME/FRB HDF5 (`.h5`, `.hdf5`) including public
 catalog waterfalls and beamformed `BBData` power files, extensible via a
 plugin-based reader framework.

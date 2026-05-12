@@ -12,7 +12,7 @@ import pytest
 from flits.session import BurstSession
 
 
-_ALL_FORMATS = ["sigproc", "chime_hdf5", "psrfits", "chime_bbdata_beamformed"]
+_ALL_FORMATS = ["sigproc", "chime_hdf5", "psrfits", "psrfits_fold", "chime_bbdata_beamformed"]
 
 
 @pytest.mark.parametrize("synthetic_waterfall", _ALL_FORMATS, indirect=True)
