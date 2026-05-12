@@ -4,6 +4,13 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [0.6.0](https://github.com/DirkKuiper/flits/compare/flits-v0.5.0...flits-v0.6.0) (2026-05-12)
+
+
+### Features
+
+* support folded PSRFITS pseudo-time loading ([3423193](https://github.com/DirkKuiper/flits/commit/3423193912b22e1f9fdabb060495e4ba5a781932))
+
 ## [0.5.0](https://github.com/DirkKuiper/flits/compare/flits-v0.4.0...flits-v0.5.0) (2026-05-01)
 
 
