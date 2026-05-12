@@ -35,6 +35,7 @@ your = _your
 
 _SIGPROC_MAGIC = struct.pack("i", 12) + b"HEADER_START"
 _FITS_MAGIC = b"SIMPLE  ="
+_PSRFITS_FOLD_MODES = frozenset({"PSR", "FOLD"})
 
 
 def _is_mmap_deadlock(exc: BaseException) -> bool:
@@ -270,6 +271,32 @@ def _is_psrfits_search_mode(path: Path) -> tuple[bool, str | None]:
     return obs_mode.startswith("SEARCH"), obs_mode
 
 
+def _is_psrfits_fold_mode(path: Path) -> tuple[bool, str | None]:
+    try:
+        from astropy.io import fits
+    except Exception:
+        return False, None
+
+    try:
+        with fits.open(path, memmap=False) as hdul:
+            obs_mode = str(hdul[0].header.get("OBS_MODE", "")).strip().upper()
+    except Exception:
+        return False, None
+
+    return obs_mode in _PSRFITS_FOLD_MODES, obs_mode or None
+
+
+def _find_psrfits_subint(hdul: object) -> object | None:
+    return next(
+        (
+            hdu
+            for hdu in hdul[1:]
+            if str(hdu.header.get("EXTNAME", "")).strip().upper() == "SUBINT"
+        ),
+        None,
+    )
+
+
 def _looks_like_psrfits(path: Path) -> bool:
     """Return True only for FITS files that look structurally like PSRFITS."""
     try:
@@ -282,14 +309,7 @@ def _looks_like_psrfits(path: Path) -> bool:
             primary = hdul[0].header
             fitstype = str(primary.get("FITSTYPE", "")).strip().upper()
             obs_mode = str(primary.get("OBS_MODE", "")).strip().upper()
-            subint = next(
-                (
-                    hdu
-                    for hdu in hdul[1:]
-                    if str(hdu.header.get("EXTNAME", "")).strip().upper() == "SUBINT"
-                ),
-                None,
-            )
+            subint = _find_psrfits_subint(hdul)
             if subint is None:
                 return False
 
@@ -300,8 +320,12 @@ def _looks_like_psrfits(path: Path) -> bool:
             primary_looks_psrfits = (
                 "PSRFITS" in fitstype or "STT_IMJD" in primary or "STT_SMJD" in primary
             )
-            mode_looks_search = (not obs_mode) or obs_mode.startswith("SEARCH")
-            return mode_looks_search and (primary_looks_psrfits or subint_keywords_present)
+            mode_supported = (
+                (not obs_mode)
+                or obs_mode.startswith("SEARCH")
+                or obs_mode in _PSRFITS_FOLD_MODES
+            )
+            return mode_supported and (primary_looks_psrfits or subint_keywords_present)
     except Exception:
         return False
 
@@ -388,6 +412,339 @@ def _peek_header_freq_range(header: object) -> tuple[float | None, float | None]
     return (min(lo, hi), max(lo, hi))
 
 
+def _folded_psrfits_dimensions(subint: object, path: Path) -> tuple[int, int, int]:
+    header = subint.header
+    missing: list[str] = []
+    nbin = _safe_int(header.get("NBIN"))
+    nchan = _safe_int(header.get("NCHAN"))
+    npol = _safe_int(header.get("NPOL"))
+    if nbin is None or nbin <= 0:
+        missing.append("SUBINT.NBIN")
+    if nchan is None or nchan <= 0:
+        missing.append("SUBINT.NCHAN")
+    if npol is None or npol <= 0:
+        missing.append("SUBINT.NPOL")
+    if missing:
+        raise MetadataMissingError(
+            f"Folded PSRFITS SUBINT header missing required dimensions: {', '.join(missing)}",
+            path=path,
+            fields=tuple(missing),
+        )
+    return int(nbin), int(nchan), int(npol)
+
+
+def _psrparam_float(hdul: object, *names: str) -> float | None:
+    wanted = {name.upper() for name in names}
+    try:
+        table = hdul["PSRPARAM"].data
+    except Exception:
+        return None
+    for row in table:
+        try:
+            text = row["PARAM"]
+        except Exception:
+            continue
+        if isinstance(text, bytes):
+            text = text.decode("utf-8", errors="replace")
+        parts = str(text).strip().split()
+        if len(parts) < 2 or parts[0].upper() not in wanted:
+            continue
+        value = _safe_float(parts[1])
+        if value is not None:
+            return value
+    return None
+
+
+def _folded_psrfits_period_sec(hdul: object, subint: object, path: Path) -> float:
+    column_names = set(getattr(subint, "columns", ()).names or ())
+    if "PERIOD" in column_names:
+        for row in subint.data:
+            period = _safe_float(row["PERIOD"])
+            if period is not None and period > 0.0:
+                return period
+
+    p0 = _psrparam_float(hdul, "P0")
+    if p0 is not None and p0 > 0.0:
+        return p0
+
+    f0 = _psrparam_float(hdul, "F0")
+    if f0 is not None and f0 > 0.0:
+        return 1.0 / f0
+
+    nbin, _, _ = _folded_psrfits_dimensions(subint, path)
+    tbin = _safe_float(subint.header.get("TBIN"))
+    if tbin is not None and tbin > 0.0:
+        return tbin * nbin
+
+    raise MetadataMissingError(
+        "Folded PSRFITS requires a positive PERIOD, P0, F0, or TBIN to define pseudo-time bins",
+        path=path,
+        fields=("SUBINT.PERIOD", "PSRPARAM.P0", "PSRPARAM.F0", "SUBINT.TBIN"),
+    )
+
+
+def _folded_psrfits_freqs_mhz(hdul: object, subint: object, path: Path) -> np.ndarray:
+    _, nchan, _ = _folded_psrfits_dimensions(subint, path)
+    column_names = set(getattr(subint, "columns", ()).names or ())
+    if "DAT_FREQ" in column_names and len(subint.data) > 0:
+        freqs = np.asarray(subint.data[0]["DAT_FREQ"], dtype=float).reshape(-1)
+        if freqs.size == nchan and np.all(np.isfinite(freqs)):
+            return freqs
+
+    primary = hdul[0].header
+    obsfreq = _safe_float(primary.get("OBSFREQ"))
+    chan_bw = _safe_float(subint.header.get("CHAN_BW"))
+    if chan_bw is None:
+        obsbw = _safe_float(primary.get("OBSBW"))
+        chan_bw = None if obsbw is None else obsbw / nchan
+    if obsfreq is None or chan_bw is None or chan_bw == 0.0:
+        raise MetadataMissingError(
+            "Folded PSRFITS requires DAT_FREQ or OBSFREQ plus CHAN_BW/OBSBW",
+            path=path,
+            fields=("SUBINT.DAT_FREQ", "OBSFREQ", "SUBINT.CHAN_BW"),
+        )
+    first = obsfreq - chan_bw * ((nchan - 1) / 2.0)
+    return first + chan_bw * np.arange(nchan, dtype=float)
+
+
+def _folded_psrfits_scale(
+    value: object,
+    *,
+    npol: int,
+    nchan: int,
+    default: float,
+    path: Path,
+    field_name: str,
+) -> np.ndarray:
+    if value is None:
+        return np.full((npol, nchan), default, dtype=np.float32)
+    arr = np.asarray(value, dtype=np.float32).reshape(-1)
+    if arr.size == 0:
+        return np.full((npol, nchan), default, dtype=np.float32)
+    if arr.size == 1:
+        return np.full((npol, nchan), float(arr[0]), dtype=np.float32)
+    if arr.size == nchan:
+        return np.broadcast_to(arr.reshape(1, nchan), (npol, nchan)).astype(np.float32, copy=False)
+    if arr.size == npol * nchan:
+        return arr.reshape(npol, nchan)
+    raise CorruptedDataError(
+        f"Folded PSRFITS {field_name} has {arr.size} values; expected 1, {nchan}, or {npol * nchan}",
+        path=path,
+    )
+
+
+def _folded_psrfits_raw_data(row: object, *, nbin: int, nchan: int, npol: int, path: Path) -> np.ndarray:
+    try:
+        raw = np.asarray(row["DATA"], dtype=np.float32)
+    except Exception as exc:
+        raise MetadataMissingError(
+            "Folded PSRFITS SUBINT row is missing DATA",
+            path=path,
+            fields=("SUBINT.DATA",),
+        ) from exc
+
+    expected = npol * nchan * nbin
+    if raw.size != expected:
+        raise CorruptedDataError(
+            f"Folded PSRFITS DATA has {raw.size} values; expected {expected}",
+            path=path,
+        )
+    if raw.shape == (npol, nchan, nbin):
+        return raw
+    if npol == 1 and raw.shape == (nchan, nbin):
+        return raw.reshape(1, nchan, nbin)
+    return raw.reshape(npol, nchan, nbin)
+
+
+def _build_folded_stokes_i(raw: np.ndarray, polarization_order: str | None) -> tuple[np.ndarray, int]:
+    normalized_order = _normalise_polarization_order(polarization_order)
+    if raw.shape[0] == 1:
+        return raw[0, :, :], 1
+    if normalized_order == "IQUV":
+        return raw[0, :, :], 2
+    return raw[0, :, :] + raw[1, :, :], 2
+
+
+def _folded_psrfits_waterfall(subint: object, path: Path) -> tuple[np.ndarray, int]:
+    nbin, nchan, npol = _folded_psrfits_dimensions(subint, path)
+    polarization_order = _normalise_polarization_order(str(subint.header.get("POL_TYPE", "")).strip())
+    column_names = set(getattr(subint, "columns", ()).names or ())
+    rows: list[np.ndarray] = []
+    effective_npol = 1
+    for row in subint.data:
+        raw = _folded_psrfits_raw_data(row, nbin=nbin, nchan=nchan, npol=npol, path=path)
+        scl = _folded_psrfits_scale(
+            row["DAT_SCL"] if "DAT_SCL" in column_names else None,
+            npol=npol,
+            nchan=nchan,
+            default=1.0,
+            path=path,
+            field_name="DAT_SCL",
+        )
+        offs = _folded_psrfits_scale(
+            row["DAT_OFFS"] if "DAT_OFFS" in column_names else None,
+            npol=npol,
+            nchan=nchan,
+            default=0.0,
+            path=path,
+            field_name="DAT_OFFS",
+        )
+        scaled = raw * scl[:, :, np.newaxis] + offs[:, :, np.newaxis]
+        stokes_i, effective_npol = _build_folded_stokes_i(scaled, polarization_order)
+        rows.append(stokes_i)
+
+    if not rows:
+        raise CorruptedDataError("Folded PSRFITS SUBINT table contains no rows", path=path)
+    if len(rows) == 1:
+        return rows[0].astype(np.float32, copy=False), effective_npol
+    return np.mean(np.stack(rows, axis=0), axis=0).astype(np.float32, copy=False), effective_npol
+
+
+def _inspect_folded_psrfits(path: Path) -> FilterbankInspection:
+    try:
+        from astropy.io import fits
+    except Exception as exc:
+        raise RuntimeError("The 'astropy' package is required for folded PSRFITS files.") from exc
+
+    with fits.open(path, memmap=False) as hdul:
+        subint = _find_psrfits_subint(hdul)
+        if subint is None:
+            raise FormatDetectionError("Folded PSRFITS file is missing a SUBINT table.", path=path)
+        freqs_mhz = _folded_psrfits_freqs_mhz(hdul, subint, path)
+        primary = hdul[0].header
+        source_name = _decode_source_name(primary.get("SRC_NAME"))
+        telescope_name = _decode_telescope_name(primary.get("TELESCOP"))
+
+    timing_metadata = _psrfits_primary_fallback(path)
+    detected_preset_key, detection_basis = detect_preset(
+        None,
+        None,
+        telescope_name=telescope_name,
+        schema_version="psrfits_fold",
+        freq_lo_mhz=float(np.min(freqs_mhz)),
+        freq_hi_mhz=float(np.max(freqs_mhz)),
+    )
+    return FilterbankInspection(
+        source_path=path,
+        source_name=source_name,
+        telescope_id=None,
+        machine_id=None,
+        detected_preset_key=detected_preset_key,
+        detection_basis=detection_basis,
+        telescope_name=telescope_name,
+        schema_version="psrfits_fold",
+        freq_lo_mhz=float(np.min(freqs_mhz)),
+        freq_hi_mhz=float(np.max(freqs_mhz)),
+        source_ra_deg=_safe_float(timing_metadata.get("source_ra_deg")),
+        source_dec_deg=_safe_float(timing_metadata.get("source_dec_deg")),
+        source_position_basis=timing_metadata.get("source_position_basis"),  # type: ignore[arg-type]
+        time_scale="utc",
+        time_reference_frame="topocentric",
+        barycentric_header_flag=_safe_bool_flag(timing_metadata.get("barycentric_header_flag")),
+        pulsarcentric_header_flag=_safe_bool_flag(timing_metadata.get("pulsarcentric_header_flag")),
+    )
+
+
+def _load_folded_psrfits(
+    path: Path,
+    config: ObservationConfig,
+    inspection: FilterbankInspection | None = None,
+) -> tuple[np.ndarray, FilterbankMetadata]:
+    try:
+        from astropy.io import fits
+    except Exception as exc:
+        raise RuntimeError("The 'astropy' package is required for folded PSRFITS files.") from exc
+
+    with fits.open(path, memmap=False) as hdul:
+        subint = _find_psrfits_subint(hdul)
+        if subint is None:
+            raise FormatDetectionError("Folded PSRFITS file is missing a SUBINT table.", path=path)
+        nbin, _, header_npol = _folded_psrfits_dimensions(subint, path)
+        period_sec = _folded_psrfits_period_sec(hdul, subint, path)
+        tsamp = period_sec / nbin
+        freqs_mhz = _folded_psrfits_freqs_mhz(hdul, subint, path)
+        polarization_order = _normalise_polarization_order(str(subint.header.get("POL_TYPE", "")).strip())
+        chan_bw = _safe_float(subint.header.get("CHAN_BW"))
+        stokes_i, effective_npol = _folded_psrfits_waterfall(subint, path)
+
+    filterbank_inspection = inspection or _inspect_folded_psrfits(path)
+    timing_metadata = _psrfits_primary_fallback(path)
+    start_mjd = _safe_float(timing_metadata.get("tstart"))
+    if start_mjd is None:
+        raise MetadataMissingError(
+            "Folded PSRFITS requires STT_IMJD and STT_SMJD to define start_mjd",
+            path=path,
+            fields=("STT_IMJD", "STT_SMJD"),
+        )
+
+    read_start_sec = config.read_start_for_file(path.name)
+    nstart = min(max(int(read_start_sec / tsamp), 0), max(stokes_i.shape[1] - 1, 0))
+    nread = stokes_i.shape[1] - nstart
+    if config.read_end_sec is not None:
+        nend = max(nstart + 1, int(config.read_end_sec / tsamp))
+        nread = min(nread, nend - nstart)
+    stokes_i = stokes_i[:, nstart : nstart + nread]
+
+    effective_npol = (
+        max(1, int(config.npol_override)) if config.npol_override is not None else effective_npol
+    )
+    if abs(float(config.dm)) > 0.0:
+        stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp)
+
+    tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
+    offpulse_start = min(stokes_i.shape[1] - 1, int((1 - tail_fraction) * stokes_i.shape[1]))
+    offpulse = stokes_i[:, offpulse_start:]
+    stokes_i = normalize(stokes_i, offpulse).astype(np.float32, copy=False)
+
+    diffs = np.diff(freqs_mhz.astype(float))
+    freqres = (
+        float(abs(chan_bw))
+        if chan_bw is not None and np.isfinite(chan_bw) and chan_bw != 0.0
+        else (float(abs(np.median(diffs))) if diffs.size else 0.0)
+    )
+    bandwidth_mhz = freqres * int(freqs_mhz.size)
+    sefd_jy = config.sefd_jy
+    if sefd_jy is None:
+        sefd_jy = resolve_default_sefd_jy(
+            config.preset_key,
+            float(np.min(freqs_mhz)),
+            float(np.max(freqs_mhz)),
+        )
+
+    metadata = FilterbankMetadata(
+        source_path=path,
+        source_name=filterbank_inspection.source_name,
+        tsamp=tsamp,
+        freqres=freqres,
+        start_mjd=start_mjd,
+        read_start_sec=read_start_sec,
+        sefd_jy=sefd_jy,
+        bandwidth_mhz=bandwidth_mhz,
+        npol=effective_npol,
+        freqs_mhz=freqs_mhz,
+        header_npol=header_npol,
+        polarization_order=polarization_order,
+        telescope_id=filterbank_inspection.telescope_id,
+        machine_id=filterbank_inspection.machine_id,
+        detected_preset_key=filterbank_inspection.detected_preset_key,
+        detection_basis=filterbank_inspection.detection_basis,
+        source_ra_deg=filterbank_inspection.source_ra_deg,
+        source_dec_deg=filterbank_inspection.source_dec_deg,
+        source_position_basis=filterbank_inspection.source_position_basis,
+        time_scale=filterbank_inspection.time_scale or "utc",
+        time_reference_frame=filterbank_inspection.time_reference_frame or "topocentric",
+        barycentric_header_flag=filterbank_inspection.barycentric_header_flag,
+        pulsarcentric_header_flag=filterbank_inspection.pulsarcentric_header_flag,
+        dedispersion_reference_frequency_mhz=(
+            float(np.max(freqs_mhz)) if abs(float(config.dm)) > 0.0 else None
+        ),
+        dedispersion_reference_basis=(
+            "flits_integer_bin_dedispersion_max_frequency" if abs(float(config.dm)) > 0.0 else None
+        ),
+    )
+    return stokes_i, validate_metadata(metadata)
+
+
 def _coerce_header_field(
     header: object,
     name: str,
@@ -410,12 +767,10 @@ def _coerce_header_field(
 
 
 class YourFilterbankReader:
-    """Reader backed by the `your` library for SIGPROC .fil and PSRFITS search-mode.
+    """Reader backed by `your` for SIGPROC/search PSRFITS and Astropy for folded PSRFITS.
 
-    Registered for both `.fil` (SIGPROC) and `.fits` / `.sf` (PSRFITS). PSRFITS
-    fold-mode files are rejected explicitly — FLITS is a burst tool, not a
-    timing tool. Missing PSRFITS header fields are patched in from the FITS
-    primary header via astropy where possible.
+    Folded PSRFITS files are exposed as pseudo-time waterfalls by treating phase
+    bins as time bins and averaging subintegrations.
     """
 
     format_id: ClassVar[str] = "sigproc"
@@ -436,9 +791,12 @@ class YourFilterbankReader:
 
         if is_fits:
             is_search, obs_mode = _is_psrfits_search_mode(source_path)
+            is_fold, _ = _is_psrfits_fold_mode(source_path)
+            if is_fold:
+                return _inspect_folded_psrfits(source_path)
             if not is_search:
                 raise FormatDetectionError(
-                    f"PSRFITS file is in {obs_mode!r} mode; FLITS requires SEARCH-mode data.",
+                    f"PSRFITS file is in {obs_mode!r} mode; FLITS supports SEARCH and PSR fold-mode data.",
                     path=source_path,
                 )
 
@@ -510,9 +868,12 @@ class YourFilterbankReader:
 
         if is_fits:
             is_search, obs_mode = _is_psrfits_search_mode(source_path)
+            is_fold, _ = _is_psrfits_fold_mode(source_path)
+            if is_fold:
+                return _load_folded_psrfits(source_path, config, inspection=inspection)
             if not is_search:
                 raise FormatDetectionError(
-                    f"PSRFITS file is in {obs_mode!r} mode; FLITS requires SEARCH-mode data.",
+                    f"PSRFITS file is in {obs_mode!r} mode; FLITS supports SEARCH and PSR fold-mode data.",
                     path=source_path,
                 )
             fits_fallback = _psrfits_primary_fallback(source_path)

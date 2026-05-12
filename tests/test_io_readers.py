@@ -22,7 +22,7 @@ from flits.models import FilterbankMetadata
 from flits.settings import ObservationConfig
 
 
-_ALL_FORMATS = ["sigproc", "chime_hdf5", "psrfits", "chime_bbdata_beamformed"]
+_ALL_FORMATS = ["sigproc", "chime_hdf5", "psrfits", "psrfits_fold", "chime_bbdata_beamformed"]
 
 
 @pytest.mark.parametrize("synthetic_waterfall", _ALL_FORMATS, indirect=True)
@@ -32,6 +32,7 @@ def test_detect_reader_picks_correct_format(synthetic_waterfall):
         "sigproc": "sigproc",
         "chime_hdf5": "chime_hdf5",
         "psrfits": "sigproc",  # shared YourFilterbankReader
+        "psrfits_fold": "sigproc",  # shared YourFilterbankReader
         "chime_bbdata_beamformed": "chime_hdf5",
     }[synthetic_waterfall.format_id]
     assert reader.format_id == expected
@@ -70,6 +71,24 @@ def test_round_trip_metadata(synthetic_waterfall):
     collapsed = data.mean(axis=0)
     peak_bin = int(np.argmax(collapsed))
     assert abs(peak_bin - synthetic_waterfall.burst_time_idx) < 5
+
+
+@pytest.mark.parametrize("synthetic_waterfall", ["psrfits_fold"], indirect=True)
+def test_folded_psrfits_uses_phase_bins_as_pseudo_time(synthetic_waterfall):
+    inspection = inspect_filterbank(synthetic_waterfall.path)
+    assert inspection.schema_version == "psrfits_fold"
+
+    config = ObservationConfig.from_preset(dm=0.0, preset_key="generic", sefd_jy=1.0)
+    data, metadata = load_filterbank_data(synthetic_waterfall.path, config, inspection=inspection)
+
+    assert data.shape == synthetic_waterfall.data.shape
+    assert metadata.tsamp == pytest.approx(synthetic_waterfall.tsamp_s, rel=1e-6)
+    assert metadata.freqres == pytest.approx(abs(synthetic_waterfall.foff_mhz), rel=1e-6)
+    assert metadata.bandwidth_mhz == pytest.approx(
+        abs(synthetic_waterfall.foff_mhz) * synthetic_waterfall.data.shape[0],
+        rel=1e-6,
+    )
+    assert int(np.argmax(data.mean(axis=0))) == pytest.approx(synthetic_waterfall.burst_time_idx, abs=5)
 
 
 @pytest.mark.parametrize("synthetic_waterfall", ["sigproc"], indirect=True)

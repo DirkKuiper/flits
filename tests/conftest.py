@@ -220,6 +220,85 @@ def _write_psrfits(
         produced.rename(path)
 
 
+def _write_folded_psrfits(
+    path: Path,
+    data: np.ndarray,
+    tsamp_s: float,
+    fch1_mhz: float,
+    foff_mhz: float,
+    tstart_mjd: float,
+    source_name: str,
+) -> None:
+    fits = pytest.importorskip("astropy.io.fits")
+
+    nchan, nbin = data.shape
+    npol = 1
+    stt_imjd = int(tstart_mjd)
+    stt_seconds = (float(tstart_mjd) - stt_imjd) * 86400.0
+    stt_smjd = int(stt_seconds)
+    stt_offs = stt_seconds - stt_smjd
+
+    packed = np.rint(data).astype(">i2").reshape(1, npol, nchan, nbin)
+    freqs = fch1_mhz + (foff_mhz * np.arange(nchan, dtype=float))
+    period = float(tsamp_s) * nbin
+
+    primary = fits.PrimaryHDU()
+    primary.header["FITSTYPE"] = "PSRFITS"
+    primary.header["OBS_MODE"] = "PSR"
+    primary.header["SRC_NAME"] = source_name
+    primary.header["TELESCOP"] = "SYNTH"
+    primary.header["OBSFREQ"] = float(np.mean(freqs))
+    primary.header["OBSBW"] = float(foff_mhz * nchan)
+    primary.header["OBSNCHAN"] = nchan
+    primary.header["STT_IMJD"] = stt_imjd
+    primary.header["STT_SMJD"] = stt_smjd
+    primary.header["STT_OFFS"] = stt_offs
+    primary.header["RAJ"] = "12:34:56.78"
+    primary.header["DECJ"] = "-12:34:56.78"
+
+    subint = fits.BinTableHDU.from_columns(
+        [
+            fits.Column(name="PERIOD", format="D", array=np.array([period])),
+            fits.Column(name="DAT_FREQ", format=f"{nchan}D", array=freqs.reshape(1, nchan)),
+            fits.Column(name="DAT_WTS", format=f"{nchan}E", array=np.ones((1, nchan), dtype=">f4")),
+            fits.Column(name="DAT_OFFS", format=f"{nchan}E", array=np.zeros((1, nchan), dtype=">f4")),
+            fits.Column(name="DAT_SCL", format=f"{nchan}E", array=np.ones((1, nchan), dtype=">f4")),
+            fits.Column(
+                name="DATA",
+                format=f"{npol * nchan * nbin}I",
+                dim=f"({nbin},{nchan},{npol})",
+                array=packed,
+            ),
+        ],
+        name="SUBINT",
+    )
+    subint.header["NBIN"] = nbin
+    subint.header["NCHAN"] = nchan
+    subint.header["NPOL"] = npol
+    subint.header["TBIN"] = float(tsamp_s)
+    subint.header["CHAN_BW"] = float(foff_mhz)
+    subint.header["POL_TYPE"] = "INTEN"
+
+    psrparam = fits.BinTableHDU.from_columns(
+        [
+            fits.Column(
+                name="PARAM",
+                format="96A",
+                array=np.array(
+                    [
+                        f"PSRJ {source_name}",
+                        f"P0 {period:.12g}",
+                        "DM 0.0",
+                    ],
+                    dtype="S96",
+                ),
+            )
+        ],
+        name="PSRPARAM",
+    )
+    fits.HDUList([primary, psrparam, subint]).writeto(path)
+
+
 @pytest.fixture
 def synthetic_waterfall(request, tmp_path: Path) -> SyntheticWaterfall:
     """Generate a synthetic burst and materialize it in the requested format.
@@ -275,6 +354,17 @@ def synthetic_waterfall(request, tmp_path: Path) -> SyntheticWaterfall:
     elif format_id == "psrfits":
         path = tmp_path / "synthetic.fits"
         _write_psrfits(path, sigproc_path)
+    elif format_id == "psrfits_fold":
+        path = tmp_path / "synthetic_fold.fits"
+        _write_folded_psrfits(
+            path,
+            data,
+            tsamp_s=tsamp_s,
+            fch1_mhz=fch1_mhz,
+            foff_mhz=foff_mhz,
+            tstart_mjd=tstart_mjd,
+            source_name=source_name,
+        )
     elif format_id == "chime_bbdata_beamformed":
         path = tmp_path / "synthetic_beamformed.h5"
         _write_chime_bbdata_beamformed(

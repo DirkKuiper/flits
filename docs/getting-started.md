@@ -27,7 +27,7 @@ Open `http://127.0.0.1:8123`.
 
 ## 3. Load a burst file
 
-FLITS reads SIGPROC filterbank (`.fil`), search-mode PSRFITS (`.fits`,
+FLITS reads SIGPROC filterbank (`.fil`), PSRFITS search/fold data (`.fits`,
 `.sf`), and CHIME/FRB HDF5 (`.h5`, `.hdf5`) files, including CHIME public
 catalog waterfalls and beamformed `BBData` power files. See
 [Supported Formats](user-guide/supported-formats.md) for the full matrix.

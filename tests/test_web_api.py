@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 
 import h5py
 import numpy as np
+import pytest
 from fastapi import HTTPException
 
 from flits.io.filterbank import FilterbankInspection, your
@@ -49,6 +50,12 @@ from flits.web.app import (
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "blc_s_guppi_60385_53711_DIAG_FRB20240114A_0057_40.265_41.518_b32_I0_D527_851_F192D_K_t30_d1.fil"
 DM_CONST = 1 / (2.41 * 10 ** -4)
+
+
+@pytest.mark.parametrize("synthetic_waterfall", ["psrfits_fold"], indirect=True)
+def test_listing_includes_folded_psrfits(synthetic_waterfall) -> None:
+    with patch.dict("os.environ", {"FLITS_DATA_DIR": str(synthetic_waterfall.path.parent)}):
+        assert synthetic_waterfall.path.name in list_filterbank_files()
 
 
 def _synthetic_session(*, auto_mask_profile: str = "auto") -> BurstSession:

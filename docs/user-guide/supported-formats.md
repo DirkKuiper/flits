@@ -1,13 +1,14 @@
 # Supported Input Formats
 
 FLITS reads filterbank-style data through a pluggable reader framework. The
-three built-in readers cover the formats most common in the FRB community:
+built-in readers cover the formats most common in the FRB community:
 
-| Format           | Extensions       | Backend                              | Notes                                |
-|------------------|------------------|--------------------------------------|--------------------------------------|
-| SIGPROC          | `.fil`           | `your` (filterbank)                  | Canonical input; fully supported.    |
-| PSRFITS (search) | `.fits`, `.sf`   | `your` + `astropy.io.fits` fallback  | Search-mode only; fold-mode rejected.|
-| CHIME/FRB HDF5   | `.h5`, `.hdf5`   | `h5py` (native)                      | `flits_chime_v1`, public catalog, and beamformed `BBData` `tiedbeam_power`. |
+| Format                | Extensions       | Backend                              | Notes                                |
+|-----------------------|------------------|--------------------------------------|--------------------------------------|
+| SIGPROC               | `.fil`           | `your` (filterbank)                  | Canonical input; fully supported.    |
+| PSRFITS (search)      | `.fits`, `.sf`   | `your` + `astropy.io.fits` fallback  | Search-mode dynamic spectra.         |
+| PSRFITS (folded/PSR)  | `.fits`, `.sf`   | `astropy.io.fits`                    | Phase bins are loaded as pseudo-time bins. |
+| CHIME/FRB HDF5        | `.h5`, `.hdf5`   | `h5py` (native)                      | `flits_chime_v1`, public catalog, and beamformed `BBData` `tiedbeam_power`. |
 
 No converter is needed in advance. Just point FLITS at the file: the reader
 framework detects the format by extension, falling back to magic-byte sniffing
@@ -47,8 +48,9 @@ UI surfaces which signal was used via the "Detected: …" label and basis.
 
 ## PSRFITS caveats
 
-- Only **search-mode** PSRFITS is supported. Fold-mode files raise
-  `FormatDetectionError` — FLITS is a burst-analysis tool, not a timing tool.
+- **Folded/PSR-mode** PSRFITS files are supported as a burst-analysis view:
+  FLITS combines subintegrations and treats folded phase bins as pseudo-time
+  bins. It does not perform pulsar timing analysis.
 - Some non-canonical files (MeerKAT, Parkes variants) leave `TSTART`,
   `TELESCOP`, or `SRC_NAME` unset at the layer `your` reads. FLITS
   automatically patches these in from the FITS primary header via
