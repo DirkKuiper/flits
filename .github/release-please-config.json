@@ -7,7 +7,14 @@
       "package-name": "flits",
       "changelog-path": "CHANGELOG.md",
       "include-v-in-tag": true,
-      "bump-minor-pre-major": true
+      "bump-minor-pre-major": true,
+      "date-format": "%Y-%m-%d",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "CITATION.cff"
+        }
+      ]
     }
   }
 }
