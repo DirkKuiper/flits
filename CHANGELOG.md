@@ -4,6 +4,19 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [0.7.0](https://github.com/DirkKuiper/flits/compare/flits-v0.6.0...flits-v0.7.0) (2026-05-21)
+
+
+### Features
+
+* **model-fit:** add explicit fitting config and solver budget ([044eb9a](https://github.com/DirkKuiper/flits/commit/044eb9aae581165c09bcbf656bba738f23ae11df))
+* **web:** add parameter-based model fit controls ([f56c1c3](https://github.com/DirkKuiper/flits/commit/f56c1c313f24eb3cf0ae2ef0b836e6d085928ea3))
+
+
+### Documentation
+
+* **model-fit:** document interactive model fitting ([3910260](https://github.com/DirkKuiper/flits/commit/39102604b7e33edf7cc60f6cc20e588a379bf469))
+
 ## [0.6.0](https://github.com/DirkKuiper/flits/compare/flits-v0.5.0...flits-v0.6.0) (2026-05-12)
 
 
