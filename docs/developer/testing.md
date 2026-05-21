@@ -52,5 +52,5 @@ Examples:
 
 ```bash
 python -m pytest tests/test_web_api.py -q
-python -m pytest tests/test_fit_scattering.py -q
+python -m pytest tests/test_model_fitting.py -q
 ```

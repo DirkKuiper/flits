@@ -29,7 +29,7 @@ flits --data-dir /path/to/filterbanks --host 127.0.0.1 --port 8123
 
 Then open `http://127.0.0.1:8123`.
 
-If you want the optional fitburst-backed scattering workflow as well:
+If you want optional selected-event model fitting as well:
 
 ```bash
 pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3ec7bc21951ce1b4a26a0255096b69.tar.gz"
@@ -54,7 +54,7 @@ pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3
 - [Measurements](analysis/measurements.md)
 - [DM Optimization](analysis/dm-optimization.md)
 - [Temporal and Spectral Analysis](analysis/temporal-spectral.md)
-- [Scattering Fits](analysis/scattering-fits.md)
+- [Model Fitting](analysis/model-fitting.md)
 
 ## Developer docs
 

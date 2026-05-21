@@ -21,7 +21,7 @@ flits --data-dir /path/to/filterbanks --host 127.0.0.1 --port 8123
 
 `fitburst` is intentionally not included in the PyPI runtime metadata because
 public package indexes do not accept direct URL runtime dependencies. If you
-want FLITS's optional scattering-fit workflow:
+want FLITS's optional selected-event model fitting:
 
 ```bash
 pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3ec7bc21951ce1b4a26a0255096b69.tar.gz"

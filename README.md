@@ -28,9 +28,9 @@ flits --data-dir /path/to/filterbanks --host 127.0.0.1 --port 8123
 
 Then open `http://127.0.0.1:8123`.
 
-Optional scattering fits use `fitburst`, which is intentionally left out of the
+Optional model fitting uses `fitburst`, which is intentionally left out of the
 PyPI dependency metadata because package indexes reject direct URL runtime
-dependencies. To enable the fitburst-backed fitting workflow after installing
+dependencies. To enable model fitting after installing
 FLITS:
 
 ```bash
@@ -44,7 +44,7 @@ pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3
 - Interactive crop, event, off-pulse, spectral-window, and masking controls.
 - Calibrated fluence and peak-flux outputs when an SEFD is available.
 - DM optimization using integrated-event S/N and DMphase.
-- Temporal-structure, PSD, ACF, and optional fitburst-backed scattering tools.
+- Temporal-structure, PSD, ACF, and optional selected-event model fitting.
 - Export bundles and JSON session snapshots for reproducible analysis.
 
 ## Documentation

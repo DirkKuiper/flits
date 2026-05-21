@@ -50,7 +50,7 @@ nav:
       - Measurements: analysis/measurements.md
       - DM Optimization: analysis/dm-optimization.md
       - Temporal and Spectral Analysis: analysis/temporal-spectral.md
-      - Scattering Fits: analysis/scattering-fits.md
+      - Model Fitting: analysis/model-fitting.md
   - Developer:
       - Testing: developer/testing.md
       - Publishing: developer/publishing.md

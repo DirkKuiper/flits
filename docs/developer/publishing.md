@@ -134,7 +134,7 @@ The repository also includes:
 ## Optional fitburst support
 
 The PyPI package intentionally omits `fitburst` from its published dependency
-metadata. Users who want the fitburst-backed scattering workflow can install it
+metadata. Users who want optional selected-event model fitting can install it
 after FLITS:
 
 ```bash
