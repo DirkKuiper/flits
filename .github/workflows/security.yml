@@ -41,7 +41,11 @@ jobs:
           python -m pip install pip-audit
 
       - name: Audit Python environment
-        run: python -m pip_audit
+        run: |
+          # PYSEC-2024-277/CVE-2024-34997 currently flags every joblib release,
+          # including the latest, for disputed trusted-cache pickle behavior.
+          # FLITS does not directly load joblib/pickle files.
+          python -m pip_audit --ignore-vuln PYSEC-2024-277
 
   trivy:
     runs-on: ubuntu-latest
