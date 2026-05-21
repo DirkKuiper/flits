@@ -103,13 +103,28 @@ const fittingSpectrumPlot = document.getElementById("fittingSpectrumPlot")
 const fittingProfilePlot = document.getElementById("fittingProfilePlot")
 const fitGuessContent = document.getElementById("fitGuessContent")
 const fitGuessPlot = document.getElementById("fitGuessPlot")
-const fitProfileSelect = document.getElementById("fitProfileSelect")
-const fitProfileSummary = document.getElementById("fitProfileSummary")
+const fitModelSummary = document.getElementById("fitModelSummary")
 const fitSeedPreviousInput = document.getElementById("fitSeedPreviousInput")
 const fitScintillationInput = document.getElementById("fitScintillationInput")
 const fitComponentsInput = document.getElementById("fitComponentsInput")
-const fitFixedParamsContainer = document.getElementById("fitFixedParamsContainer")
+const fitDetectThresholdInput = document.getElementById("fitDetectThresholdInput")
+const fitDetectDistanceInput = document.getElementById("fitDetectDistanceInput")
+const fitDetectComponentsButton = document.getElementById("fitDetectComponentsButton")
+const fitFreeParamsContainer = document.getElementById("fitFreeParamsContainer")
 const fitParameterSummary = document.getElementById("fitParameterSummary")
+const fitWeightingModeSelect = document.getElementById("fitWeightingModeSelect")
+const fitWeightStartInput = document.getElementById("fitWeightStartInput")
+const fitWeightEndInput = document.getElementById("fitWeightEndInput")
+const fitIterationsInput = document.getElementById("fitIterationsInput")
+const fitMaxEvaluationsInput = document.getElementById("fitMaxEvaluationsInput")
+const fitTimeUpsampleInput = document.getElementById("fitTimeUpsampleInput")
+const fitFreqUpsampleInput = document.getElementById("fitFreqUpsampleInput")
+const fitRefFreqInput = document.getElementById("fitRefFreqInput")
+const fitFoldedInput = document.getElementById("fitFoldedInput")
+const fitExactJacobianInput = document.getElementById("fitExactJacobianInput")
+const fitImportSolutionButton = document.getElementById("fitImportSolutionButton")
+const fitExportSolutionButton = document.getElementById("fitExportSolutionButton")
+const fitSolutionInput = document.getElementById("fitSolutionInput")
 const spectralContent = document.getElementById("spectralContent")
 const acfPlot = document.getElementById("acfPlot")
 const temporalScalePlot = document.getElementById("temporalScalePlot")
@@ -151,7 +166,7 @@ const saveNotesButton = document.getElementById("saveNotesButton")
 const setDmButton = document.getElementById("setDmButton")
 const optimizeDmButton = document.getElementById("optimizeDmButton")
 const applyBestDmButton = document.getElementById("applyBestDmButton")
-const fitScatteringButton = document.getElementById("fitScatteringButton")
+const fitModelButton = document.getElementById("fitModelButton")
 const buildExportButton = document.getElementById("buildExportButton")
 const resetViewButton = document.getElementById("resetViewButton")
 const clearRegionsButton = document.getElementById("clearRegionsButton")
@@ -230,26 +245,12 @@ const FIT_PARAMETER_LABELS = Object.freeze({
   amplitude: "Amplitude",
   arrival_time: "Arrival Time",
   burst_width: "Intrinsic Width",
-  scattering_timescale: "Shared Scattering Tau",
-  dm: "Shared DM",
+  scattering_timescale: "Scattering Timescale",
+  dm: "DM Offset",
   dm_index: "Shared DM Index",
   scattering_index: "Shared Scattering Index",
   spectral_index: "Spectral Index",
   spectral_running: "Spectral Running",
-})
-const FIT_PROFILES = Object.freeze({
-  flits_scattering: {
-    label: "FLITS scattering",
-    fixedParameters: ["dm", "dm_index", "scattering_index", "spectral_index", "spectral_running"],
-    weightedFit: false,
-    iterations: 1,
-  },
-  advanced_fitburst_like: {
-    label: "Advanced fitburst-like",
-    fixedParameters: ["dm_index", "scattering_index"],
-    weightedFit: true,
-    iterations: 3,
-  },
 })
 const modeButtons = Array.from(document.querySelectorAll(".mode-button"))
 const analysisTabButtons = Array.from(document.querySelectorAll("[data-analysis-tab]"))
@@ -258,10 +259,13 @@ const sessionControls = [
   setDmButton,
   optimizeDmButton,
   applyBestDmButton,
-  fitProfileSelect,
   fitSeedPreviousInput,
   fitScintillationInput,
-  fitScatteringButton,
+  fitDetectComponentsButton,
+  fitWeightingModeSelect,
+  fitImportSolutionButton,
+  fitExportSolutionButton,
+  fitModelButton,
   runSpectralButton,
   buildExportButton,
   exportIncludeJson,
@@ -323,17 +327,30 @@ const busyLockControls = [
   notesInput,
   dmHalfRangeInput,
   dmStepInput,
-  fitProfileSelect,
   fitSeedPreviousInput,
   fitScintillationInput,
   spectralSegmentInput,
   fitComponentsInput,
+  fitDetectThresholdInput,
+  fitDetectDistanceInput,
+  fitWeightingModeSelect,
+  fitWeightStartInput,
+  fitWeightEndInput,
+  fitIterationsInput,
+  fitMaxEvaluationsInput,
+  fitTimeUpsampleInput,
+  fitFreqUpsampleInput,
+  fitRefFreqInput,
+  fitFoldedInput,
+  fitExactJacobianInput,
+  fitSolutionInput,
 ]
 
 document.addEventListener("DOMContentLoaded", async () => {
   rememberButtonLabels()
   bindControls()
-  applyFitProfileDefaults(currentFitProfileKey())
+  syncScintillationParameterControls()
+  updateFitParameterSummary()
   setMode(state.mode)
   setAnalysisTab(initialAnalysisTab())
   setStatus("Idle", "neutral")
@@ -456,11 +473,8 @@ function bindControls() {
     setDmInputValue(bestDm)
     postAction("set_dm", { dm: Number(bestDm) })
   })
-  fitScatteringButton.addEventListener("click", () => {
-    const checkboxes = document.querySelectorAll("#fitFixedParamsContainer input[type='checkbox']:checked");
-    const fixedParams = Array.from(checkboxes)
-      .filter((cb) => !cb.disabled)
-      .map((cb) => cb.value);
+  fitModelButton.addEventListener("click", () => {
+    const freeParameters = currentFreeFitParameters()
     const seedFromPrevious = Boolean(fitSeedPreviousInput.checked && hasPreviousSuccessfulFit())
     let componentGuesses = null
     if (!seedFromPrevious) {
@@ -469,18 +483,21 @@ function bindControls() {
         return
       }
     }
-    postAction("fit_scattering", {
-      fit_profile: currentFitProfileKey(),
+    let solverConfig = null
+    try {
+      solverConfig = collectFitSolverConfig()
+    } catch (error) {
+      showToast(error.message || "Review the advanced fit setup.", "error")
+      return
+    }
+    postAction("fit_model", {
       seed_from_previous_fit: seedFromPrevious,
       scintillation: Boolean(fitScintillationInput.checked),
-      fixed_parameters: fixedParams,
+      free_parameters: freeParameters,
+      solver: solverConfig,
       num_components: seedFromPrevious ? clampFitComponentCount(fitComponentsInput.value, previousFitComponentCount()) : componentGuesses.length,
       ...(seedFromPrevious ? {} : { component_guesses: componentGuesses }),
     });
-  })
-  fitProfileSelect.addEventListener("change", () => {
-    applyFitProfileDefaults(fitProfileSelect.value)
-    updateControlStates()
   })
   fitSeedPreviousInput.addEventListener("change", () => {
     updateFitParameterSummary()
@@ -491,10 +508,21 @@ function bindControls() {
     updateFitParameterSummary()
     updateControlStates()
   })
-  fitFixedParamsContainer.addEventListener("change", () => {
+  fitFreeParamsContainer.addEventListener("change", () => {
     updateFitParameterSummary()
     updateControlStates()
   })
+  fitDetectComponentsButton.addEventListener("click", () => detectFitComponentsFromProfile())
+  fitWeightingModeSelect.addEventListener("change", () => updateFitParameterSummary())
+  ;[fitIterationsInput, fitMaxEvaluationsInput, fitTimeUpsampleInput, fitFreqUpsampleInput, fitRefFreqInput, fitWeightStartInput, fitWeightEndInput].forEach((input) => {
+    input.addEventListener("input", () => updateFitParameterSummary())
+  })
+  ;[fitFoldedInput, fitExactJacobianInput].forEach((input) => {
+    input.addEventListener("change", () => updateFitParameterSummary())
+  })
+  fitImportSolutionButton.addEventListener("click", () => fitSolutionInput.click())
+  fitSolutionInput.addEventListener("change", () => importModelFitSolution())
+  fitExportSolutionButton.addEventListener("click", () => exportModelFitSolution())
   fitComponentsInput.addEventListener("change", () => {
     if (state.view) {
       renderFitting(state.view)
@@ -1333,7 +1361,7 @@ async function postAction(type, payload = {}) {
       state.activeAnalysisTab = "dm"
     } else if (type === "compute_properties" || type === "compute_widths" || type === "accept_width_result") {
       state.activeAnalysisTab = "prepare"
-    } else if (type === "fit_scattering") {
+    } else if (type === "fit_model") {
       state.activeAnalysisTab = "fitting"
     } else if (type === "run_temporal_structure_analysis" || type === "run_spectral_analysis") {
       state.activeAnalysisTab = "temporal"
@@ -2264,7 +2292,7 @@ function renderFitting(view) {
   renderFitGuessBuilder(view)
   const results = view?.results
   const diagnostics = results?.diagnostics || {}
-  const scatteringFit = diagnostics?.scattering_fit
+  const modelFit = diagnostics?.model_fit
 
   if (!results) {
     fittingContent.innerHTML =
@@ -2278,7 +2306,7 @@ function renderFitting(view) {
     return
   }
 
-  if (!scatteringFit) {
+  if (!modelFit) {
     fittingContent.innerHTML = `
       <div class="empty-state">No 2D model fit yet. Run the fit on the current selection to inspect model width, scattering time, and residuals.</div>
     `
@@ -2291,13 +2319,16 @@ function renderFitting(view) {
     return
   }
 
-  const fitTone = scatteringStatusTone(scatteringFit.status)
-  const fitStatistics = scatteringFit.fit_statistics || {}
-  const initialParameters = scatteringFit.initial_parameters || {}
-  const bestfit = scatteringFit.bestfit_parameters || {}
-  const bestfitUncertainties = scatteringFit.bestfit_uncertainties || {}
+  const fitTone = modelFitStatusTone(modelFit.status)
+  const fitStatistics = modelFit.fit_statistics || {}
+  const initialParameters = modelFit.initial_parameters || {}
+  const bestfit = modelFit.bestfit_parameters || {}
+  const bestfitUncertainties = modelFit.bestfit_uncertainties || {}
   const widthDetail = resultUncertaintyDetail(results, "width_ms_model", "ms")
   const tauDetail = resultUncertaintyDetail(results, "tau_sc_ms", "ms")
+  const fitStatusCopyText = modelFit.status === "ok" || modelFit.status === "evaluation_limit_exceeded"
+    ? modelFitStatusCopy(modelFit.status)
+    : (modelFit.message || modelFitStatusCopy(modelFit.status))
   const fitSummaryTiles = [
     resultTile("Model Width", results.width_ms_model === null ? "n/a" : formatValueWithDetail(results.width_ms_model, widthDetail, { valueDigits: 3, uncertaintyDigits: 3, units: "ms" }), "primary", {
       detail: widthDetail,
@@ -2308,17 +2339,20 @@ function renderFitting(view) {
     resultTile("Reduced Chi^2", fitStatistics.chisq_final_reduced === null || fitStatistics.chisq_final_reduced === undefined ? "n/a" : fmt(fitStatistics.chisq_final_reduced, 3), "primary"),
   ]
   const fitMetaTiles = [
-    resultTile("Fitter", scatteringFit.fitter || "n/a", "secondary"),
-    resultTile("Profile", fitProfileLabel(scatteringFit.fit_profile), "secondary"),
-    resultTile("Initialization", fitInitialSourceLabel(scatteringFit.initial_parameter_source), "secondary"),
-    resultTile("Iterations", scatteringFit.fit_iterations_completed === null || scatteringFit.fit_iterations_completed === undefined ? "n/a" : `${scatteringFit.fit_iterations_completed}/${scatteringFit.fit_iterations_requested || scatteringFit.fit_iterations_completed}`, "secondary"),
-    resultTile("Weighting", scatteringFit.weighted_fit ? "weighted" : "unweighted", "secondary"),
-    resultTile("Scintillation", scatteringFit.scintillation ? "enabled" : "disabled", "secondary"),
+    resultTile("Fitter", modelFit.fitter || "n/a", "secondary"),
+    resultTile("Initialization", fitInitialSourceLabel(modelFit.initial_parameter_source), "secondary"),
+    resultTile("Optimizer Passes", modelFit.fit_iterations_completed === null || modelFit.fit_iterations_completed === undefined ? "n/a" : `${modelFit.fit_iterations_completed}/${modelFit.fit_iterations_requested || modelFit.fit_iterations_completed}`, "secondary"),
+    resultTile("Function Evaluations", modelFit.function_evaluations === null || modelFit.function_evaluations === undefined ? "n/a" : String(modelFit.function_evaluations), "secondary"),
+    resultTile("Max Evaluations", modelFit.max_function_evaluations === null || modelFit.max_function_evaluations === undefined ? "auto" : String(modelFit.max_function_evaluations), "secondary"),
+    resultTile("Weighting", weightingLabel(modelFit.weighting_mode), "secondary"),
+    resultTile("Scintillation", modelFit.scintillation ? "enabled" : "disabled", "secondary"),
+    resultTile("Folded", modelFit.is_folded ? "enabled" : "disabled", "secondary"),
+    resultTile("Jacobian", modelFit.exact_jacobian ? "exact" : "numeric", "secondary"),
     resultTile("Fit S/N", fitStatistics.snr === null || fitStatistics.snr === undefined ? "n/a" : fmt(fitStatistics.snr, 3), "secondary"),
     resultTile("Good Channels", fitStatistics.num_freq_good === null || fitStatistics.num_freq_good === undefined ? "n/a" : String(fitStatistics.num_freq_good), "secondary"),
     resultTile("Observations", fitStatistics.num_observations === null || fitStatistics.num_observations === undefined ? "n/a" : String(fitStatistics.num_observations), "secondary"),
-    resultTile("Fitted Parameters", fitParameterListLabel(scatteringFit.fit_parameters), "secondary"),
-    resultTile("Fixed Parameters", fitParameterListLabel(scatteringFit.fixed_parameters), "secondary"),
+    resultTile("Parameters Fit", fitParameterListLabel(modelFit.free_parameters || modelFit.fit_parameters), "secondary"),
+    resultTile("Fixed Parameters", fitParameterListLabel(modelFit.fixed_parameters), "secondary"),
   ]
 
   fittingContent.innerHTML = `
@@ -2329,8 +2363,8 @@ function renderFitting(view) {
       ${fitMetaTiles.join("")}
     </div>
     <div class="dm-fit-note" data-tone="${escapeHtml(fitTone)}">
-      <strong>${escapeHtml(scatteringStatusLabel(scatteringFit.status))}</strong>
-      <span>${escapeHtml(scatteringFit.status === "ok" ? scatteringStatusCopy(scatteringFit.status) : (scatteringFit.message || scatteringStatusCopy(scatteringFit.status)))}</span>
+      <strong>${escapeHtml(modelFitStatusLabel(modelFit.status))}</strong>
+      <span>${escapeHtml(fitStatusCopyText)}</span>
     </div>
     ${renderScatteringParameterTable(initialParameters, bestfit, bestfitUncertainties)}
     ${results?.provenance ? `
@@ -2345,11 +2379,11 @@ function renderFitting(view) {
 }
 
 function renderFitGuessBuilder(view) {
-  const guess = view?.fitburst_guess
+  const guess = view?.model_fit_guess
   if (!guess || guess.status !== "ok") {
     fitComponentsInput.disabled = false
     fitGuessContent.innerHTML =
-      '<div class="empty-state">No fitburst initial guesses are available for the current selection.</div>'
+      '<div class="empty-state">No model initial guesses are available for the current selection.</div>'
     fitGuessPlot.classList.add("is-empty")
     Plotly.purge(fitGuessPlot)
     fitGuessPlot.replaceChildren()
@@ -2369,7 +2403,7 @@ function renderFitGuessBuilder(view) {
   const rows = fitGuessRowsForCurrentInput(view)
   if (!rows.length) {
     fitGuessContent.innerHTML =
-      '<div class="empty-state">No fitburst initial guesses are available for the current selection.</div>'
+      '<div class="empty-state">No model initial guesses are available for the current selection.</div>'
     return
   }
 
@@ -2389,6 +2423,12 @@ function renderFitGuessBuilder(view) {
               <th>Width (ms)</th>
               <th>Tau (ms)</th>
               <th>Log Amp</th>
+              <th>DM</th>
+              <th>DM Index</th>
+              <th>Scat Index</th>
+              <th>Spectral Index</th>
+              <th>Spectral Running</th>
+              <th>Ref MHz</th>
               <th>Window</th>
             </tr>
           </thead>
@@ -2408,7 +2448,7 @@ function clampFitComponentCount(value, fallback = 1) {
 }
 
 function fitGuessRowsForCurrentInput(view) {
-  const guess = view?.fitburst_guess
+  const guess = view?.model_fit_guess
   const baseRows = Array.isArray(guess?.component_guesses) ? guess.component_guesses : []
   if (!baseRows.length) {
     return []
@@ -2436,6 +2476,12 @@ function normalizeFitGuessRow(row, index) {
     width_ms: Number(row.width_ms),
     tau_ms: Number(row.tau_ms),
     log_amplitude: Number(row.log_amplitude),
+    dm: Number.isFinite(Number(row.dm)) ? Number(row.dm) : 0,
+    dm_index: Number.isFinite(Number(row.dm_index)) ? Number(row.dm_index) : -2,
+    scattering_index: Number.isFinite(Number(row.scattering_index)) ? Number(row.scattering_index) : -4,
+    spectral_index: Number.isFinite(Number(row.spectral_index)) ? Number(row.spectral_index) : 0,
+    spectral_running: Number.isFinite(Number(row.spectral_running)) ? Number(row.spectral_running) : 0,
+    ref_freq_mhz: Number.isFinite(Number(row.ref_freq_mhz)) ? Number(row.ref_freq_mhz) : defaultFitRefFreq(),
     component_window_ms: windowMs && windowMs.every((value) => Number.isFinite(value)) ? windowMs : null,
   }
 }
@@ -2446,6 +2492,24 @@ function cloneFitGuessRow(row, index) {
     label: `Component ${index + 1}`,
     source_label: `Auto ${index + 1}`,
   }
+}
+
+function defaultFitRefFreq() {
+  const selected = state.view?.state?.spectral_extent_mhz
+  if (Array.isArray(selected) && selected.length >= 2) {
+    const values = selected.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0)
+    if (values.length) {
+      return Math.min(...values)
+    }
+  }
+  const axis = state.view?.plot?.heatmap?.y_mhz
+  if (Array.isArray(axis) && axis.length) {
+    const values = axis.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0)
+    if (values.length) {
+      return Math.min(...values)
+    }
+  }
+  return 0
 }
 
 function renderFitGuessRow(row, index, view) {
@@ -2467,6 +2531,12 @@ function renderFitGuessRow(row, index, view) {
       <td><input class="fit-guess-input" data-fit-field="width_ms" type="number" min="${escapeHtml(String(sampleMs))}" step="${escapeHtml(String(sampleMs))}" value="${escapeHtml(fmt(row.width_ms, 6))}"></td>
       <td><input class="fit-guess-input" data-fit-field="tau_ms" type="number" min="${escapeHtml(String(sampleMs))}" step="${escapeHtml(String(sampleMs))}" value="${escapeHtml(fmt(row.tau_ms, 6))}"></td>
       <td><input class="fit-guess-input" data-fit-field="log_amplitude" type="number" step="0.001" value="${escapeHtml(fmt(row.log_amplitude, 6))}"></td>
+      <td><input class="fit-guess-input" data-fit-field="dm" type="number" step="0.001" value="${escapeHtml(fmt(row.dm, 6))}"></td>
+      <td><input class="fit-guess-input" data-fit-field="dm_index" type="number" step="0.001" value="${escapeHtml(fmt(row.dm_index, 6))}"></td>
+      <td><input class="fit-guess-input" data-fit-field="scattering_index" type="number" step="0.001" value="${escapeHtml(fmt(row.scattering_index, 6))}"></td>
+      <td><input class="fit-guess-input" data-fit-field="spectral_index" type="number" step="0.001" value="${escapeHtml(fmt(row.spectral_index, 6))}"></td>
+      <td><input class="fit-guess-input" data-fit-field="spectral_running" type="number" step="0.001" value="${escapeHtml(fmt(row.spectral_running, 6))}"></td>
+      <td><input class="fit-guess-input" data-fit-field="ref_freq_mhz" type="number" min="0" step="0.001" value="${escapeHtml(fmt(row.ref_freq_mhz || defaultFitRefFreq(), 6))}"></td>
       <td>${escapeHtml(windowLabel)} ms</td>
     </tr>
   `
@@ -2479,36 +2549,14 @@ function fitGuessSourceLabel(source) {
   return "Unavailable"
 }
 
-function currentFitProfileKey() {
-  const selected = String(fitProfileSelect.value || "").trim()
-  return Object.prototype.hasOwnProperty.call(FIT_PROFILES, selected) ? selected : "flits_scattering"
-}
-
-function applyFitProfileDefaults(profileKey) {
-  const profile = FIT_PROFILES[profileKey] || FIT_PROFILES.flits_scattering
-  fitProfileSelect.value = Object.prototype.hasOwnProperty.call(FIT_PROFILES, profileKey)
-    ? profileKey
-    : "flits_scattering"
-  const fixed = new Set(profile.fixedParameters)
-  fitFixedParamsContainer.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
-    checkbox.checked = fixed.has(checkbox.value)
-  })
-  syncScintillationParameterControls()
-  updateFitParameterSummary()
-}
-
-function fitProfileLabel(profileKey) {
-  return (FIT_PROFILES[profileKey] || FIT_PROFILES.flits_scattering).label
-}
-
 function fitInitialSourceLabel(source) {
   const labels = {
-    adapter_default: "Adapter default",
-    component_guesses: "Current guesses",
+    current_selection: "Current selection",
     previous_fit: "Previous fit",
-    request: "API request",
+    imported_solution: "Imported solution",
+    api: "API request",
   }
-  return labels[source] || "Adapter default"
+  return labels[source] || "Current selection"
 }
 
 function fitParameterLabel(parameter) {
@@ -2522,12 +2570,17 @@ function fitParameterListLabel(parameters) {
   return parameters.map((parameter) => fitParameterLabel(parameter)).join(", ")
 }
 
-function currentFixedFitParameterSet() {
+function currentFreeFitParameterSet() {
   return new Set(
-    Array.from(fitFixedParamsContainer.querySelectorAll("input[type='checkbox']:checked"))
+    Array.from(fitFreeParamsContainer.querySelectorAll("input[type='checkbox']:checked"))
       .filter((input) => !input.disabled)
       .map((input) => input.value),
   )
+}
+
+function currentFreeFitParameters() {
+  const free = currentFreeFitParameterSet()
+  return activeFitParameterOrder().filter((parameter) => free.has(parameter))
 }
 
 function activeFitParameterOrder() {
@@ -2538,58 +2591,72 @@ function activeFitParameterOrder() {
 }
 
 function hasFreeFitParameters() {
-  const fixed = currentFixedFitParameterSet()
-  return activeFitParameterOrder().some((parameter) => !fixed.has(parameter))
+  return currentFreeFitParameters().length > 0
 }
 
 function updateFitParameterSummary() {
-  const profile = FIT_PROFILES[currentFitProfileKey()] || FIT_PROFILES.flits_scattering
-  const fixed = currentFixedFitParameterSet()
+  const free = currentFreeFitParameterSet()
   const activeParameters = activeFitParameterOrder()
-  const fitted = activeParameters.filter((parameter) => !fixed.has(parameter))
-  const fixedLabels = activeParameters.filter((parameter) => fixed.has(parameter)).map((parameter) => fitParameterLabel(parameter))
+  const fitted = activeParameters.filter((parameter) => free.has(parameter))
+  const fixedLabels = activeParameters.filter((parameter) => !free.has(parameter)).map((parameter) => fitParameterLabel(parameter))
   const fittedLabels = fitted.map((parameter) => fitParameterLabel(parameter))
   const previousFitLabel = fitSeedPreviousInput.checked && hasPreviousSuccessfulFit() ? ", previous-fit seed" : ""
   const scintillationLabel = fitScintillationInput.checked
-    ? ", scintillation mode: per-channel amplitude/spectral shape"
+    ? ", scintillation: per-channel amplitude/spectral shape"
     : ""
-  fitProfileSummary.textContent = `${profile.label}: ${profile.weightedFit ? "weighted" : "unweighted"}, ${profile.iterations} iteration${profile.iterations === 1 ? "" : "s"}${previousFitLabel}${scintillationLabel}`
+  const weighting = fitWeightingModeSelect.value || "none"
+  const iterations = Math.max(1, Math.round(Number(fitIterationsInput.value) || 1))
+  const maxEvaluations = parseOptionalNumber(fitMaxEvaluationsInput.value)
+  const maxEvaluationsLabel = maxEvaluations !== null && maxEvaluations > 0
+    ? `${Math.round(maxEvaluations)} max evaluations`
+    : "auto evaluation budget"
+  fitModelSummary.textContent = `Solver: ${weightingLabel(weighting)} weighting; ${iterations} optimizer pass${iterations === 1 ? "" : "es"}; ${maxEvaluationsLabel}${previousFitLabel}${scintillationLabel}`
   fitParameterSummary.innerHTML = `
-    <span><strong>Fitted</strong> ${escapeHtml(fittedLabels.join(", ") || "none")}</span>
+    <span><strong>Fit</strong> ${escapeHtml(fittedLabels.join(", ") || "none")}</span>
     <span><strong>Fixed</strong> ${escapeHtml(fixedLabels.join(", ") || "none")}</span>
   `
   fitParameterSummary.dataset.tone = fitted.length ? "neutral" : "error"
 }
 
-function syncScintillationParameterControls() {
+function weightingLabel(mode) {
+  const labels = {
+    none: "none",
+    auto: "auto off-pulse",
+    fit_window: "fit window",
+    manual_range: "manual range",
+  }
+  return labels[mode] || "none"
+}
+
+function syncScintillationParameterControls(baseDisabled = false) {
   const inactive = new Set(fitScintillationInput.checked ? FIT_SCINTILLATION_INACTIVE_PARAMETERS : [])
-  fitFixedParamsContainer.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+  fitFreeParamsContainer.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
     if (inactive.has(checkbox.value)) {
       checkbox.checked = false
       checkbox.disabled = true
     } else {
-      checkbox.disabled = false
+      checkbox.disabled = Boolean(baseDisabled)
     }
   })
 }
 
 function hasPreviousSuccessfulFit() {
-  return state.view?.results?.diagnostics?.scattering_fit?.status === "ok"
+  return state.view?.results?.diagnostics?.model_fit?.status === "ok"
 }
 
 function previousFitComponentCount() {
-  const count = Number(state.view?.results?.diagnostics?.scattering_fit?.component_count)
+  const count = Number(state.view?.results?.diagnostics?.model_fit?.component_count)
   return Number.isFinite(count) && count > 0 ? count : 1
 }
 
 function collectFitComponentGuesses() {
   const rows = Array.from(fitGuessContent.querySelectorAll("[data-fit-guess-row]"))
   if (!rows.length) {
-    showToast("No fitburst initial guesses are available for this selection.", "error")
+    showToast("No model initial guesses are available for this selection.", "error")
     return null
   }
-  const eventWindow = Array.isArray(state.view?.fitburst_guess?.event_window_ms)
-    ? state.view.fitburst_guess.event_window_ms
+  const eventWindow = Array.isArray(state.view?.model_fit_guess?.event_window_ms)
+    ? state.view.model_fit_guess.event_window_ms
     : state.view?.state?.event_ms
   const eventStart = Number(eventWindow?.[0])
   const eventEnd = Number(eventWindow?.[1])
@@ -2600,12 +2667,18 @@ function collectFitComponentGuesses() {
     const width = readFitGuessNumber(row, "width_ms")
     const tau = readFitGuessNumber(row, "tau_ms")
     const logAmplitude = readFitGuessNumber(row, "log_amplitude")
-    if ([arrival, width, tau, logAmplitude].some((value) => !Number.isFinite(value))) {
+    const dm = readFitGuessNumber(row, "dm")
+    const dmIndex = readFitGuessNumber(row, "dm_index")
+    const scatteringIndex = readFitGuessNumber(row, "scattering_index")
+    const spectralIndex = readFitGuessNumber(row, "spectral_index")
+    const spectralRunning = readFitGuessNumber(row, "spectral_running")
+    const refFreqMhz = readFitGuessNumber(row, "ref_freq_mhz")
+    if ([arrival, width, tau, logAmplitude, dm, dmIndex, scatteringIndex, spectralIndex, spectralRunning, refFreqMhz].some((value) => !Number.isFinite(value))) {
       showToast(`Component ${index + 1} has a non-numeric initial guess.`, "error")
       return null
     }
-    if (width <= 0 || tau <= 0) {
-      showToast(`Component ${index + 1} width and tau must be positive.`, "error")
+    if (width <= 0 || tau <= 0 || refFreqMhz <= 0) {
+      showToast(`Component ${index + 1} width, tau, and reference frequency must be positive.`, "error")
       return null
     }
     if (Number.isFinite(eventStart) && Number.isFinite(eventEnd) && (arrival < eventStart || arrival > eventEnd)) {
@@ -2619,6 +2692,12 @@ function collectFitComponentGuesses() {
       width_ms: width,
       tau_ms: tau,
       log_amplitude: logAmplitude,
+      dm,
+      dm_index: dmIndex,
+      scattering_index: scatteringIndex,
+      spectral_index: spectralIndex,
+      spectral_running: spectralRunning,
+      ref_freq_mhz: refFreqMhz,
       source_label: row.dataset.sourceLabel || `Component ${index + 1}`,
       component_window_ms: Number.isFinite(windowStart) && Number.isFinite(windowEnd) ? [windowStart, windowEnd] : null,
     })
@@ -2631,6 +2710,206 @@ function readFitGuessNumber(row, field) {
   if (!input) return NaN
   const value = parseOptionalNumber(input.value)
   return value === null ? NaN : value
+}
+
+function collectFitSolverConfig() {
+  const weightingMode = fitWeightingModeSelect.value || "none"
+  const solver = {
+    weighting_mode: weightingMode,
+    iterations: Math.max(1, Math.round(Number(fitIterationsInput.value) || 1)),
+    factor_time_upsample: Math.max(1, Math.round(Number(fitTimeUpsampleInput.value) || 1)),
+    factor_freq_upsample: Math.max(1, Math.round(Number(fitFreqUpsampleInput.value) || 1)),
+    is_folded: Boolean(fitFoldedInput.checked),
+    exact_jacobian: Boolean(fitExactJacobianInput.checked),
+  }
+  const refFreq = parseOptionalNumber(fitRefFreqInput.value)
+  if (refFreq !== null && refFreq > 0) {
+    solver.ref_freq_mhz = refFreq
+  }
+  const maxEvaluations = parseOptionalNumber(fitMaxEvaluationsInput.value)
+  if (maxEvaluations !== null && maxEvaluations > 0) {
+    solver.max_function_evaluations = Math.round(maxEvaluations)
+  }
+  if (weightingMode === "manual_range") {
+    const start = parseOptionalNumber(fitWeightStartInput.value)
+    const end = parseOptionalNumber(fitWeightEndInput.value)
+    if (start === null || end === null || end <= start) {
+      showToast("Manual weighting needs a valid start and end bin.", "error")
+      throw new Error("Invalid manual weighting range")
+    }
+    solver.weight_range = [Math.floor(start), Math.ceil(end)]
+  }
+  return solver
+}
+
+function detectFitComponentsFromProfile() {
+  const view = state.view
+  const profile = Array.isArray(view?.plot?.time_profile?.y) ? view.plot.time_profile.y.map(Number) : []
+  const times = Array.isArray(view?.plot?.time_profile?.x_ms) ? view.plot.time_profile.x_ms.map(Number) : []
+  if (!profile.length || profile.length !== times.length) {
+    showToast("No profile is available for component detection.", "error")
+    return
+  }
+  const eventWindow = Array.isArray(view?.state?.event_ms) ? view.state.event_ms.map(Number) : [times[0], times[times.length - 1]]
+  const eventStart = Number(eventWindow[0])
+  const eventEnd = Number(eventWindow[1])
+  const candidates = profile
+    .map((value, index) => ({ value, index, time: times[index] }))
+    .filter((point) => Number.isFinite(point.value) && Number.isFinite(point.time) && point.time >= eventStart && point.time <= eventEnd)
+  if (!candidates.length) {
+    showToast("No event-window profile samples are available for component detection.", "error")
+    return
+  }
+  const peakValue = Math.max(...candidates.map((point) => point.value))
+  const threshold = Math.max(0, Math.min(1, Number(fitDetectThresholdInput.value) || 0.35)) * peakValue
+  const distance = Math.max(1, Math.round(Number(fitDetectDistanceInput.value) || 5))
+  const peaks = []
+  for (const point of candidates) {
+    const left = profile[point.index - 1] ?? Number.NEGATIVE_INFINITY
+    const right = profile[point.index + 1] ?? Number.NEGATIVE_INFINITY
+    if (point.value >= threshold && point.value >= left && point.value >= right) {
+      if (!peaks.length || point.index - peaks[peaks.length - 1].index >= distance) {
+        peaks.push(point)
+      } else if (point.value > peaks[peaks.length - 1].value) {
+        peaks[peaks.length - 1] = point
+      }
+    }
+  }
+  if (!peaks.length) {
+    showToast("No components passed the detection threshold.", "error")
+    return
+  }
+  const sampleMs = Number(view?.meta?.tsamp_us) > 0
+    ? Math.max(1e-9, Number(view.meta.tsamp_us) * Number(view.state.time_factor || 1) / 1000)
+    : 0.001
+  const windowWidthMs = Math.max(sampleMs * 4, (eventEnd - eventStart) / Math.max(6, peaks.length * 4))
+  const rows = peaks.slice(0, 10).map((peak, index) => normalizeFitGuessRow({
+    label: `Component ${index + 1}`,
+    source: "detected",
+    source_label: "Detected",
+    arrival_time_ms: peak.time,
+    width_ms: Math.max(sampleMs, windowWidthMs / 6),
+    tau_ms: Math.max(sampleMs, windowWidthMs / 24),
+    log_amplitude: Math.log10(Math.max(peak.value, 1e-2)),
+    component_window_ms: [Math.max(eventStart, peak.time - windowWidthMs / 2), Math.min(eventEnd, peak.time + windowWidthMs / 2)],
+  }, index))
+  fitComponentsInput.value = String(rows.length)
+  renderFitGuessRows(rows, view, `${rows.length} component guess${rows.length === 1 ? "" : "es"} from detected profile peaks.`)
+  renderFitGuessPlot(view)
+  updateControlStates()
+}
+
+function renderFitGuessRows(rows, view, message) {
+  const rowMarkup = rows.map((row, index) => renderFitGuessRow(row, index, view)).join("")
+  fitGuessContent.innerHTML = `
+    <section class="fit-guess-panel">
+      <div class="analysis-panel-head compact">
+        <h5>Initial Guesses</h5>
+        <p>${escapeHtml(message)}</p>
+      </div>
+      <div class="fit-guess-table-wrap">
+        <table class="fit-guess-table">
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Arrival (ms)</th>
+              <th>Width (ms)</th>
+              <th>Tau (ms)</th>
+              <th>Log Amp</th>
+              <th>DM</th>
+              <th>DM Index</th>
+              <th>Scat Index</th>
+              <th>Spectral Index</th>
+              <th>Spectral Running</th>
+              <th>Ref MHz</th>
+              <th>Window</th>
+            </tr>
+          </thead>
+          <tbody>${rowMarkup}</tbody>
+        </table>
+      </div>
+    </section>
+  `
+}
+
+async function importModelFitSolution() {
+  const file = fitSolutionInput.files?.[0]
+  if (!file) return
+  try {
+    const payload = JSON.parse(await file.text())
+    const params = payload.model_parameters || payload.bestfit_parameters || payload.initial_parameters
+    if (!params || typeof params !== "object") {
+      throw new Error("Solution JSON does not contain model_parameters.")
+    }
+    const rows = fitRowsFromParameterDict(params)
+    if (!rows.length) {
+      throw new Error("Solution JSON does not contain usable component parameters.")
+    }
+    fitComponentsInput.value = String(rows.length)
+    renderFitGuessRows(rows, state.view, `Imported ${rows.length} component${rows.length === 1 ? "" : "s"} from solution JSON.`)
+    renderFitGuessPlot(state.view)
+  } catch (error) {
+    showToast(error.message || "Could not import model solution.", "error")
+  } finally {
+    fitSolutionInput.value = ""
+  }
+}
+
+function fitRowsFromParameterDict(params) {
+  const arrivals = Array.isArray(params.arrival_time) ? params.arrival_time : []
+  const count = Math.max(0, arrivals.length)
+  const baseMs = Number(state.view?.plot?.time_profile?.x_ms?.[0]) || 0
+  const get = (key, index, fallback) => {
+    const values = Array.isArray(params[key]) ? params[key] : []
+    const value = Number(values[Math.min(index, Math.max(0, values.length - 1))])
+    return Number.isFinite(value) ? value : fallback
+  }
+  return Array.from({ length: count }, (_, index) => normalizeFitGuessRow({
+    label: `Component ${index + 1}`,
+    source: "imported_solution",
+    source_label: "Imported",
+    arrival_time_ms: baseMs + get("arrival_time", index, 0) * 1e3,
+    width_ms: get("burst_width", index, 0.001) * 1e3,
+    tau_ms: get("scattering_timescale", index, 0.001) * 1e3,
+    log_amplitude: get("amplitude", index, 0),
+    dm: get("dm", index, 0),
+    dm_index: get("dm_index", index, -2),
+    scattering_index: get("scattering_index", index, -4),
+    spectral_index: get("spectral_index", index, 0),
+    spectral_running: get("spectral_running", index, 0),
+    ref_freq_mhz: get("ref_freq", index, defaultFitRefFreq()),
+  }, index))
+}
+
+function exportModelFitSolution() {
+  const modelFit = state.view?.results?.diagnostics?.model_fit
+  if (!modelFit) {
+    showToast("Run a model fit before exporting a solution.", "error")
+    return
+  }
+  const payload = {
+    model_parameters: modelFit.bestfit_parameters || {},
+    fit_statistics: modelFit.fit_statistics || {},
+    fit_logistics: {
+      weighting_mode: modelFit.weighting_mode,
+      weight_range: modelFit.weight_range,
+      iterations: modelFit.fit_iterations_completed,
+      factor_time_upsample: modelFit.factor_time_upsample,
+      factor_freq_upsample: modelFit.factor_freq_upsample,
+      ref_freq_mhz: modelFit.ref_freq_mhz,
+      is_folded: modelFit.is_folded,
+      exact_jacobian: modelFit.exact_jacobian,
+      max_function_evaluations: modelFit.max_function_evaluations,
+      function_evaluations: modelFit.function_evaluations,
+    },
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = "model_fit_solution.json"
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 function renderSpectral(view) {
@@ -2682,8 +2961,8 @@ function renderSpectral(view) {
         tooltip: temporalTooltip("crossoverFrequency"),
         detail: crossoverDetail,
       }),
-      resultTile("fitburst Cross-Check", temporalStructure.fitburst_min_component_ms === null || temporalStructure.fitburst_min_component_ms === undefined ? "n/a" : `${fmt(temporalStructure.fitburst_min_component_ms, 3)} ms`, "primary", {
-        tooltip: temporalTooltip("fitburstCrossCheck"),
+      resultTile("Model-Fit Cross-Check", temporalStructure.model_fit_min_component_ms === null || temporalStructure.model_fit_min_component_ms === undefined ? "n/a" : `${fmt(temporalStructure.model_fit_min_component_ms, 3)} ms`, "primary", {
+        tooltip: temporalTooltip("modelFitCrossCheck"),
         detail: modelWidthDetail,
       }),
     ]
@@ -2723,7 +3002,7 @@ function renderSpectral(view) {
         </div>
         <div class="dm-fit-note" data-tone="neutral" style="margin-top: 1rem;">
           <strong>How To Read This Tab</strong>
-          <span>The primary minimum-timescale metric is data-driven. The PSD slope is fit only on the averaged periodogram, while fitburst widths are shown as a model-based cross-check when available.</span>
+          <span>The primary minimum-timescale metric is data-driven. The PSD slope is fit only on the averaged periodogram, while model-fit widths are shown as a cross-check when available.</span>
         </div>
         <div class="dm-fit-note" data-tone="neutral" style="margin-top: 1rem;">
           <strong>Minimum Structure Scale Scan</strong>
@@ -2843,7 +3122,7 @@ function temporalTooltip(topic) {
     psdSlope: "Power-law slope of the averaged periodogram. Larger slopes indicate stronger low-frequency/red-noise structure relative to high-frequency fluctuations.",
     crossoverFrequency: "Frequency where the fitted power-law component equals the fitted white-noise floor. Out-of-band values are stored but not drawn as an in-band marker.",
     crossoverBand: "Yellow band showing the stored diagnostic crossover interval after propagating the fitted PSD covariance. The band is clipped to the plotted frequency range and should not be read as a publishable confidence interval.",
-    fitburstCrossCheck: "Smallest fitted component width from the optional fitburst model. This is model-dependent and should be compared with non-parametric width estimates.",
+    modelFitCrossCheck: "Smallest fitted component width from the optional model fit. This is model-dependent and should be compared with non-parametric width estimates.",
     segmentLength: "Time span used for each averaged periodogram segment. Longer segments improve frequency resolution but reduce the number of averages.",
     segments: "Number of independent event-profile chunks used for the averaged PSD. More segments reduce noise but require shorter segment length.",
     frequencyResolution: "Spacing between averaged PSD frequency bins, set by the segment length.",
@@ -3959,7 +4238,7 @@ function syncDmPlots() {
 }
 
 function syncFittingPlot() {
-  const scatteringFit = state.view?.results?.diagnostics?.scattering_fit
+  const modelFit = state.view?.results?.diagnostics?.model_fit
   if (state.activeAnalysisTab !== "fitting") {
     fitGuessPlot.classList.add("is-empty")
     Plotly.purge(fitGuessPlot)
@@ -3967,7 +4246,7 @@ function syncFittingPlot() {
     return
   }
   renderFitGuessPlot(state.view)
-  if (!scatteringFit) {
+  if (!modelFit) {
     fittingSpectrumPlot.classList.add("is-empty")
     Plotly.purge(fittingSpectrumPlot)
     fittingSpectrumPlot.replaceChildren()
@@ -3976,8 +4255,8 @@ function syncFittingPlot() {
     fittingProfilePlot.replaceChildren()
     return
   }
-  renderFittingSpectrumPlot(scatteringFit)
-  renderFittingProfilePlot(scatteringFit)
+  renderFittingSpectrumPlot(modelFit)
+  renderFittingProfilePlot(modelFit)
 }
 
 function syncAcfPlot() {
@@ -4423,7 +4702,7 @@ function renderScatteringParameterTable(initialParameters, bestfitParameters, un
     ["Log Amplitude", "amplitude", 1.0, "", "component"],
     ["Spectral Index", "spectral_index", 1.0, "", "component"],
     ["Spectral Running", "spectral_running", 1.0, "", "component"],
-    ["Shared Scattering Tau", "scattering_timescale", 1e3, "ms", "global"],
+    ["Scattering Timescale", "scattering_timescale", 1e3, "ms", "global"],
     ["Shared DM", "dm", 1.0, "pc/cm³", "global"],
     ["Shared DM Index", "dm_index", 1.0, "", "global"],
     ["Shared Scattering Index", "scattering_index", 1.0, "", "global"],
@@ -4870,16 +5149,16 @@ function updateControlStates() {
     control.disabled = isBusy
   }
 
-  const fitGuessSource = state.view?.fitburst_guess?.source
+  const fitGuessSource = state.view?.model_fit_guess?.source
   const fitGuessFromAnnotations = fitGuessSource === "component_regions" || fitGuessSource === "manual_peaks"
   if (!hasPreviousFit && fitSeedPreviousInput.checked) {
     fitSeedPreviousInput.checked = false
     updateFitParameterSummary()
   }
   fitComponentsInput.disabled = !hasSession || isBusy || (fitGuessFromAnnotations && !fitSeedPreviousInput.checked)
-  fitProfileSelect.disabled = !hasSession || isBusy
   fitSeedPreviousInput.disabled = !hasSession || isBusy || !hasPreviousFit
   fitScintillationInput.disabled = !hasSession || isBusy
+  syncScintillationParameterControls(!hasSession || isBusy)
   notesInput.disabled = !hasSession || isBusy
   dmMetricInput.disabled = !hasSession || isBusy
   exportPlotPng.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("plots")
@@ -4893,7 +5172,7 @@ function updateControlStates() {
   loadButton.disabled = isBusy || !hasBurstPath || !hasRequiredDm
   setDmButton.disabled = !hasSession || isBusy || !hasRequiredDm
   optimizeDmButton.disabled = !hasSession || isBusy || !hasRequiredDm
-  fitScatteringButton.disabled = !hasSession || isBusy || !hasFitParameters
+  fitModelButton.disabled = !hasSession || isBusy || !hasFitParameters
   applyBestDmButton.disabled = !hasSession || isBusy || !hasBestDm
   snapshotDirectorySelect.disabled = isBusy || state.snapshotLibrary.length === 0
   snapshotFileSelect.disabled = isBusy || snapshotsForDirectory(state.selectedSnapshotDirectory).length === 0
@@ -4940,7 +5219,7 @@ function busyButtonForAction(action) {
   if (action === "compute_properties") return computeButton
   if (action === "auto_mask_jess") return jessButton
   if (action === "optimize_dm") return optimizeDmButton
-  if (action === "fit_scattering") return fitScatteringButton
+  if (action === "fit_model") return fitModelButton
   if (action === "run_temporal_structure_analysis") return runSpectralButton
   if (action === "run_spectral_analysis") return runSpectralButton
   if (action === "export_results") return buildExportButton
@@ -4962,7 +5241,7 @@ function busyButtonText(action) {
   if (action === "compute_properties") return "Computing..."
   if (action === "auto_mask_jess") return "Masking..."
   if (action === "optimize_dm") return "Sweeping DM..."
-  if (action === "fit_scattering") return "Fitting..."
+  if (action === "fit_model") return "Fitting..."
   if (action === "run_temporal_structure_analysis") return "Running..."
   if (action === "run_spectral_analysis") return "Running..."
   if (action === "export_results") return "Building..."
@@ -4995,7 +5274,7 @@ function actionBusyText(action) {
     optimize_dm: "Sweeping DM",
     compute_widths: "Computing width comparison",
     accept_width_result: "Accepting width result",
-    fit_scattering: "Running scattering fit",
+    fit_model: "Running model fit",
     run_temporal_structure_analysis: "Running temporal structure",
     run_spectral_analysis: "Running power spectrum",
     export_results: "Building export bundle",
@@ -5017,7 +5296,7 @@ function actionSuccessText(action) {
     optimize_dm: "DM sweep completed",
     compute_widths: "Width comparison updated",
     accept_width_result: "Accepted width updated",
-    fit_scattering: "Scattering fit completed",
+    fit_model: "Model fit completed",
     run_temporal_structure_analysis: "Temporal structure updated",
     run_spectral_analysis: "Power spectrum updated",
     export_results: "Export bundle built",
@@ -5328,7 +5607,7 @@ function fitStatusTone(status) {
   return "warning"
 }
 
-function scatteringStatusTone(status) {
+function modelFitStatusTone(status) {
   if (status === "ok") return "success"
   if (status === "fitburst_unavailable") return "error"
   return "warning"
@@ -5395,29 +5674,33 @@ function fitStatusCopy(status) {
   return labels[status] || "Review the sampled S/N curve before applying a new DM."
 }
 
-function scatteringStatusLabel(status) {
+function modelFitStatusLabel(status) {
   const labels = {
-    ok: "Scattering fit accepted",
+    ok: "Model fit accepted",
     fitburst_unavailable: "fitburst is unavailable",
     insufficient_data: "Selected-band data are unavailable",
     insufficient_time_bins: "Selection is too short for fitting",
+    fit_window_too_large: "Fit window is too large",
     insufficient_channels: "Too few usable channels",
     insufficient_offpulse: "No contiguous off-pulse region",
     insufficient_signal: "Event signal is too weak for fitting",
-    fit_failed: "Scattering fit failed",
+    evaluation_limit_exceeded: "Evaluation budget reached",
+    fit_failed: "Model fit failed",
   }
-  return labels[status] || "Scattering fit unavailable"
+  return labels[status] || "Model fit unavailable"
 }
 
-function scatteringStatusCopy(status) {
+function modelFitStatusCopy(status) {
   const labels = {
-    ok: "The model fit uses fitburst on the current selected band and reports intrinsic width and scattering time as secondary, model-based diagnostics.",
+    ok: "The model fit used the current selected band and reports intrinsic width and scattering time as secondary, model-based diagnostics.",
     fitburst_unavailable: "Install the optional fitburst dependency to enable model-based burst fitting in FLITS.",
-    insufficient_data: "Widen the selected spectral window or reset the current crop before running a scattering fit.",
+    insufficient_data: "Widen the selected spectral window or reset the current crop before running a model fit.",
     insufficient_time_bins: "Use a wider crop or event window so the burst and off-pulse baseline are both represented in the fit.",
+    fit_window_too_large: "Narrow the event window or increase time/frequency downsampling before running the model fit.",
     insufficient_channels: "Keep at least four unmasked channels inside the selected spectral window for a stable fit.",
     insufficient_offpulse: "The fitter needs a contiguous off-pulse block to estimate per-channel weights from the current crop.",
     insufficient_signal: "The selected event window does not support a stable model fit. Recenter or widen the event window before retrying.",
+    evaluation_limit_exceeded: "The optimizer used its evaluation budget before converging. Try fewer fit parameters, better initial guesses, a narrower event window, or a larger Max Evaluations budget.",
     fit_failed: "The current selection or initial guesses did not converge to a stable fit. Check masking and event placement before retrying.",
   }
   return labels[status] || "Review the current selection before trusting the model fit."

@@ -373,69 +373,124 @@
             <section class="analysis-panel" id="analysisFittingPanel" data-tab-panel="fitting" role="tabpanel" hidden>
               <div class="analysis-panel-head">
                 <h4>Model Fitting</h4>
-                <p>Run a fitburst-backed 2D model fit on the current selected event window, crop, mask, and spectral window.</p>
+                <p>Run a 2D model fit on the current selected event window, crop, mask, and spectral window.</p>
               </div>
               <div class="field-row">
-                <label class="field">
-                  <span>Fit Profile <span class="tooltip-icon" data-tooltip="FLITS scattering preserves the default selected-event scattering fit. Advanced fitburst-like enables weighted iterative fitting and leaves spectral terms free.">?</span></span>
-                  <select id="fitProfileSelect">
-                    <option value="flits_scattering">FLITS scattering</option>
-                    <option value="advanced_fitburst_like">Advanced fitburst-like</option>
-                  </select>
-                </label>
                 <label class="field">
                   <span>Components <span class="tooltip-icon" data-tooltip="Number of gaussian components to model in this fit.">?</span></span>
                   <input id="fitComponentsInput" type="number" min="1" max="10" step="1" value="1">
                 </label>
-              </div>
-              <div id="fitProfileSummary" class="fit-profile-summary"></div>
-              <div class="fit-advanced-options">
-                <label class="checkbox-label" data-tooltip="Seed this run from the previous successful FLITS fit in this session when available. External fitburst solution JSON is not imported.">
-                  <input id="fitSeedPreviousInput" type="checkbox"> Seed from Previous Fit
+                <label class="field">
+                  <span>Detect Threshold <span class="tooltip-icon" data-tooltip="Relative profile height used by Detect Components. Larger values keep only stronger peaks.">?</span></span>
+                  <input id="fitDetectThresholdInput" type="number" min="0.05" max="1" step="0.05" value="0.35">
                 </label>
-                <label class="checkbox-label" data-tooltip="Use fitburst scintillation mode. Amplitude and spectral-shape terms are estimated per channel and are not optimized as global spectral parameters.">
-                  <input id="fitScintillationInput" type="checkbox"> Scintillation Mode
+                <label class="field">
+                  <span>Peak Distance <span class="tooltip-icon" data-tooltip="Minimum separation between detected component peaks, in time bins.">?</span></span>
+                  <input id="fitDetectDistanceInput" type="number" min="1" max="512" step="1" value="5">
                 </label>
               </div>
-              <div id="fitGuessContent" class="fit-guess-content">
-                <div class="empty-state">Load a session to inspect fitburst initial guesses.</div>
-              </div>
-              <div class="plot fitting-guess-plot is-empty" id="fitGuessPlot"></div>
               <div class="field" style="grid-column: 1 / -1; margin-top: 4px;">
-                <span>Fixed Parameters <span class="tooltip-icon" data-tooltip="Checked parameters will not be varied by the fitburst optimizer.">?</span></span>
-                <div class="checkbox-grid" id="fitFixedParamsContainer">
-                  <label class="checkbox-label" data-tooltip="Usually fixed because data is already dedispersed.">
-                    <input type="checkbox" name="fixed_param" value="dm" checked> DM
+                <span>Parameters to Fit <span class="tooltip-icon" data-tooltip="Checked parameters will be varied by the optimizer. Leave poorly constrained terms fixed unless the data can support them.">?</span></span>
+                <div class="checkbox-grid" id="fitFreeParamsContainer">
+                  <label class="checkbox-label" data-tooltip="Overall amplitude of each component. Disabled in scintillation mode.">
+                    <input type="checkbox" name="free_param" value="amplitude" checked> Amplitude
                   </label>
-                  <label class="checkbox-label" data-tooltip="Frequency dependence of DM. Expected to be -2.0.">
-                    <input type="checkbox" name="fixed_param" value="dm_index" checked> DM Index
+                  <label class="checkbox-label" data-tooltip="Arrival time or centroid of each component.">
+                    <input type="checkbox" name="free_param" value="arrival_time" checked> Arrival Time
                   </label>
-                  <label class="checkbox-label" data-tooltip="Frequency dependence of scattering. Expected to be -4.0.">
-                    <input type="checkbox" name="fixed_param" value="scattering_index" checked> Scattering Index
+                  <label class="checkbox-label" data-tooltip="Intrinsic Gaussian width of each component.">
+                    <input type="checkbox" name="free_param" value="burst_width" checked> Intrinsic Width
                   </label>
-                  <label class="checkbox-label" data-tooltip="Power-law index of the spectrum across the band.">
-                    <input type="checkbox" name="fixed_param" value="spectral_index" checked> Spectral Index
+                  <label class="checkbox-label" data-tooltip="Shared exponential scattering timescale.">
+                    <input type="checkbox" name="free_param" value="scattering_timescale" checked> Scattering Timescale
                   </label>
-                  <label class="checkbox-label" data-tooltip="Running of the spectral index.">
-                    <input type="checkbox" name="fixed_param" value="spectral_running" checked> Spectral Running
+                  <label class="checkbox-label" data-tooltip="Residual DM offset around the session DM.">
+                    <input type="checkbox" name="free_param" value="dm"> DM Offset
                   </label>
-                  <label class="checkbox-label" data-tooltip="Overall amplitude of the component.">
-                    <input type="checkbox" name="fixed_param" value="amplitude"> Amplitude
+                  <label class="checkbox-label" data-tooltip="Frequency dependence of DM. Usually fixed at -2.0.">
+                    <input type="checkbox" name="free_param" value="dm_index"> DM Index
                   </label>
-                  <label class="checkbox-label" data-tooltip="Arrival time (centroid) of the burst component.">
-                    <input type="checkbox" name="fixed_param" value="arrival_time"> Arrival Time
+                  <label class="checkbox-label" data-tooltip="Frequency dependence of scattering. Usually fixed at -4.0 unless the burst strongly constrains it.">
+                    <input type="checkbox" name="free_param" value="scattering_index"> Scattering Index
                   </label>
-                  <label class="checkbox-label" data-tooltip="Intrinsic Gaussian width of the component.">
-                    <input type="checkbox" name="fixed_param" value="burst_width"> Width
+                  <label class="checkbox-label" data-tooltip="Power-law spectral index across the band. Disabled in scintillation mode.">
+                    <input type="checkbox" name="free_param" value="spectral_index"> Spectral Index
                   </label>
-                  <label class="checkbox-label" data-tooltip="Exponential scattering timescale (tau).">
-                    <input type="checkbox" name="fixed_param" value="scattering_timescale"> Scattering Timescale
+                  <label class="checkbox-label" data-tooltip="Running of the spectral index. Disabled in scintillation mode.">
+                    <input type="checkbox" name="free_param" value="spectral_running"> Spectral Running
                   </label>
                 </div>
-                <div id="fitParameterSummary" class="fit-parameter-summary"></div>
               </div>
+              <div id="fitParameterSummary" class="fit-parameter-summary"></div>
+              <div id="fitModelSummary" class="fit-model-summary"></div>
+              <div class="fit-advanced-options">
+                <label class="checkbox-label" data-tooltip="Seed this run from the previous successful model fit in this session when available.">
+                  <input id="fitSeedPreviousInput" type="checkbox"> Seed from Previous Fit
+                </label>
+                <label class="checkbox-label" data-tooltip="Derive per-channel amplitudes from the data. Amplitude and spectral-shape terms are not optimizer parameters in this mode.">
+                  <input id="fitScintillationInput" type="checkbox"> Scintillation
+                </label>
+                <button class="secondary-button" id="fitDetectComponentsButton" type="button">Detect Components</button>
+              </div>
+              <div id="fitGuessContent" class="fit-guess-content">
+                <div class="empty-state">Load a session to inspect model initial guesses.</div>
+              </div>
+              <div class="plot fitting-guess-plot is-empty" id="fitGuessPlot"></div>
+              <details class="fit-advanced-panel">
+                <summary>Advanced Fit Setup</summary>
+                <div class="field-row">
+                  <label class="field">
+                    <span>Weighting <span class="tooltip-icon" data-tooltip="Choose how channel weights are estimated for the solver.">?</span></span>
+                    <select id="fitWeightingModeSelect">
+                      <option value="none">None</option>
+                      <option value="auto">Auto off-pulse</option>
+                      <option value="fit_window">Fit window</option>
+                      <option value="manual_range">Manual range</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Weight Start Bin</span>
+                    <input id="fitWeightStartInput" type="number" min="0" step="1">
+                  </label>
+                  <label class="field">
+                    <span>Weight End Bin</span>
+                    <input id="fitWeightEndInput" type="number" min="1" step="1">
+                  </label>
+                  <label class="field">
+                    <span>Optimizer Passes <span class="tooltip-icon" data-tooltip="Number of consecutive optimizer passes. Each pass restarts from the previous best fit; this is separate from Max Evaluations.">?</span></span>
+                    <input id="fitIterationsInput" type="number" min="1" max="20" step="1" value="1">
+                  </label>
+                  <label class="field">
+                    <span>Max Evaluations <span class="tooltip-icon" data-tooltip="Maximum residual evaluations per optimizer pass. Auto uses SciPy's default, 100 x free parameter count.">?</span></span>
+                    <input id="fitMaxEvaluationsInput" type="number" min="1" max="50000" step="1" placeholder="auto">
+                  </label>
+                  <label class="field">
+                    <span>Time Upsampling</span>
+                    <input id="fitTimeUpsampleInput" type="number" min="1" max="32" step="1" value="1">
+                  </label>
+                  <label class="field">
+                    <span>Frequency Upsampling</span>
+                    <input id="fitFreqUpsampleInput" type="number" min="1" max="32" step="1" value="1">
+                  </label>
+                  <label class="field">
+                    <span>Reference Frequency (MHz)</span>
+                    <input id="fitRefFreqInput" type="number" min="0" step="0.001">
+                  </label>
+                </div>
+                <div class="fit-advanced-options">
+                  <label class="checkbox-label" data-tooltip="Model a folded profile with pulse wrapping.">
+                    <input id="fitFoldedInput" type="checkbox"> Folded Profile
+                  </label>
+                  <label class="checkbox-label" data-tooltip="Use the analytic Jacobian provided by the model fitter.">
+                    <input id="fitExactJacobianInput" type="checkbox" checked> Exact Jacobian
+                  </label>
+                  <button class="secondary-button" id="fitImportSolutionButton" type="button">Import Solution</button>
+                  <button class="secondary-button" id="fitExportSolutionButton" type="button">Export Solution</button>
+                  <input id="fitSolutionInput" type="file" accept=".json,application/json" hidden>
+                </div>
+              </details>
               <div class="export-actions">
-                <button class="primary-button" id="fitScatteringButton">Run 2D Model Fit</button>
+                <button class="primary-button" id="fitModelButton">Run Model Fit</button>
               </div>
               <div id="fittingContent" class="results-content">
                 <div class="empty-state">No 2D model fit yet. Run the fit on the current selection to inspect model width, scattering time, and residuals.</div>

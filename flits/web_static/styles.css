@@ -1528,7 +1528,7 @@ button.is-busy::after {
   margin-top: 12px;
 }
 
-.fit-profile-summary,
+.fit-model-summary,
 .fit-parameter-summary {
   display: grid;
   gap: 6px;
@@ -1537,7 +1537,7 @@ button.is-busy::after {
   line-height: 1.45;
 }
 
-.fit-profile-summary {
+.fit-model-summary {
   margin-top: 2px;
 }
 
