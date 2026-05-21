@@ -1005,7 +1005,7 @@ def compute_burst_measurements(
         temporal_acf_lags_ms=np.asarray(temporal_lags_ms, dtype=float),
         spectral_acf=np.asarray(spectral_acf, dtype=float),
         spectral_acf_lags_mhz=np.asarray(spectral_lags_mhz, dtype=float),
-        scattering_fit=None,
+        model_fit=None,
     )
 
     spectral_extent_mhz = 0.0

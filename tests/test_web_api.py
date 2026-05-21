@@ -346,9 +346,17 @@ class WebApiTest(unittest.TestCase):
         self.assertIn('data-analysis-tab="temporal"', index_html)
         self.assertIn('data-analysis-tab="export"', index_html)
         self.assertIn('id="dmResidualPlot"', index_html)
-        self.assertIn('id="fitScatteringButton"', index_html)
-        self.assertIn('id="fitProfileSelect"', index_html)
-        self.assertIn("advanced_fitburst_like", index_html)
+        self.assertIn('id="fitModelButton"', index_html)
+        self.assertIn("Parameters to Fit", index_html)
+        self.assertNotIn('id="fitParameterGroupsContainer"', index_html)
+        self.assertIn('id="fitFreeParamsContainer"', index_html)
+        self.assertIn('id="fitMaxEvaluationsInput"', index_html)
+        self.assertIn("Optimizer Passes", index_html)
+        self.assertIn("Max Evaluations", index_html)
+        self.assertIn('id="fitWeightingModeSelect"', index_html)
+        self.assertIn('id="fitDetectComponentsButton"', index_html)
+        self.assertNotIn("advanced_fitburst_like", index_html)
+        self.assertNotIn('id="fitProfileSelect"', index_html)
         self.assertIn('id="fitSeedPreviousInput"', index_html)
         self.assertIn('id="fitScintillationInput"', index_html)
         self.assertIn('id="fitGuessContent"', index_html)
@@ -366,10 +374,17 @@ class WebApiTest(unittest.TestCase):
         self.assertIn('id="buildExportButton"', index_html)
         self.assertIn('id="exportPreviewContent"', index_html)
         self.assertIn("collectFitComponentGuesses", app_js)
-        self.assertIn("fit_profile", app_js)
+        self.assertIn("free_parameters", app_js)
+        self.assertIn("collectFitSolverConfig", app_js)
+        self.assertNotIn("fit_profile", app_js)
+        self.assertNotIn("FIT_PARAMETER_GROUPS", app_js)
         self.assertIn("seed_from_previous_fit", app_js)
         self.assertIn("scintillation", app_js)
-        self.assertIn("Shared Scattering Tau", app_js)
+        self.assertIn("Scattering Timescale", app_js)
+        self.assertIn("max_function_evaluations", app_js)
+        self.assertIn("evaluation_limit_exceeded", app_js)
+        self.assertIn("fit_window_too_large", app_js)
+        self.assertIn("Fit window is too large", app_js)
         self.assertIn("renderFitGuessPlot", app_js)
         self.assertIn("component_guesses", app_js)
         self.assertIn('id="exportPreviewThumbs"', index_html)
@@ -675,10 +690,10 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(context.exception.status_code, 400)
         self.assertIn("Unsupported DM metric", context.exception.detail)
 
-    def test_session_action_fit_scattering_dispatches_to_session_method(self) -> None:
+    def test_session_action_fit_model_dispatches_to_session_method(self) -> None:
         session_id = "synthetic-fit-dispatch"
         session = _synthetic_session()
-        session.fit_scattering = Mock(return_value=None)
+        session.fit_model = Mock(return_value=None)
         payload = {
             "num_components": 1,
             "component_guesses": [
@@ -694,15 +709,15 @@ class WebApiTest(unittest.TestCase):
         try:
             session_action(
                 session_id,
-                ActionRequest(type="fit_scattering", payload=payload),
+                ActionRequest(type="fit_model", payload=payload),
             )
         finally:
             SESSIONS.pop(session_id, None)
 
-        session.fit_scattering.assert_called_once_with(payload)
+        session.fit_model.assert_called_once_with(payload)
 
-    def test_session_action_fit_scattering_rejects_invalid_fixed_parameters(self) -> None:
-        session_id = "synthetic-fit-invalid-fixed-params"
+    def test_session_action_fit_model_rejects_invalid_free_parameters(self) -> None:
+        session_id = "synthetic-fit-invalid-free-params"
         session = _synthetic_session()
         SESSIONS[session_id] = session
         try:
@@ -710,8 +725,8 @@ class WebApiTest(unittest.TestCase):
                 session_action(
                     session_id,
                     ActionRequest(
-                        type="fit_scattering",
-                        payload={"fixed_parameters": ["dm", "ref_freq"]},
+                        type="fit_model",
+                        payload={"free_parameters": ["dm", "ref_freq"]},
                     ),
                 )
         finally:
@@ -861,7 +876,7 @@ class WebApiTest(unittest.TestCase):
             nyquist_hz=500.0,
             min_structure_ms_primary=2.0,
             min_structure_ms_wavelet=4.0,
-            fitburst_min_component_ms=3.0,
+            model_fit_min_component_ms=3.0,
             power_law_fit_status="underconstrained",
             power_law_fit_message="Need at least 12 bins.",
             raw_periodogram_freq_hz=np.array([62.5, 125.0], dtype=float),
@@ -916,7 +931,7 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(temporal["segment_length_ms"], 16.0)
         self.assertEqual(temporal["min_structure_ms_primary"], 2.0)
         self.assertEqual(temporal["min_structure_ms_wavelet"], 4.0)
-        self.assertEqual(temporal["fitburst_min_component_ms"], 3.0)
+        self.assertEqual(temporal["model_fit_min_component_ms"], 3.0)
         self.assertEqual(temporal["raw_periodogram_freq_hz"], [62.5, 125.0])
         self.assertEqual(temporal["averaged_psd_power"], [1.5, 0.75])
         self.assertEqual(temporal["matched_filter_scales_ms"], [1.0, 2.0, 4.0])

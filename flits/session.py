@@ -15,8 +15,8 @@ from flits.analysis.spectral.core import run_averaged_spectral_analysis
 from flits.analysis.morphology import compute_width_analysis
 from flits.analysis.temporal.core import run_temporal_structure_analysis, temporal_to_spectral_result
 from flits.exports import MAX_EXPORT_SNAPSHOTS, StoredExportSnapshot, create_export_snapshot, preview_export
-from flits.analysis.fitting import fit_scattering_selected_band
-from flits.analysis.fitting.fitburst_adapter import FitburstRequestConfig
+from flits.analysis.fitting import fit_model_selected_band
+from flits.analysis.fitting.fitburst_adapter import ModelFitRequestConfig
 from flits.measurements import (
     MeasurementContext,
     _offpulse_windows_ms,
@@ -981,7 +981,7 @@ class BurstSession:
             diagnostics.status,
         )
 
-    def _fitburst_guess_payload(
+    def _model_fit_guess_payload(
         self,
         grid: ReducedAnalysisGrid,
         context: MeasurementContext,
@@ -996,7 +996,7 @@ class BurstSession:
         ):
             return {
                 "status": "unavailable",
-                "message": "No selected event data are available for fitburst initial guesses.",
+                "message": "No selected event data are available for model initial guesses.",
                 "source": "unavailable",
                 "component_count": 0,
                 "component_guesses": [],
@@ -1069,7 +1069,7 @@ class BurstSession:
             else:
                 width_ms = max(float(grid.effective_tsamp_ms), duration_ms / 6.0)
             tau_ms = max(float(grid.effective_tsamp_ms), width_ms / 4.0)
-            log_amplitude = self._fitburst_log_amplitude(
+            log_amplitude = self._model_fit_log_amplitude(
                 selected_band=selected_band,
                 offpulse_bins=context.offpulse_bins,
                 start_bin=start,
@@ -1149,11 +1149,11 @@ class BurstSession:
 
         return {
             "status": "ok" if guesses else "unavailable",
-            "message": self._fitburst_guess_message(source, len(guesses)),
+            "message": self._model_fit_guess_message(source, len(guesses)),
             "source": source,
             "component_count": len(guesses),
             "component_guesses": guesses,
-            "initial_parameters": self._fitburst_initial_parameters_from_component_guesses(
+            "initial_parameters": self._model_fit_initial_parameters_from_component_guesses(
                 guesses,
                 time_axis_ms=time_axis_ms,
                 freqs_mhz=selected_freqs,
@@ -1164,7 +1164,7 @@ class BurstSession:
         }
 
     @staticmethod
-    def _fitburst_guess_message(source: str, component_count: int) -> str:
+    def _model_fit_guess_message(source: str, component_count: int) -> str:
         if source == "component_regions":
             return f"{component_count} component guess{'es' if component_count != 1 else ''} from component regions."
         if source == "manual_peaks":
@@ -1172,7 +1172,7 @@ class BurstSession:
         return "Automatic single-component guess from the strongest event peak."
 
     @staticmethod
-    def _fitburst_log_amplitude(
+    def _model_fit_log_amplitude(
         *,
         selected_band: np.ndarray,
         offpulse_bins: np.ndarray,
@@ -1205,7 +1205,7 @@ class BurstSession:
             peak_value = float(np.nanmax(profile_window)) if profile_window.size and np.isfinite(profile_window).any() else 1.0
         return float(np.log10(max(peak_value, 1e-2)))
 
-    def _fitburst_initial_parameters_from_component_guesses(
+    def _model_fit_initial_parameters_from_component_guesses(
         self,
         component_guesses: list[dict[str, Any]],
         *,
@@ -1218,59 +1218,89 @@ class BurstSession:
         freqs_mhz = np.asarray(freqs_mhz, dtype=float)
         if time_axis_ms.size == 0:
             if validate:
-                raise ValueError("Cannot build fitburst guesses without a time axis.")
+                raise ValueError("Cannot build model fit guesses without a time axis.")
             return {}
         if freqs_mhz.size == 0:
             if validate:
-                raise ValueError("Cannot build fitburst guesses without selected frequencies.")
+                raise ValueError("Cannot build model fit guesses without selected frequencies.")
             return {}
         ref_freq = float(np.min(freqs_mhz))
         base_time_ms = float(time_axis_ms[0])
 
-        rows: list[tuple[float, float, float, float]] = []
+        rows: list[dict[str, float]] = []
         for index, guess in enumerate(component_guesses, start=1):
             try:
                 arrival_ms = float(guess.get("arrival_time_ms"))
                 width_ms = float(guess.get("width_ms"))
                 tau_ms = float(guess.get("tau_ms"))
                 log_amplitude = float(guess.get("log_amplitude"))
+                dm = float(guess.get("dm", 0.0))
+                dm_index = float(guess.get("dm_index", -2.0))
+                scattering_index = float(guess.get("scattering_index", -4.0))
+                spectral_index = float(guess.get("spectral_index", 0.0))
+                spectral_running = float(guess.get("spectral_running", 0.0))
+                ref_freq_guess = float(guess.get("ref_freq_mhz", ref_freq))
             except (TypeError, ValueError, AttributeError) as exc:
                 if validate:
                     raise ValueError(f"Component {index} has a non-numeric initial guess.") from exc
                 continue
 
-            values = (arrival_ms, width_ms, tau_ms, log_amplitude)
+            values = (
+                arrival_ms,
+                width_ms,
+                tau_ms,
+                log_amplitude,
+                dm,
+                dm_index,
+                scattering_index,
+                spectral_index,
+                spectral_running,
+                ref_freq_guess,
+            )
             if not all(np.isfinite(value) for value in values):
                 if validate:
                     raise ValueError(f"Component {index} has a non-finite initial guess.")
                 continue
-            if width_ms <= 0 or tau_ms <= 0:
+            if width_ms <= 0 or tau_ms <= 0 or ref_freq_guess <= 0:
                 if validate:
-                    raise ValueError(f"Component {index} width and tau guesses must be positive.")
+                    raise ValueError(f"Component {index} width, tau, and reference frequency guesses must be positive.")
                 continue
             if event_window_ms is not None and not (event_window_ms[0] <= arrival_ms <= event_window_ms[1]):
                 if validate:
                     raise ValueError(f"Component {index} arrival guess is outside the selected event window.")
                 continue
-            rows.append((arrival_ms, width_ms, tau_ms, log_amplitude))
+            rows.append(
+                {
+                    "arrival_ms": arrival_ms,
+                    "width_ms": width_ms,
+                    "tau_ms": tau_ms,
+                    "log_amplitude": log_amplitude,
+                    "dm": dm,
+                    "dm_index": dm_index,
+                    "scattering_index": scattering_index,
+                    "spectral_index": spectral_index,
+                    "spectral_running": spectral_running,
+                    "ref_freq_mhz": ref_freq_guess,
+                }
+            )
 
         if validate and not rows:
             raise ValueError("At least one component initial guess is required.")
 
         return {
-            "amplitude": [float(row[3]) for row in rows],
-            "arrival_time": [float((row[0] - base_time_ms) / 1e3) for row in rows],
-            "burst_width": [float(row[1] / 1e3) for row in rows],
-            "dm": [0.0] * len(rows),
-            "dm_index": [-2.0] * len(rows),
-            "ref_freq": [ref_freq] * len(rows),
-            "scattering_timescale": [float(row[2] / 1e3) for row in rows],
-            "scattering_index": [-4.0] * len(rows),
-            "spectral_index": [0.0] * len(rows),
-            "spectral_running": [0.0] * len(rows),
+            "amplitude": [float(row["log_amplitude"]) for row in rows],
+            "arrival_time": [float((row["arrival_ms"] - base_time_ms) / 1e3) for row in rows],
+            "burst_width": [float(row["width_ms"] / 1e3) for row in rows],
+            "dm": [float(row["dm"]) for row in rows],
+            "dm_index": [float(row["dm_index"]) for row in rows],
+            "ref_freq": [float(row["ref_freq_mhz"]) for row in rows],
+            "scattering_timescale": [float(row["tau_ms"] / 1e3) for row in rows],
+            "scattering_index": [float(row["scattering_index"]) for row in rows],
+            "spectral_index": [float(row["spectral_index"]) for row in rows],
+            "spectral_running": [float(row["spectral_running"]) for row in rows],
         }
 
-    def _fitburst_initial_parameters_from_previous_fit(
+    def _model_fit_initial_parameters_from_previous_fit(
         self,
         previous_fit: Any | None,
         *,
@@ -1294,26 +1324,46 @@ class BurstSession:
         if time_axis_ms.size == 0 or freqs_mhz.size == 0:
             return None
         base_time_ms = float(time_axis_ms[0])
+        event_duration_sec = max(0.0, float(event_window_ms[1] - event_window_ms[0]) / 1e3)
         sanitized: dict[str, list[float]] = {}
         for key, fallback_values in defaults.items():
-            fallback = self._coerce_fitburst_parameter_values(fallback_values, fallback_values, component_count)
+            fallback = self._coerce_model_fit_parameter_values(fallback_values, fallback_values, component_count)
             if key == "ref_freq":
                 sanitized[key] = [float(np.min(freqs_mhz))] * component_count
                 continue
 
-            values = self._coerce_fitburst_parameter_values(
+            values = self._coerce_model_fit_parameter_values(
                 previous_parameters.get(key),
                 fallback,
                 component_count,
             )
             if key in {"burst_width", "scattering_timescale"}:
                 values = [
-                    value if np.isfinite(value) and value > 0.0 else fallback[index]
+                    value
+                    if np.isfinite(value)
+                    and value > 0.0
+                    and (event_duration_sec <= 0.0 or value <= event_duration_sec)
+                    else fallback[index]
+                    for index, value in enumerate(values)
+                ]
+            elif key == "dm_index":
+                values = [
+                    value if np.isfinite(value) and -4.0 <= value <= -1.0 else fallback[index]
+                    for index, value in enumerate(values)
+                ]
+            elif key == "scattering_index":
+                values = [
+                    value if np.isfinite(value) and -8.0 <= value <= -0.5 else fallback[index]
+                    for index, value in enumerate(values)
+                ]
+            elif key in {"spectral_index", "spectral_running"}:
+                values = [
+                    value if np.isfinite(value) and -10.0 <= value <= 10.0 else fallback[index]
                     for index, value in enumerate(values)
                 ]
             sanitized[key] = values
 
-        arrivals = self._coerce_fitburst_parameter_values(
+        arrivals = self._coerce_model_fit_parameter_values(
             previous_parameters.get("arrival_time"),
             defaults.get("arrival_time", []),
             component_count,
@@ -1336,7 +1386,7 @@ class BurstSession:
         return sanitized
 
     @staticmethod
-    def _coerce_fitburst_parameter_values(
+    def _coerce_model_fit_parameter_values(
         values: Any,
         defaults: Any,
         num_components: int,
@@ -1487,7 +1537,7 @@ class BurstSession:
                     "y_mhz": _jsonable_array(grid.freqs_mhz, digits=4),
                 },
             },
-            "fitburst_guess": self._fitburst_guess_payload(grid, context),
+            "model_fit_guess": self._model_fit_guess_payload(grid, context),
             "results": self.results.to_dict() if self.results is not None else None,
             "width_analysis": self.width_analysis.to_dict() if self.width_analysis is not None else None,
             "dm_optimization": self.dm_optimization.to_dict() if self.dm_optimization is not None else None,
@@ -2074,7 +2124,7 @@ class BurstSession:
             time_axis_ms=grid.time_axis_ms,
             timing_context=self._timing_context(),
         )
-        if previous_results is not None and previous_results.diagnostics.scattering_fit is not None:
+        if previous_results is not None and previous_results.diagnostics.model_fit is not None:
             fit_uncertainty_details = {
                 key: value
                 for key, value in previous_results.uncertainty_details.items()
@@ -2104,14 +2154,14 @@ class BurstSession:
                 uncertainty_details={**measurements.uncertainty_details, **fit_uncertainty_details},
                 diagnostics=replace(
                     measurements.diagnostics,
-                    scattering_fit=previous_results.diagnostics.scattering_fit,
+                    model_fit=previous_results.diagnostics.model_fit,
                 ),
             )
         self.results = measurements
         self._apply_width_analysis_to_results()
         return self.results
 
-    def fit_scattering(self, config_data: dict[str, Any] | None = None) -> BurstMeasurements:
+    def fit_model(self, config_data: dict[str, Any] | None = None) -> BurstMeasurements:
         if self.results is None:
             self.compute_properties()
         assert self.results is not None
@@ -2126,15 +2176,15 @@ class BurstSession:
             target_components = int(config_payload.get("num_components") or 1)
             if isinstance(component_guesses, list) and component_guesses:
                 target_components = int(config_payload.get("num_components", len(component_guesses)) or len(component_guesses))
-            guess_payload = self._fitburst_guess_payload(grid, context)
-            fallback_parameters = self._fitburst_initial_parameters_from_component_guesses(
+            guess_payload = self._model_fit_guess_payload(grid, context)
+            fallback_parameters = self._model_fit_initial_parameters_from_component_guesses(
                 guess_payload.get("component_guesses", []),
                 time_axis_ms=context.time_axis_ms,
                 freqs_mhz=selected_freqs,
             )
-            previous_fit = self.results.diagnostics.scattering_fit
+            previous_fit = self.results.diagnostics.model_fit
             event_window_ms = self._current_event_window_ms(context, tsamp_ms=grid.effective_tsamp_ms)
-            previous_parameters = self._fitburst_initial_parameters_from_previous_fit(
+            previous_parameters = self._model_fit_initial_parameters_from_previous_fit(
                 previous_fit,
                 defaults=fallback_parameters,
                 num_components=target_components,
@@ -2149,10 +2199,10 @@ class BurstSession:
                 component_guesses = None
             elif fallback_parameters and component_guesses is None:
                 config_payload["initial_parameters"] = fallback_parameters
-                config_payload["initial_parameter_source"] = "component_guesses"
+                config_payload["initial_parameter_source"] = "current_selection"
                 config_payload["num_components"] = target_components
             else:
-                config_payload["initial_parameter_source"] = "component_guesses" if component_guesses is not None else "adapter_default"
+                config_payload["initial_parameter_source"] = "current_selection"
 
         if component_guesses is not None:
             if not isinstance(component_guesses, list):
@@ -2161,7 +2211,7 @@ class BurstSession:
             if expected_components != len(component_guesses):
                 raise ValueError("Fit component count does not match the submitted initial guesses.")
             event_window_ms = self._current_event_window_ms(context, tsamp_ms=grid.effective_tsamp_ms)
-            config_payload["initial_parameters"] = self._fitburst_initial_parameters_from_component_guesses(
+            config_payload["initial_parameters"] = self._model_fit_initial_parameters_from_component_guesses(
                 component_guesses,
                 time_axis_ms=context.time_axis_ms,
                 freqs_mhz=selected_freqs,
@@ -2169,8 +2219,8 @@ class BurstSession:
                 event_window_ms=event_window_ms,
             )
             config_payload["num_components"] = len(component_guesses)
-            config_payload["initial_parameter_source"] = config_payload.get("initial_parameter_source", "component_guesses")
-        config = FitburstRequestConfig.from_dict(config_payload) if config_payload else None
+            config_payload["initial_parameter_source"] = config_payload.get("initial_parameter_source", "current_selection")
+        config = ModelFitRequestConfig.from_dict(config_payload) if config_payload else None
 
         peak_rel_bin = _primary_peak_bin(
             peak_bins_abs=grid.peak_bins,
@@ -2180,7 +2230,7 @@ class BurstSession:
             event_rel_end=context.event_rel_end,
         )
 
-        fit_result = fit_scattering_selected_band(
+        fit_result = fit_model_selected_band(
             selected_band=selected_band,
             freqs_mhz=selected_freqs,
             time_axis_ms=context.time_axis_ms,
@@ -2233,25 +2283,25 @@ class BurstSession:
             uncertainty_details=updated_uncertainty_details,
             diagnostics=replace(
                 self.results.diagnostics,
-                scattering_fit=fit_result.diagnostics,
+                model_fit=fit_result.diagnostics,
             ),
         )
         if self.temporal_structure is not None and fit_result.status == "ok":
-            updated_widths_ms = self._fitburst_component_widths_ms()
+            updated_widths_ms = self._model_fit_component_widths_ms()
             finite_widths = updated_widths_ms[np.isfinite(updated_widths_ms) & (updated_widths_ms > 0)]
             self.temporal_structure = replace(
                 self.temporal_structure,
-                fitburst_min_component_ms=(
+                model_fit_min_component_ms=(
                     None if finite_widths.size == 0 else float(np.min(finite_widths))
                 ),
             )
         self._apply_width_analysis_to_results()
         return self.results
 
-    def _fitburst_component_widths_ms(self) -> np.ndarray:
-        if self.results is None or self.results.diagnostics.scattering_fit is None:
+    def _model_fit_component_widths_ms(self) -> np.ndarray:
+        if self.results is None or self.results.diagnostics.model_fit is None:
             return np.array([], dtype=float)
-        bestfit = self.results.diagnostics.scattering_fit.bestfit_parameters or {}
+        bestfit = self.results.diagnostics.model_fit.bestfit_parameters or {}
         widths_sec = np.asarray(bestfit.get("burst_width", []), dtype=float)
         widths_sec = widths_sec[np.isfinite(widths_sec) & (widths_sec > 0)]
         return widths_sec * 1e3
@@ -2284,7 +2334,7 @@ class BurstSession:
                 float(np.min(context.spectral_axis_mhz)) if context.spectral_axis_mhz.size else 0.0,
                 float(np.max(context.spectral_axis_mhz)) if context.spectral_axis_mhz.size else 0.0,
             ],
-            fitburst_widths_ms=self._fitburst_component_widths_ms(),
+            model_fit_widths_ms=self._model_fit_component_widths_ms(),
             offpulse_series_runs=self._contiguous_profile_runs(
                 context.selected_profile_baselined,
                 context.offpulse_bins,

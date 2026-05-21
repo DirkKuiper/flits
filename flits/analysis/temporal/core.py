@@ -84,7 +84,7 @@ def _failure(
     tsamp_ms: float,
     min_structure_ms_primary: float | None = None,
     min_structure_ms_wavelet: float | None = None,
-    fitburst_min_component_ms: float | None = None,
+    model_fit_min_component_ms: float | None = None,
     raw_periodogram_freq_hz: np.ndarray | None = None,
     raw_periodogram_power: np.ndarray | None = None,
     matched_filter_scales_ms: np.ndarray | None = None,
@@ -110,7 +110,7 @@ def _failure(
         nyquist_hz=None,
         min_structure_ms_primary=min_structure_ms_primary,
         min_structure_ms_wavelet=min_structure_ms_wavelet,
-        fitburst_min_component_ms=fitburst_min_component_ms,
+        model_fit_min_component_ms=model_fit_min_component_ms,
         power_law_fit_status="unavailable",
         power_law_fit_message=message,
         raw_periodogram_freq_hz=np.asarray(
@@ -747,7 +747,7 @@ def run_temporal_structure_analysis(
     noise_sigma: float,
     event_window_ms: tuple[float, float],
     spectral_extent_mhz: tuple[float, float],
-    fitburst_widths_ms: np.ndarray | None = None,
+    model_fit_widths_ms: np.ndarray | None = None,
     offpulse_series_runs: Sequence[np.ndarray] | None = None,
     backend_loader: Callable[[], tuple[type[Any] | None, type[Any] | None, str | None]] = _load_stingray_backend,
 ) -> TemporalStructureResult:
@@ -769,8 +769,8 @@ def run_temporal_structure_analysis(
         Event-window bounds in milliseconds for provenance.
     spectral_extent_mhz
         Selected spectral extent in MHz for provenance.
-    fitburst_widths_ms
-        Optional fitburst component widths in milliseconds. When provided, the
+    model_fit_widths_ms
+        Optional model-fit component widths in milliseconds. When provided, the
         smallest positive width is recorded as a model-based cross-check.
     offpulse_series_runs
         Optional contiguous off-pulse time-series runs used to estimate a noise
@@ -799,12 +799,12 @@ def run_temporal_structure_analysis(
     series = np.asarray(event_series, dtype=float)
     tsamp_ms = float(tsamp_ms)
     segment_length_ms = float(segment_length_ms)
-    fitburst_min_component_ms = None
-    if fitburst_widths_ms is not None:
-        finite_widths = np.asarray(fitburst_widths_ms, dtype=float)
+    model_fit_min_component_ms = None
+    if model_fit_widths_ms is not None:
+        finite_widths = np.asarray(model_fit_widths_ms, dtype=float)
         finite_widths = finite_widths[np.isfinite(finite_widths) & (finite_widths > 0)]
         if finite_widths.size:
-            fitburst_min_component_ms = float(np.min(finite_widths))
+            model_fit_min_component_ms = float(np.min(finite_widths))
 
     raw_freq_hz, raw_power, _raw_df, raw_nyquist_hz = _raw_periodogram(series, tsamp_ms)
     structure_scan = _scan_minimum_structure(series, tsamp_ms=tsamp_ms, noise_sigma=float(noise_sigma))
@@ -821,7 +821,7 @@ def run_temporal_structure_analysis(
             tsamp_ms=tsamp_ms,
             min_structure_ms_primary=structure_scan["primary_ms"],
             min_structure_ms_wavelet=structure_scan["wavelet_ms"],
-            fitburst_min_component_ms=fitburst_min_component_ms,
+            model_fit_min_component_ms=model_fit_min_component_ms,
             raw_periodogram_freq_hz=raw_freq_hz,
             raw_periodogram_power=raw_power,
             matched_filter_scales_ms=structure_scan["scales_ms"],
@@ -845,7 +845,7 @@ def run_temporal_structure_analysis(
             tsamp_ms=tsamp_ms,
             min_structure_ms_primary=structure_scan["primary_ms"],
             min_structure_ms_wavelet=structure_scan["wavelet_ms"],
-            fitburst_min_component_ms=fitburst_min_component_ms,
+            model_fit_min_component_ms=model_fit_min_component_ms,
             raw_periodogram_freq_hz=raw_freq_hz,
             raw_periodogram_power=raw_power,
             matched_filter_scales_ms=structure_scan["scales_ms"],
@@ -869,7 +869,7 @@ def run_temporal_structure_analysis(
             tsamp_ms=tsamp_ms,
             min_structure_ms_primary=structure_scan["primary_ms"],
             min_structure_ms_wavelet=structure_scan["wavelet_ms"],
-            fitburst_min_component_ms=fitburst_min_component_ms,
+            model_fit_min_component_ms=model_fit_min_component_ms,
             raw_periodogram_freq_hz=raw_freq_hz,
             raw_periodogram_power=raw_power,
             matched_filter_scales_ms=structure_scan["scales_ms"],
@@ -896,7 +896,7 @@ def run_temporal_structure_analysis(
             tsamp_ms=tsamp_ms,
             min_structure_ms_primary=structure_scan["primary_ms"],
             min_structure_ms_wavelet=structure_scan["wavelet_ms"],
-            fitburst_min_component_ms=fitburst_min_component_ms,
+            model_fit_min_component_ms=model_fit_min_component_ms,
             raw_periodogram_freq_hz=raw_freq_hz,
             raw_periodogram_power=raw_power,
             matched_filter_scales_ms=structure_scan["scales_ms"],
@@ -921,7 +921,7 @@ def run_temporal_structure_analysis(
             tsamp_ms=tsamp_ms,
             min_structure_ms_primary=structure_scan["primary_ms"],
             min_structure_ms_wavelet=structure_scan["wavelet_ms"],
-            fitburst_min_component_ms=fitburst_min_component_ms,
+            model_fit_min_component_ms=model_fit_min_component_ms,
             raw_periodogram_freq_hz=raw_freq_hz,
             raw_periodogram_power=raw_power,
             matched_filter_scales_ms=structure_scan["scales_ms"],
@@ -946,7 +946,7 @@ def run_temporal_structure_analysis(
             tsamp_ms=tsamp_ms,
             min_structure_ms_primary=structure_scan["primary_ms"],
             min_structure_ms_wavelet=structure_scan["wavelet_ms"],
-            fitburst_min_component_ms=fitburst_min_component_ms,
+            model_fit_min_component_ms=model_fit_min_component_ms,
             raw_periodogram_freq_hz=raw_freq_hz,
             raw_periodogram_power=raw_power,
             matched_filter_scales_ms=structure_scan["scales_ms"],
@@ -990,7 +990,7 @@ def run_temporal_structure_analysis(
             tsamp_ms=tsamp_ms,
             min_structure_ms_primary=structure_scan["primary_ms"],
             min_structure_ms_wavelet=structure_scan["wavelet_ms"],
-            fitburst_min_component_ms=fitburst_min_component_ms,
+            model_fit_min_component_ms=model_fit_min_component_ms,
             raw_periodogram_freq_hz=raw_freq_hz,
             raw_periodogram_power=raw_power,
             matched_filter_scales_ms=structure_scan["scales_ms"],
@@ -1037,7 +1037,7 @@ def run_temporal_structure_analysis(
         nyquist_hz=raw_nyquist_hz,
         min_structure_ms_primary=structure_scan["primary_ms"],
         min_structure_ms_wavelet=structure_scan["wavelet_ms"],
-        fitburst_min_component_ms=fitburst_min_component_ms,
+        model_fit_min_component_ms=model_fit_min_component_ms,
         power_law_fit_status=str(power_law["fit_status"]),
         power_law_fit_message=power_law["fit_message"],
         raw_periodogram_freq_hz=np.asarray(raw_freq_hz, dtype=float),

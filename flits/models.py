@@ -992,7 +992,7 @@ class TemporalStructureResult:
     nyquist_hz: float | None
     min_structure_ms_primary: float | None = None
     min_structure_ms_wavelet: float | None = None
-    fitburst_min_component_ms: float | None = None
+    model_fit_min_component_ms: float | None = None
     power_law_fit_status: str = "unavailable"
     power_law_fit_message: str | None = None
     raw_periodogram_freq_hz: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
@@ -1036,7 +1036,7 @@ class TemporalStructureResult:
             "nyquist_hz": _float_or_none(self.nyquist_hz),
             "min_structure_ms_primary": _float_or_none(self.min_structure_ms_primary),
             "min_structure_ms_wavelet": _float_or_none(self.min_structure_ms_wavelet),
-            "fitburst_min_component_ms": _float_or_none(self.fitburst_min_component_ms),
+            "model_fit_min_component_ms": _float_or_none(self.model_fit_min_component_ms),
             "power_law_fit_status": self.power_law_fit_status,
             "power_law_fit_message": self.power_law_fit_message,
             "raw_periodogram_freq_hz": _jsonable_1d(self.raw_periodogram_freq_hz, digits=6),
@@ -1084,7 +1084,7 @@ class TemporalStructureResult:
             nyquist_hz=_float_or_none(payload.get("nyquist_hz")),
             min_structure_ms_primary=_float_or_none(payload.get("min_structure_ms_primary")),
             min_structure_ms_wavelet=_float_or_none(payload.get("min_structure_ms_wavelet")),
-            fitburst_min_component_ms=_float_or_none(payload.get("fitburst_min_component_ms")),
+            model_fit_min_component_ms=_float_or_none(payload.get("model_fit_min_component_ms")),
             power_law_fit_status=str(payload.get("power_law_fit_status", "unavailable")),
             power_law_fit_message=None
             if payload.get("power_law_fit_message") in (None, "")
@@ -1327,17 +1327,17 @@ class MeasurementProvenance:
 
 
 @dataclass(frozen=True)
-class ScatteringFitDiagnostics:
+class ModelFitDiagnostics:
     status: str
     message: str | None
     fitter: str | None
     component_count: int
     fit_parameters: list[str] = field(default_factory=list)
-    fit_profile: str | None = None
+    free_parameters: list[str] = field(default_factory=list)
     initial_parameter_source: str | None = None
     fixed_parameters: list[str] = field(default_factory=list)
     scintillation: bool | None = None
-    weighted_fit: bool | None = None
+    weighting_mode: str | None = None
     weight_range: list[int] | None = None
     weight_range_basis: str | None = None
     fit_iterations_requested: int | None = None
@@ -1348,6 +1348,12 @@ class ScatteringFitDiagnostics:
     factor_time_upsample: int | None = None
     factor_freq_upsample: int | None = None
     ref_freq_mhz: float | None = None
+    is_folded: bool | None = None
+    exact_jacobian: bool | None = None
+    max_function_evaluations: int | None = None
+    function_evaluations: int | None = None
+    solver_status: int | None = None
+    solver_message: str | None = None
     initial_parameters: dict[str, list[float] | None] = field(default_factory=dict)
     bestfit_parameters: dict[str, list[float] | None] = field(default_factory=dict)
     bestfit_uncertainties: dict[str, list[float] | None] = field(default_factory=dict)
@@ -1384,11 +1390,11 @@ class ScatteringFitDiagnostics:
             "fitter": self.fitter,
             "component_count": self.component_count,
             "fit_parameters": self.fit_parameters,
-            "fit_profile": self.fit_profile,
+            "free_parameters": self.free_parameters,
             "initial_parameter_source": self.initial_parameter_source,
             "fixed_parameters": self.fixed_parameters,
             "scintillation": _bool_or_none(self.scintillation),
-            "weighted_fit": _bool_or_none(self.weighted_fit),
+            "weighting_mode": self.weighting_mode,
             "weight_range": None if self.weight_range is None else [int(value) for value in self.weight_range],
             "weight_range_basis": self.weight_range_basis,
             "fit_iterations_requested": _int_or_none(self.fit_iterations_requested),
@@ -1399,6 +1405,12 @@ class ScatteringFitDiagnostics:
             "factor_time_upsample": _int_or_none(self.factor_time_upsample),
             "factor_freq_upsample": _int_or_none(self.factor_freq_upsample),
             "ref_freq_mhz": _float_or_none(self.ref_freq_mhz),
+            "is_folded": _bool_or_none(self.is_folded),
+            "exact_jacobian": _bool_or_none(self.exact_jacobian),
+            "max_function_evaluations": _int_or_none(self.max_function_evaluations),
+            "function_evaluations": _int_or_none(self.function_evaluations),
+            "solver_status": _int_or_none(self.solver_status),
+            "solver_message": self.solver_message,
             "initial_parameters": _jsonable_parameter_dict(self.initial_parameters),
             "bestfit_parameters": _jsonable_parameter_dict(self.bestfit_parameters),
             "bestfit_uncertainties": _jsonable_parameter_dict(self.bestfit_uncertainties),
@@ -1418,18 +1430,18 @@ class ScatteringFitDiagnostics:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "ScatteringFitDiagnostics":
+    def from_dict(cls, payload: dict[str, Any]) -> "ModelFitDiagnostics":
         return cls(
             status=str(payload.get("status", "unknown")),
             message=payload.get("message"),
             fitter=payload.get("fitter"),
             component_count=int(payload.get("component_count", 0)),
             fit_parameters=[str(value) for value in payload.get("fit_parameters", [])],
-            fit_profile=payload.get("fit_profile"),
+            free_parameters=[str(value) for value in payload.get("free_parameters", [])],
             initial_parameter_source=payload.get("initial_parameter_source"),
             fixed_parameters=[str(value) for value in payload.get("fixed_parameters", [])],
             scintillation=_bool_or_none(payload.get("scintillation")),
-            weighted_fit=_bool_or_none(payload.get("weighted_fit")),
+            weighting_mode=payload.get("weighting_mode"),
             weight_range=(
                 None
                 if payload.get("weight_range") is None
@@ -1444,6 +1456,12 @@ class ScatteringFitDiagnostics:
             factor_time_upsample=_int_or_none(payload.get("factor_time_upsample")),
             factor_freq_upsample=_int_or_none(payload.get("factor_freq_upsample")),
             ref_freq_mhz=_float_or_none(payload.get("ref_freq_mhz")),
+            is_folded=_bool_or_none(payload.get("is_folded")),
+            exact_jacobian=_bool_or_none(payload.get("exact_jacobian")),
+            max_function_evaluations=_int_or_none(payload.get("max_function_evaluations")),
+            function_evaluations=_int_or_none(payload.get("function_evaluations")),
+            solver_status=_int_or_none(payload.get("solver_status")),
+            solver_message=payload.get("solver_message"),
             initial_parameters={str(key): value for key, value in payload.get("initial_parameters", {}).items()},
             bestfit_parameters={str(key): value for key, value in payload.get("bestfit_parameters", {}).items()},
             bestfit_uncertainties={str(key): value for key, value in payload.get("bestfit_uncertainties", {}).items()},
@@ -1476,7 +1494,7 @@ class MeasurementDiagnostics:
     temporal_acf_lags_ms: np.ndarray
     spectral_acf: np.ndarray
     spectral_acf_lags_mhz: np.ndarray
-    scattering_fit: ScatteringFitDiagnostics | None = None
+    model_fit: ModelFitDiagnostics | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1491,7 +1509,7 @@ class MeasurementDiagnostics:
             "temporal_acf_lags_ms": _jsonable_1d(self.temporal_acf_lags_ms),
             "spectral_acf": _jsonable_1d(self.spectral_acf),
             "spectral_acf_lags_mhz": _jsonable_1d(self.spectral_acf_lags_mhz),
-            "scattering_fit": self.scattering_fit.to_dict() if self.scattering_fit is not None else None,
+            "model_fit": self.model_fit.to_dict() if self.model_fit is not None else None,
         }
 
     @classmethod
@@ -1508,10 +1526,10 @@ class MeasurementDiagnostics:
             temporal_acf_lags_ms=_array_1d(payload.get("temporal_acf_lags_ms"), dtype=float),
             spectral_acf=_array_1d(payload.get("spectral_acf"), dtype=float),
             spectral_acf_lags_mhz=_array_1d(payload.get("spectral_acf_lags_mhz"), dtype=float),
-            scattering_fit=(
+            model_fit=(
                 None
-                if payload.get("scattering_fit") is None
-                else ScatteringFitDiagnostics.from_dict(payload["scattering_fit"])
+                if payload.get("model_fit") is None
+                else ModelFitDiagnostics.from_dict(payload["model_fit"])
             ),
         )
 

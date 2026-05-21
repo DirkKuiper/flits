@@ -708,8 +708,8 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
             session.accept_width_result(str(payload["method"]))
         elif action == "compute_properties":
             session.compute_properties()
-        elif action == "fit_scattering":
-            session.fit_scattering(payload)
+        elif action == "fit_model":
+            session.fit_model(payload)
         elif action == "run_temporal_structure_analysis":
             session.run_temporal_structure_analysis(
                 segment_length_ms=float(payload["segment_length_ms"]),

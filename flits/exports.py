@@ -1068,7 +1068,7 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         "iso_e_erg": results.get("iso_e", ""),
         "min_structure_ms_primary": temporal.get("min_structure_ms_primary", ""),
         "min_structure_ms_wavelet": temporal.get("min_structure_ms_wavelet", ""),
-        "fitburst_min_component_ms": temporal.get("fitburst_min_component_ms", ""),
+        "model_fit_min_component_ms": temporal.get("model_fit_min_component_ms", ""),
         "psd_alpha": temporal.get("power_law_alpha", ""),
         "psd_alpha_err": temporal.get("power_law_alpha_err", ""),
         "psd_fit_status": temporal.get("power_law_fit_status", ""),
@@ -1167,7 +1167,7 @@ def _build_diagnostics_npz(snapshot: ExportSnapshotData) -> bytes:
         payload["gaussian_mu_ms"] = np.asarray([fit.get("mu_ms", np.nan) for fit in gaussian_fits], dtype=float)
         payload["gaussian_sigma_ms"] = np.asarray([fit.get("sigma_ms", np.nan) for fit in gaussian_fits], dtype=float)
         payload["gaussian_offset"] = np.asarray([fit.get("offset", np.nan) for fit in gaussian_fits], dtype=float)
-        scattering_fit = diagnostics.get("scattering_fit") or {}
+        model_fit = diagnostics.get("model_fit") or {}
         for key in (
             "freq_axis_mhz",
             "time_axis_ms",
@@ -1178,8 +1178,8 @@ def _build_diagnostics_npz(snapshot: ExportSnapshotData) -> bytes:
             "model_profile_sn",
             "residual_profile_sn",
         ):
-            if key in scattering_fit:
-                payload[f"scattering_{key}"] = np.asarray(scattering_fit.get(key, []), dtype=float)
+            if key in model_fit:
+                payload[f"model_fit_{key}"] = np.asarray(model_fit.get(key, []), dtype=float)
 
     if snapshot.dm_optimization is not None:
         for key in (
