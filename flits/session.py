@@ -1884,6 +1884,17 @@ class BurstSession:
         )
         self.invalidate_analysis_state()
 
+    def apply_best_dm(self) -> DmOptimizationResult:
+        optimization = self.dm_optimization
+        if optimization is None:
+            raise ValueError("No DM optimization is available to apply.")
+        best_dm = float(optimization.best_dm)
+        if not np.isfinite(best_dm):
+            raise ValueError("The optimized best DM is not finite.")
+        self.set_dm(best_dm)
+        self.dm_optimization = optimization
+        return optimization
+
     def _dm_provenance(
         self,
         context: MeasurementContext,

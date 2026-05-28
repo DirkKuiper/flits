@@ -271,6 +271,31 @@ class SessionSnapshotTest(unittest.TestCase):
             self.assertEqual(restored.temporal_structure.crossover_frequency_hz, 250.0)
             self.assertEqual(restored.temporal_structure.uncertainty_details["crossover_frequency_hz"].classification, "diagnostic_only")
 
+    def test_snapshot_after_apply_best_dm_preserves_dm_sweep(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            snapshot_path = Path(tmpdir) / "applied_best_dm_source.fil"
+            snapshot_path.write_bytes(b"snapshot-source")
+            session = _synthetic_width_session(path=snapshot_path)
+            optimization = session.optimize_dm(center_dm=0.0, half_range=2.0, step=0.5)
+
+            session.apply_best_dm()
+            snapshot_payload = session.snapshot_dict()
+
+            self.assertAlmostEqual(snapshot_payload["dm"], optimization.best_dm)
+            self.assertIsNotNone(snapshot_payload["dm_optimization"])
+            self.assertEqual(snapshot_payload["dm_optimization"]["best_dm"], optimization.best_dm)
+            self.assertIn("best_dm", snapshot_payload["dm_optimization"]["uncertainty_details"])
+
+            restored = BurstSession.from_snapshot(snapshot_payload, loader=_snapshot_loader)
+
+            self.assertAlmostEqual(restored.dm, optimization.best_dm)
+            self.assertIsNotNone(restored.dm_optimization)
+            self.assertEqual(restored.dm_optimization.best_dm, optimization.best_dm)
+            self.assertEqual(
+                restored.dm_optimization.uncertainty_details["best_dm"].value,
+                optimization.uncertainty_details["best_dm"].value,
+            )
+
     def test_snapshot_import_fails_when_source_file_is_missing(self) -> None:
         with TemporaryDirectory() as tmpdir:
             snapshot_path = Path(tmpdir) / "missing_after_save.fil"

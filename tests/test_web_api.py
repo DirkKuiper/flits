@@ -480,6 +480,13 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("downloadSessionSnapshot", app_js)
         self.assertIn("importSessionSnapshot", app_js)
         self.assertIn("dm_phase", app_js)
+        self.assertIn('postAction("apply_best_dm")', app_js)
+        self.assertIn('if (action === "apply_best_dm") return applyBestDmButton', app_js)
+        self.assertIn('apply_best_dm: "Applying best DM"', app_js)
+        self.assertIn('apply_best_dm: "Best DM applied"', app_js)
+        self.assertIn("Best DM From Sweep", app_js)
+        self.assertIn("Current Session DM", app_js)
+        self.assertIn("Sweep Input DM", app_js)
         self.assertIn("renderDmComponentSummary", app_js)
         self.assertIn("Selected Metric", app_js)
         self.assertIn("DMphase Reference", app_js)
@@ -671,6 +678,25 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("origin", metric_defs[0])
         self.assertIn("references", metric_defs[0])
         self.assertEqual([item["key"] for item in metric_defs], ["integrated_event_snr", "dm_phase"])
+
+    def test_session_action_apply_best_dm_preserves_dm_optimization_payload(self) -> None:
+        session_id = "synthetic-apply-best-dm"
+        session = _synthetic_session()
+        optimization = session.optimize_dm(center_dm=50.0, half_range=4.0, step=0.5)
+        SESSIONS[session_id] = session
+        try:
+            payload = session_action(
+                session_id,
+                ActionRequest(type="apply_best_dm"),
+            )
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        self.assertAlmostEqual(payload["view"]["meta"]["dm"], optimization.best_dm)
+        self.assertIsNotNone(payload["view"]["dm_optimization"])
+        self.assertEqual(payload["view"]["dm_optimization"]["best_dm"], optimization.best_dm)
+        self.assertEqual(payload["view"]["dm_optimization"]["applied_dm"], 0.0)
+        self.assertIs(session.dm_optimization, optimization)
 
     def test_session_action_optimize_dm_rejects_removed_metric(self) -> None:
         session_id = "synthetic-dm-invalid-metric"

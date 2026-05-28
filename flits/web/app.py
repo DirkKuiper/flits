@@ -695,6 +695,8 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
             session.auto_mask_jess(payload.get("profile"))
         elif action == "set_dm":
             session.set_dm(float(payload["dm"]))
+        elif action == "apply_best_dm":
+            session.apply_best_dm()
         elif action == "optimize_dm":
             session.optimize_dm(
                 float(payload["center_dm"]),

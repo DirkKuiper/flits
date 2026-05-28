@@ -471,7 +471,7 @@ function bindControls() {
       return
     }
     setDmInputValue(bestDm)
-    postAction("set_dm", { dm: Number(bestDm) })
+    postAction("apply_best_dm")
   })
   fitModelButton.addEventListener("click", () => {
     const freeParameters = currentFreeFitParameters()
@@ -2119,9 +2119,10 @@ function renderDmOptimization(view) {
   const metricContextNote = optimization.snr_metric === "dm_phase"
     ? "Sampled Peak DM is the discrete argmax of the DMphase curve. Best DM is the upstream-style weighted polynomial refinement used for comparison with DM_phase."
     : "Sampled Peak DM is the best discrete grid point. Best DM is the local quadratic refinement around that sampled peak."
+  const currentDm = view?.meta?.dm
 
   const primaryTiles = [
-    resultTile("Best DM", fmt(optimization.best_dm, 6), "primary", "Refined best-fit DM reported by the selected metric model."),
+    resultTile("Best DM From Sweep", fmt(optimization.best_dm, 6), "primary", "Refined best-fit DM reported by the selected metric model for this retained sweep."),
     resultTile("DM Fit Width", formatDetailUncertainty(bestDmDetail, { digits: 6, units: "pc cm^-3" }) || "n/a", "primary", {
       tooltip: "Local width reported by the DM peak-refinement fit.",
       detail: bestDmDetail,
@@ -2131,12 +2132,13 @@ function renderDmOptimization(view) {
 
   const secondaryTiles = [
     resultTile("Selected Metric", snrLabel, "secondary", "Metric currently used to score every trial DM in this sweep."),
+    resultTile("Current Session DM", fmt(currentDm, 6), "secondary", "DM currently applied to the displayed dynamic spectrum."),
     resultTile("Sweep Center DM", fmt(optimization.center_dm, 6), "secondary", "DM around which the symmetric trial grid was generated."),
     resultTile("Sampled Peak DM", fmt(optimization.sampled_best_dm, 6), "secondary", "Best discrete DM bin before any peak refinement is applied."),
     resultTile(`Sampled Peak ${scoreLabel}`, fmt(optimization.sampled_best_sn, 3), "secondary", `Raw ${scoreLabel.toLowerCase()} at the best discrete trial DM.`),
     resultTile("Half-range", fmt(optimization.actual_half_range, 3), "secondary", "Actual symmetric search half-range covered by the discrete trial grid."),
     resultTile("Step", fmt(optimization.step, 3), "secondary", "Spacing between adjacent trial DMs in the sweep."),
-    resultTile("Applied DM During Sweep", fmt(optimization.applied_dm, 6), "secondary", "DM that was applied to the session data before the sweep was run."),
+    resultTile("Sweep Input DM", fmt(optimization.applied_dm, 6), "secondary", "Historical DM that was applied to the session data before this retained sweep was run."),
   ]
 
   dmOptimizationContent.innerHTML = `
@@ -5219,6 +5221,7 @@ function busyButtonForAction(action) {
   if (action === "compute_properties") return computeButton
   if (action === "auto_mask_jess") return jessButton
   if (action === "optimize_dm") return optimizeDmButton
+  if (action === "apply_best_dm") return applyBestDmButton
   if (action === "fit_model") return fitModelButton
   if (action === "run_temporal_structure_analysis") return runSpectralButton
   if (action === "run_spectral_analysis") return runSpectralButton
@@ -5247,6 +5250,7 @@ function busyButtonText(action) {
   if (action === "export_results") return "Building..."
   if (action === "set_notes") return "Saving..."
   if (action === "set_timing_metadata") return "Applying..."
+  if (action === "apply_best_dm") return "Applying..."
   if (action === "set_dm") return "Applying DM..."
   if (action === "reset_view") return "Resetting..."
   return actionBusyText(action)
@@ -5280,6 +5284,7 @@ function actionBusyText(action) {
     export_results: "Building export bundle",
     set_notes: "Saving notes",
     set_timing_metadata: "Applying timing metadata",
+    apply_best_dm: "Applying best DM",
     set_dm: "Applying DM",
     compute_properties: "Computing",
   }
@@ -5302,6 +5307,7 @@ function actionSuccessText(action) {
     export_results: "Export bundle built",
     set_notes: "Notes saved",
     set_timing_metadata: "Timing metadata applied",
+    apply_best_dm: "Best DM applied",
     set_dm: "Dispersion measure updated",
     compute_properties: "Derived properties updated",
   }
