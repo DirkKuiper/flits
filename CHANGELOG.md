@@ -4,6 +4,13 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [0.7.1](https://github.com/DirkKuiper/flits/compare/flits-v0.7.0...flits-v0.7.1) (2026-05-28)
+
+
+### Bug Fixes
+
+* preserve DM sweep after applying best DM ([bc5f08e](https://github.com/DirkKuiper/flits/commit/bc5f08e9ad1467f60847fab83a22ad97ae4e8673))
+
 ## [0.7.0](https://github.com/DirkKuiper/flits/compare/flits-v0.6.0...flits-v0.7.0) (2026-05-21)
 
 
