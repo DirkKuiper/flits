@@ -471,7 +471,7 @@ function bindControls() {
       return
     }
     setDmInputValue(bestDm)
-    postAction("set_dm", { dm: Number(bestDm) })
+    postAction("apply_best_dm")
   })
   fitModelButton.addEventListener("click", () => {
     const freeParameters = currentFreeFitParameters()
@@ -2116,27 +2116,30 @@ function renderDmOptimization(view) {
       "Legacy DM scalar uncertainty carried by an older session or API response.",
     )
   )
+  const displayedBestDmDetail = dmFitWidthDisplayDetail(bestDmDetail)
   const metricContextNote = optimization.snr_metric === "dm_phase"
     ? "Sampled Peak DM is the discrete argmax of the DMphase curve. Best DM is the upstream-style weighted polynomial refinement used for comparison with DM_phase."
     : "Sampled Peak DM is the best discrete grid point. Best DM is the local quadratic refinement around that sampled peak."
+  const currentDm = view?.meta?.dm
 
   const primaryTiles = [
-    resultTile("Best DM", fmt(optimization.best_dm, 6), "primary", "Refined best-fit DM reported by the selected metric model."),
-    resultTile("DM Fit Width", formatDetailUncertainty(bestDmDetail, { digits: 6, units: "pc cm^-3" }) || "n/a", "primary", {
-      tooltip: "Local width reported by the DM peak-refinement fit.",
-      detail: bestDmDetail,
+    resultTile("Best DM From Sweep", fmt(optimization.best_dm, 6), "primary", "Refined best-fit DM reported by the selected metric model for this retained sweep."),
+    resultTile("DM Fit Width", formatDetailUncertainty(displayedBestDmDetail, { digits: 6, units: "pc cm^-3" }) || "n/a", "primary", {
+      tooltip: "Local width from the DM peak-refinement fit.",
+      detail: displayedBestDmDetail,
     }),
     resultTile(`Best ${scoreLabel}`, fmt(optimization.best_sn, 3), "primary", `Best fitted ${scoreLabel.toLowerCase()} at the refined DM solution.`),
   ]
 
   const secondaryTiles = [
     resultTile("Selected Metric", snrLabel, "secondary", "Metric currently used to score every trial DM in this sweep."),
+    resultTile("Current Session DM", fmt(currentDm, 6), "secondary", "DM currently applied to the displayed dynamic spectrum."),
     resultTile("Sweep Center DM", fmt(optimization.center_dm, 6), "secondary", "DM around which the symmetric trial grid was generated."),
     resultTile("Sampled Peak DM", fmt(optimization.sampled_best_dm, 6), "secondary", "Best discrete DM bin before any peak refinement is applied."),
     resultTile(`Sampled Peak ${scoreLabel}`, fmt(optimization.sampled_best_sn, 3), "secondary", `Raw ${scoreLabel.toLowerCase()} at the best discrete trial DM.`),
     resultTile("Half-range", fmt(optimization.actual_half_range, 3), "secondary", "Actual symmetric search half-range covered by the discrete trial grid."),
     resultTile("Step", fmt(optimization.step, 3), "secondary", "Spacing between adjacent trial DMs in the sweep."),
-    resultTile("Applied DM During Sweep", fmt(optimization.applied_dm, 6), "secondary", "DM that was applied to the session data before the sweep was run."),
+    resultTile("Sweep Input DM", fmt(optimization.applied_dm, 6), "secondary", "Historical DM that was applied to the session data before this retained sweep was run."),
   ]
 
   dmOptimizationContent.innerHTML = `
@@ -2244,7 +2247,7 @@ function renderDmComponentSummary(optimization) {
   }
 
   const rows = components.map((component) => {
-    const detail = (
+    const detail = dmFitWidthDisplayDetail(
       uncertaintyDetail(component?.uncertainty_details, "best_dm")
       || legacyScalarUncertaintyDetail(
         component?.best_dm_uncertainty,
@@ -3828,6 +3831,7 @@ function uncertaintyDetailLabel(detail) {
     formal_1sigma: "Formal 1σ",
     model_hessian: "Model-based",
     resolution_limit: "Resolution limit",
+    dm_fit_width: "Fit width",
     heuristic_local_fit: "Heuristic",
     statistical_only: "Statistical only",
     diagnostic_only: "Diagnostic only",
@@ -3840,6 +3844,7 @@ function uncertaintyTone(detail) {
     formal_1sigma: "success",
     model_hessian: "neutral",
     resolution_limit: "warning",
+    dm_fit_width: "neutral",
     heuristic_local_fit: "warning",
     statistical_only: "warning",
     diagnostic_only: "neutral",
@@ -3865,6 +3870,17 @@ function uncertaintyTooltip(detail) {
 function uncertaintyBadgeMarkup(detail) {
   if (!detail) return ""
   return `<span class="panel-badge uncertainty-badge" data-tone="${escapeHtml(uncertaintyTone(detail))}" data-tooltip="${escapeHtml(uncertaintyTooltip(detail))}">${escapeHtml(uncertaintyDetailLabel(detail))}</span>`
+}
+
+function dmFitWidthDisplayDetail(detail) {
+  if (!detail) return null
+  return {
+    ...detail,
+    classification: "dm_fit_width",
+    tooltip: "Local width from the DM peak-refinement fit.",
+    basis: "Diagnostic local fit width from the selected DM score curve.",
+    warning_flags: [],
+  }
 }
 
 function formatDetailUncertainty(detail, { digits = 3, units = null, scientific = false, formatter = null } = {}) {
@@ -5219,6 +5235,7 @@ function busyButtonForAction(action) {
   if (action === "compute_properties") return computeButton
   if (action === "auto_mask_jess") return jessButton
   if (action === "optimize_dm") return optimizeDmButton
+  if (action === "apply_best_dm") return applyBestDmButton
   if (action === "fit_model") return fitModelButton
   if (action === "run_temporal_structure_analysis") return runSpectralButton
   if (action === "run_spectral_analysis") return runSpectralButton
@@ -5247,6 +5264,7 @@ function busyButtonText(action) {
   if (action === "export_results") return "Building..."
   if (action === "set_notes") return "Saving..."
   if (action === "set_timing_metadata") return "Applying..."
+  if (action === "apply_best_dm") return "Applying..."
   if (action === "set_dm") return "Applying DM..."
   if (action === "reset_view") return "Resetting..."
   return actionBusyText(action)
@@ -5280,6 +5298,7 @@ function actionBusyText(action) {
     export_results: "Building export bundle",
     set_notes: "Saving notes",
     set_timing_metadata: "Applying timing metadata",
+    apply_best_dm: "Applying best DM",
     set_dm: "Applying DM",
     compute_properties: "Computing",
   }
@@ -5302,6 +5321,7 @@ function actionSuccessText(action) {
     export_results: "Export bundle built",
     set_notes: "Notes saved",
     set_timing_metadata: "Timing metadata applied",
+    apply_best_dm: "Best DM applied",
     set_dm: "Dispersion measure updated",
     compute_properties: "Derived properties updated",
   }
@@ -5659,9 +5679,9 @@ function fitStatusLabel(status) {
 
 function fitStatusCopy(status) {
   const labels = {
-    quadratic_peak_fit: "The fitted best DM comes from a local quadratic model around the sampled peak. The displayed fit width is retained as a heuristic diagnostic rather than a publishable 1-sigma DM error bar.",
+    quadratic_peak_fit: "The fitted best DM comes from a local quadratic model around the sampled peak. The displayed fit width is a diagnostic local-fit width from that curve.",
     quadratic_peak_fit_uncertainty_unavailable: "The local fit found a best DM, but the sampled range was not sufficient to derive even a stable diagnostic fit width.",
-    dmphase_weighted_polyfit: "The fitted best DM comes from an upstream-style weighted polynomial fit applied to the DMphase curve. The displayed fit width remains a heuristic local-fit diagnostic rather than a formal 1-sigma uncertainty.",
+    dmphase_weighted_polyfit: "The fitted best DM comes from an upstream-style weighted polynomial fit applied to the DMphase curve. The displayed fit width is a diagnostic local-fit width from that curve.",
     dmphase_weighted_polyfit_uncertainty_unavailable: "The DMphase fit found a best DM, but the weighted polynomial model did not yield a stable diagnostic fit width.",
     dmphase_weighted_polyfit_failed: "The DMphase weighted polynomial fit failed, so the sampled peak was retained.",
     dmphase_weighted_polyfit_fallback: "The DMphase peak fit could not define a stable fitting window, so the discrete sampled peak was retained.",

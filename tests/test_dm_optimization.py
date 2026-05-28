@@ -266,6 +266,26 @@ class DmOptimizationTest(unittest.TestCase):
             action(current)
             self.assertIsNone(current.dm_optimization)
 
+    def test_apply_best_dm_preserves_sweep_while_manual_set_dm_still_clears_it(self) -> None:
+        session = _synthetic_dm_session(true_dm=50.0)
+        result = session.optimize_dm(center_dm=50.0, half_range=4.0, step=0.5)
+
+        applied = session.apply_best_dm()
+
+        self.assertIs(applied, result)
+        self.assertAlmostEqual(session.dm, result.best_dm)
+        self.assertIs(session.dm_optimization, result)
+        self.assertEqual(session.dm_optimization.applied_dm, 0.0)
+
+        session.set_dm(result.best_dm + 1.0)
+        self.assertIsNone(session.dm_optimization)
+
+    def test_apply_best_dm_requires_existing_finite_sweep(self) -> None:
+        session = _synthetic_dm_session(true_dm=50.0)
+
+        with self.assertRaisesRegex(ValueError, "No DM optimization"):
+            session.apply_best_dm()
+
     def test_optimize_dm_uses_reduced_resolution_in_provenance(self) -> None:
         session = _synthetic_dm_session(true_dm=50.0, num_channels=24)
         session.set_time_factor(4)
