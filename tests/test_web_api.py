@@ -387,6 +387,8 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("Fit window is too large", app_js)
         self.assertIn("renderFitGuessPlot", app_js)
         self.assertIn("component_guesses", app_js)
+        self.assertIn("uirevision: viewerUiRevision(view)", app_js)
+        self.assertIn("function viewerUiRevision(view)", app_js)
         self.assertIn('id="exportPreviewThumbs"', index_html)
         self.assertIn('id="exportIncludeJson"', index_html)
         self.assertIn('id="exportIncludePlots"', index_html)

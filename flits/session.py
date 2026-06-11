@@ -1448,7 +1448,12 @@ class BurstSession:
         freq_lo_mhz, freq_hi_mhz = self._frequency_range_mhz()
         spec_lo_mhz, spec_hi_mhz = self._selected_frequency_bounds_mhz()
         time_profile = np.nansum(grid.display, axis=0) if grid.display.size else np.array([], dtype=float)
-        spectrum = np.nansum(grid.display, axis=1) if grid.display.size else np.array([], dtype=float)
+        event_display = (
+            grid.display[:, grid.event_rel_start:grid.event_rel_end]
+            if grid.display.size
+            else np.empty((0, 0), dtype=float)
+        )
+        spectrum = np.nansum(event_display, axis=1) if event_display.size else np.array([], dtype=float)
         peak_positions_ms = [
             float(grid.time_axis_ms[peak])
             for peak in grid.peak_bins

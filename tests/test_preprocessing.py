@@ -224,7 +224,49 @@ class ViewerAndMaskingTest(unittest.TestCase):
         view = session.get_view()
 
         self.assertEqual(view["plot"]["time_profile"]["y"], [-2.25, -2.25, 6.75, -2.25])
-        self.assertEqual(view["plot"]["spectrum"]["x"], [0.0, 0.0, 0.0])
+        self.assertEqual(view["plot"]["spectrum"]["x"], [-0.75, -1.0, -0.5])
+
+    def test_native_frequency_profile_uses_event_window_not_full_crop(self) -> None:
+        config = ObservationConfig.from_preset(dm=0.0, preset_key="generic")
+        offsets = np.array([5.0, 20.0, -7.0], dtype=float)
+        amplitudes = np.array([12.0, 6.0, 3.0], dtype=float)
+        data = np.repeat(offsets[:, None], 8, axis=1)
+        data[:, 3:5] += amplitudes[:, None]
+        metadata = FilterbankMetadata(
+            source_path=Path("native-event-spectrum.fil"),
+            source_name="synthetic",
+            tsamp=1e-3,
+            freqres=1.0,
+            start_mjd=60000.0,
+            read_start_sec=0.0,
+            sefd_jy=None,
+            bandwidth_mhz=3.0,
+            npol=1,
+            freqs_mhz=np.array([1002.0, 1001.0, 1000.0]),
+            header_npol=1,
+            telescope_id=None,
+            machine_id=None,
+            detected_preset_key="generic",
+            detection_basis="synthetic",
+        )
+        session = BurstSession(
+            config=config,
+            metadata=metadata,
+            data=data,
+            crop_start=0,
+            crop_end=data.shape[1],
+            event_start=3,
+            event_end=5,
+            spec_ex_lo=0,
+            spec_ex_hi=data.shape[0] - 1,
+            channel_mask=np.zeros(data.shape[0], dtype=bool),
+        )
+
+        view = session.get_view()
+
+        self.assertEqual(view["state"]["time_factor"], 1)
+        self.assertEqual(view["plot"]["spectrum"]["x"], [18.0, 9.0, 4.5])
+        self.assertFalse(np.allclose(view["plot"]["spectrum"]["x"], 0.0))
 
     @patch("flits.session.jess.channel_masks.channel_masker")
     def test_auto_mask_jess_uses_profile_budget_for_sampling(self, mock_channel_masker: object) -> None:

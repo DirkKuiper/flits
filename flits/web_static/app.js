@@ -4104,6 +4104,7 @@ async function renderPlots(view) {
       plot_bgcolor: plotTheme.plotBg,
       showlegend: false,
       hovermode: "closest",
+      uirevision: viewerUiRevision(view),
       xaxis: {
         domain: viewerDomains.heatmap.x,
         anchor: "y",
@@ -4954,6 +4955,18 @@ function scaleFactor(axis, multiplier) {
   const current = state.view.state[key]
   const next = multiplier > 1 ? current * multiplier : Math.max(1, Math.floor(current / 2))
   postAction(key, { value: next })
+}
+
+function viewerUiRevision(view) {
+  const crop = Array.isArray(view?.state?.crop_ms) ? view.state.crop_ms : []
+  return [
+    "viewer",
+    state.sessionId || view?.meta?.burst_file || "",
+    view?.state?.time_factor || 1,
+    view?.state?.freq_factor || 1,
+    crop[0] ?? "",
+    crop[1] ?? "",
+  ].join("|")
 }
 
 function buildViewerShapes(view) {
