@@ -4,6 +4,14 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [0.7.3](https://github.com/DirkKuiper/flits/compare/flits-v0.7.2...flits-v0.7.3) (2026-06-19)
+
+
+### Bug Fixes
+
+* **io:** support psrfits archive extension ([9b0704a](https://github.com/DirkKuiper/flits/commit/9b0704af84542d05ed64347f16a5493574b17704))
+* **web:** speed up mounted file listing ([1083878](https://github.com/DirkKuiper/flits/commit/10838780e803f4ef559b9ad395fc0ed8615f892e))
+
 ## [0.7.2](https://github.com/DirkKuiper/flits/compare/flits-v0.7.1...flits-v0.7.2) (2026-06-11)
 
 
