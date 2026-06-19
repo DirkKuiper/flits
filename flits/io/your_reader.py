@@ -774,8 +774,8 @@ class YourFilterbankReader:
     """
 
     format_id: ClassVar[str] = "sigproc"
-    format_id_aliases: ClassVar[tuple[str, ...]] = ("psrfits", "your", "fil", "fits")
-    extensions: ClassVar[tuple[str, ...]] = (".fil", ".fits", ".sf")
+    format_id_aliases: ClassVar[tuple[str, ...]] = ("psrfits", "your", "fil", "fits", "ar")
+    extensions: ClassVar[tuple[str, ...]] = (".fil", ".fits", ".sf", ".ar")
 
     def sniff(self, path: Path) -> bool:
         head = _peek_bytes(path, 16)
@@ -787,7 +787,7 @@ class YourFilterbankReader:
 
     def inspect(self, path: Path) -> FilterbankInspection:
         source_path = Path(path).expanduser().resolve()
-        is_fits = source_path.suffix.lower() in {".fits", ".sf"}
+        is_fits = source_path.suffix.lower() in {".fits", ".sf", ".ar"}
 
         if is_fits:
             is_search, obs_mode = _is_psrfits_search_mode(source_path)
@@ -864,7 +864,7 @@ class YourFilterbankReader:
         inspection: FilterbankInspection | None = None,
     ) -> tuple[np.ndarray, FilterbankMetadata]:
         source_path = Path(path).expanduser().resolve()
-        is_fits = source_path.suffix.lower() in {".fits", ".sf"}
+        is_fits = source_path.suffix.lower() in {".fits", ".sf", ".ar"}
 
         if is_fits:
             is_search, obs_mode = _is_psrfits_search_mode(source_path)
