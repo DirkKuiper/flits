@@ -358,7 +358,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadPresets()
   await loadAutoMaskProfiles()
   await loadFiles()
-  await loadSnapshotLibrary()
+  void loadSnapshotLibrary()
   // Removed auto-loading logic. Waiting for explicit user action.
 })
 
@@ -897,7 +897,7 @@ async function importSessionSnapshot(event) {
 async function loadSnapshotLibrary(options = {}) {
   const { refresh = false, silent = false } = options
   if (!silent) {
-    snapshotLibraryMeta.textContent = refresh ? "Refreshing saved sessions." : "Loading saved sessions."
+    snapshotLibraryMeta.textContent = refresh ? "Refreshing saved sessions..." : "Loading saved sessions..."
   }
   if (refresh) {
     setBusy("refresh_snapshots")
@@ -1248,6 +1248,7 @@ async function detectSelectedFile() {
 }
 
 async function loadFiles() {
+  setStatus("Scanning mounted files...", "info")
   try {
     const payload = await api("/api/files")
     state.knownFileDirectories = Array.isArray(payload.directories)
@@ -1259,6 +1260,7 @@ async function loadFiles() {
     if (defaultDirectory != null) {
       directorySelect.value = directoryOptionValue(defaultDirectory)
     }
+    setStatus("Mounted files ready", "success")
     updateControlStates()
   } catch (error) {
     setStatus(error.message, "error")

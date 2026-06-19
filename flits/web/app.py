@@ -29,7 +29,6 @@ SESSION_SNAPSHOT_PATHS: dict[str, Path] = {}
 _SKIP_DIRS: frozenset[str] = frozenset(
     {"site-packages", "node_modules", "__pycache__", "dist", "build"}
 )
-_TRUSTED_LISTING_SUFFIXES: frozenset[str] = frozenset({".fil"})
 _SESSION_SNAPSHOT_SUFFIX = "_flits_session.json"
 _SESSION_SNAPSHOT_INDEX_VERSION = 1
 _SESSION_SNAPSHOT_INDEX_PATH = Path(".flits") / "session_snapshot_index.json"
@@ -138,30 +137,45 @@ def _inspection_dm_guidance(inspection: object) -> str | None:
     return None
 
 
-def list_filterbank_files() -> list[str]:
+def _is_listable_data_path(path: Path, base: Path, suffixes: set[str]) -> bool:
+    if not path.is_file() or path.suffix.lower() not in suffixes:
+        return False
+    try:
+        rel = path.relative_to(base)
+    except ValueError:
+        return False
+    # Skip hidden directories (.venv, .vendor, .git, etc.) and caches
+    # that happen to live under the data dir when it points at a repo root.
+    return not any(part.startswith(".") or part in _SKIP_DIRS for part in rel.parts)
+
+
+def list_filterbank_files(*, validate: bool = False) -> list[str]:
     base = data_dir()
     suffixes = {ext.lower() for reader in list_readers() for ext in reader.extensions}
     found: set[str] = set()
     for path in base.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in suffixes:
+        if not _is_listable_data_path(path, base, suffixes):
             continue
-        rel = path.relative_to(base)
-        # Skip hidden directories (.venv, .vendor, .git, etc.) and caches
-        # that happen to live under the data dir when it points at a repo root.
-        if any(part.startswith(".") or part in _SKIP_DIRS for part in rel.parts):
-            continue
-        if path.suffix.lower() not in _TRUSTED_LISTING_SUFFIXES:
+        if validate:
             try:
                 inspect_filterbank(str(path))
             except Exception:
                 continue
+        rel = path.relative_to(base)
         found.add(rel.as_posix())
     return sorted(found)
 
 
-def list_filterbank_directories() -> list[dict[str, Any]]:
+def list_filterbank_directories(
+    relative_paths: list[str] | None = None,
+    *,
+    validate: bool = False,
+) -> list[dict[str, Any]]:
+    if relative_paths is None:
+        relative_paths = list_filterbank_files(validate=validate)
+
     grouped_files: dict[str, list[str]] = {}
-    for relative_path in list_filterbank_files():
+    for relative_path in relative_paths:
         parent = str(Path(relative_path).parent)
         directory = "" if parent == "." else parent.replace("\\", "/")
         grouped_files.setdefault(directory, []).append(relative_path)
@@ -453,10 +467,11 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/files")
-def files() -> dict[str, Any]:
+def files(validate: bool = False) -> dict[str, Any]:
+    file_list = list_filterbank_files(validate=validate)
     return {
-        "files": list_filterbank_files(),
-        "directories": list_filterbank_directories(),
+        "files": file_list,
+        "directories": list_filterbank_directories(file_list),
     }
 
 

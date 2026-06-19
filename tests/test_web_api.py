@@ -281,6 +281,20 @@ class WebApiTest(unittest.TestCase):
                 self.assertEqual(resolve_burst_path("nested/example.fil"), filterbank.resolve())
                 self.assertEqual(resolve_burst_path("nested/deeper/deep_example.fil"), deeper_filterbank.resolve())
 
+    @patch("flits.web.app.inspect_filterbank")
+    def test_default_listing_is_extension_based_without_inspection(self, mock_inspect: Mock) -> None:
+        with TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            (tmp_path / "bad.fits").write_bytes(b"not-a-readable-archive")
+            (tmp_path / "bad.h5").write_bytes(b"not-a-readable-archive")
+            (tmp_path / "ok.fil").write_bytes(b"")
+            (tmp_path / "ignore.txt").write_text("not a filterbank", encoding="utf-8")
+
+            with patch.dict("os.environ", {"FLITS_DATA_DIR": str(tmp_path)}):
+                self.assertEqual(list_filterbank_files(), ["bad.fits", "bad.h5", "ok.fil"])
+
+            mock_inspect.assert_not_called()
+
     def test_listing_filters_unsupported_container_formats(self) -> None:
         from astropy.io import fits
 
@@ -304,7 +318,46 @@ class WebApiTest(unittest.TestCase):
             fits.PrimaryHDU(data=np.zeros((4, 4), dtype=np.float32)).writeto(unsupported_fits)
 
             with patch.dict("os.environ", {"FLITS_DATA_DIR": str(tmp_path)}):
-                self.assertEqual(list_filterbank_files(), ["supported.h5"])
+                self.assertEqual(
+                    list_filterbank_files(),
+                    ["supported.h5", "unsupported.fits", "unsupported.h5"],
+                )
+                self.assertEqual(list_filterbank_files(validate=True), ["supported.h5"])
+                self.assertEqual(files(validate=True)["files"], ["supported.h5"])
+
+    def test_files_endpoint_reuses_single_file_scan_for_directories(self) -> None:
+        with patch(
+            "flits.web.app.list_filterbank_files",
+            return_value=["root.fil", "nested/example.ar"],
+        ) as mock_list:
+            payload = files()
+
+        mock_list.assert_called_once_with(validate=False)
+        self.assertEqual(payload["files"], ["root.fil", "nested/example.ar"])
+        self.assertEqual(
+            payload["directories"],
+            [
+                {
+                    "path": "",
+                    "label": "Data root",
+                    "file_count": 1,
+                    "files": [{"path": "root.fil", "name": "root.fil"}],
+                },
+                {
+                    "path": "nested",
+                    "label": "nested",
+                    "file_count": 1,
+                    "files": [{"path": "nested/example.ar", "name": "example.ar"}],
+                },
+            ],
+        )
+
+    def test_files_endpoint_passes_validate_flag_to_single_scan(self) -> None:
+        with patch("flits.web.app.list_filterbank_files", return_value=["validated.h5"]) as mock_list:
+            payload = files(validate=True)
+
+        mock_list.assert_called_once_with(validate=True)
+        self.assertEqual(payload["files"], ["validated.h5"])
 
     def test_data_dir_defaults_to_current_working_directory(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -466,7 +519,10 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("compute_widths", app_js)
         self.assertIn("saveSessionSnapshot", app_js)
         self.assertIn("loadSnapshotLibrary", app_js)
-        self.assertIn("await loadSnapshotLibrary()", app_js)
+        self.assertIn("void loadSnapshotLibrary()", app_js)
+        self.assertNotIn("await loadSnapshotLibrary()", app_js)
+        self.assertIn("Scanning mounted files...", app_js)
+        self.assertIn("Loading saved sessions...", app_js)
         self.assertIn("openStoredSession", app_js)
         self.assertIn("renderSnapshotLibrary", app_js)
         self.assertIn('<option value="">Choose saved session</option>', app_js)
