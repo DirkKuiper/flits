@@ -47,6 +47,7 @@ nav:
       - Exports and Snapshots: user-guide/exports-and-snapshots.md
       - Supported Formats: user-guide/supported-formats.md
   - Analysis:
+      - Burst Localization: analysis/localization.md
       - Measurements: analysis/measurements.md
       - DM Optimization: analysis/dm-optimization.md
       - Temporal and Spectral Analysis: analysis/temporal-spectral.md
