@@ -3864,7 +3864,7 @@ function uncertaintyTooltip(detail) {
     parts.push(`Basis: ${detail.basis}`)
   }
   if (Array.isArray(detail.warning_flags) && detail.warning_flags.length) {
-    parts.push(`Flags: ${detail.warning_flags.join(", ")}`)
+    parts.push(`Flags: ${detail.warning_flags.map((flag) => formatMeasurementFlag(flag)).join(", ")}`)
   }
   return parts.join(" ")
 }
@@ -5763,6 +5763,9 @@ function formatMeasurementFlag(flag) {
     uncertainty_unavailable: "No uncertainty",
     insufficient_successful_trials: "Sparse MC trials",
     measurement_unavailable: "Unavailable",
+    saturation_suspected: "Saturation suspected",
+    negative_recovery_wing: "Negative recovery",
+    negative_event_tail: "Negative event tail",
   }
   return labels[flag] || flag
 }

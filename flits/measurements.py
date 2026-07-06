@@ -17,6 +17,7 @@ from flits.models import (
     MeasurementUncertainties,
     NoiseEstimateSettings,
     NoiseEstimateSummary,
+    SaturationDiagnostic,
     UncertaintyDetail,
     WidthResult,
     compatible_scalar_uncertainty,
@@ -30,6 +31,19 @@ HEAVILY_MASKED_FRACTION = 0.25
 DM_RESIDUAL_MAX_SUBBANDS = 8
 DM_RESIDUAL_MIN_CHANNELS = 4
 DM_RESIDUAL_MIN_SUBBANDS = 3
+SATURATION_WING_EXCESS_SIGNIFICANCE = 5.0
+SATURATION_WING_MIN_SN = -3.0
+SATURATION_RUN_MIN_SN = -2.0
+SATURATION_RUN_DEPTH_SN = -1.0
+SATURATION_EVENT_NEGATIVE_FRACTION = 0.15
+SATURATION_EVENT_MIN_SN = -4.0
+SATURATION_MIN_WING_BINS = 5
+# For X ~ N(0, 1): E[min(X, 0)] and Std[min(X, 0)], used to correct the
+# negative-area statistic for its pure-noise expectation.
+_NEGATIVE_HALF_MEAN = 0.3989422804014327
+_NEGATIVE_HALF_STD = 0.5838301894182458
+# P(X < SATURATION_RUN_DEPTH_SN) for the longest-negative-run calibration.
+_RUN_DEPTH_PROBABILITY = 0.15865525393145707
 
 
 def _uncertainty_detail(
@@ -594,6 +608,161 @@ def event_snr(selected_profile_sn: np.ndarray, event_rel_start: int, event_rel_e
     return float(np.nansum(finite) / np.sqrt(finite.size))
 
 
+def _finite_min_or_none(values: np.ndarray) -> float | None:
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    if finite.size == 0:
+        return None
+    return float(np.min(finite))
+
+
+def _negative_excess_significance(values: np.ndarray) -> float | None:
+    """Z-score of the negative area relative to its pure-noise expectation.
+
+    For a unit-normal profile, sum(min(x, 0)) over N bins has mean
+    -0.3989*N and standard deviation 0.5838*sqrt(N). The uncorrected
+    statistic |sum(min(x, 0))| / sqrt(N) grows as 0.4*sqrt(N) for pure
+    noise, so it must be centred before thresholding or wide windows flag
+    spuriously.
+    """
+    if values.size == 0:
+        return None
+    negative_area = abs(float(np.sum(np.minimum(values, 0.0))))
+    expected = _NEGATIVE_HALF_MEAN * float(values.size)
+    scale = _NEGATIVE_HALF_STD * float(np.sqrt(values.size))
+    return float((negative_area - expected) / scale)
+
+
+def _longest_run_below(values: np.ndarray, threshold: float) -> int:
+    longest = 0
+    current = 0
+    for value in values:
+        if np.isfinite(value) and value < threshold:
+            current += 1
+            longest = max(longest, current)
+        else:
+            current = 0
+    return int(longest)
+
+
+def _negative_run_threshold(wing_size: int) -> int:
+    """Longest run of sub-(-1 sigma) bins expected < 0.1% of the time.
+
+    Solves N * p^L <= 1e-3 for L with p = P(X < -1), floored at 5 bins.
+    """
+    if wing_size <= 0:
+        return 5
+    length = np.log(wing_size / 1e-3) / np.log(1.0 / _RUN_DEPTH_PROBABILITY)
+    return int(max(5, np.ceil(length)))
+
+
+def saturation_diagnostic(
+    selected_profile_sn: np.ndarray,
+    event_rel_start: int,
+    event_rel_end: int,
+) -> SaturationDiagnostic:
+    """Detect saturation/AGC-recovery signatures around an event window.
+
+    Works on the off-pulse-normalized S/N profile. Two per-side wing tests
+    target the classic post-burst negative recovery: a noise-corrected
+    negative-area excess (deep, localized dips) and a longest-negative-run
+    test (broad, shallow troughs). An in-event test catches negative tails
+    inside the selected window. Clipped-plateau detection at the profile
+    peak is intentionally out of scope: smooth broad bursts legitimately
+    spend many bins near their maximum, so a profile-level plateau test
+    cannot separate clipping from morphology.
+    """
+    profile = np.asarray(selected_profile_sn, dtype=float)
+    if profile.size == 0:
+        return SaturationDiagnostic.ok()
+
+    event_start = max(0, min(int(event_rel_start), profile.size))
+    event_end = max(event_start, min(int(event_rel_end), profile.size))
+    event_width = max(1, event_end - event_start)
+    wing_cap = max(SATURATION_MIN_WING_BINS, profile.size // 4)
+    wing_bins = min(max(event_width, SATURATION_MIN_WING_BINS), wing_cap)
+
+    left = profile[max(0, event_start - wing_bins):event_start]
+    right = profile[event_end:min(profile.size, event_end + wing_bins)]
+    left_finite = left[np.isfinite(left)]
+    right_finite = right[np.isfinite(right)]
+
+    left_min = _finite_min_or_none(left_finite)
+    right_min = _finite_min_or_none(right_finite)
+    wing_min = _finite_min_or_none(np.concatenate([left_finite, right_finite]))
+
+    warning_flags: list[str] = []
+    excess_values: list[float] = []
+    run_values: list[int] = []
+    run_thresholds: list[int] = []
+    for side_values, side_min in ((left_finite, left_min), (right_finite, right_min)):
+        if side_values.size < SATURATION_MIN_WING_BINS:
+            continue
+        excess = _negative_excess_significance(side_values)
+        run = _longest_run_below(side_values, SATURATION_RUN_DEPTH_SN)
+        run_threshold = _negative_run_threshold(side_values.size)
+        if excess is not None:
+            excess_values.append(excess)
+        run_values.append(run)
+        run_thresholds.append(run_threshold)
+        if (
+            excess is not None
+            and side_min is not None
+            and excess >= SATURATION_WING_EXCESS_SIGNIFICANCE
+            and side_min <= SATURATION_WING_MIN_SN
+        ):
+            warning_flags.append("negative_recovery_wing")
+        elif (
+            side_min is not None
+            and run >= run_threshold
+            and side_min <= SATURATION_RUN_MIN_SN
+        ):
+            warning_flags.append("negative_recovery_wing")
+
+    event = profile[event_start:event_end]
+    event_finite = event[np.isfinite(event)]
+    event_negative_fraction = 0.0
+    event_negative_min = _finite_min_or_none(event_finite)
+    if event_finite.size:
+        positive_area = float(np.sum(np.maximum(event_finite, 0.0)))
+        negative_area = abs(float(np.sum(np.minimum(event_finite, 0.0))))
+        negative_excess = max(0.0, negative_area - _NEGATIVE_HALF_MEAN * float(event_finite.size))
+        if positive_area > 0:
+            event_negative_fraction = float(negative_excess / positive_area)
+        elif negative_excess > 0:
+            event_negative_fraction = float("inf")
+    if (
+        event_negative_min is not None
+        and event_negative_fraction >= SATURATION_EVENT_NEGATIVE_FRACTION
+        and event_negative_min <= SATURATION_EVENT_MIN_SN
+    ):
+        warning_flags.append("negative_event_tail")
+
+    if warning_flags:
+        warning_flags.insert(0, "saturation_suspected")
+
+    def finite_or_none(value: float | None) -> float | None:
+        if value is None or not np.isfinite(value):
+            return None
+        return float(value)
+
+    return SaturationDiagnostic(
+        status="suspected" if warning_flags else "ok",
+        warning_flags=sorted(set(warning_flags)),
+        wing_bin_count=int(wing_bins),
+        left_wing_min_sn=finite_or_none(left_min),
+        right_wing_min_sn=finite_or_none(right_min),
+        negative_wing_min_sn=finite_or_none(wing_min),
+        negative_wing_excess_significance=(
+            finite_or_none(max(excess_values)) if excess_values else None
+        ),
+        negative_wing_max_run_bins=(max(run_values) if run_values else 0),
+        negative_wing_run_threshold_bins=(min(run_thresholds) if run_thresholds else 0),
+        event_negative_fraction=finite_or_none(event_negative_fraction),
+        event_negative_min_sn=finite_or_none(event_negative_min),
+    )
+
+
 def compute_burst_measurements(
     *,
     burst_name: str,
@@ -689,6 +858,7 @@ def compute_burst_measurements(
 
     width_ms_acf, temporal_lags_ms, temporal_acf = _acf_width(context.event_profile_sn, tsamp_ms)
     spectral_width_mhz_acf, spectral_lags_mhz, spectral_acf = _acf_width(context.spectrum_sn, abs(freqres_mhz))
+    saturation = saturation_diagnostic(context.selected_profile_sn, event_rel_start, event_rel_end)
 
     flux_scale = None
     peak_flux_jy = None
@@ -740,6 +910,7 @@ def compute_burst_measurements(
         measurement_flags.append("missing_distance")
     if sefd_jy is None or context.effective_bandwidth_mhz <= 0:
         measurement_flags.append("missing_sefd")
+    measurement_flags.extend(saturation.warning_flags)
 
     uncertainty_details: dict[str, UncertaintyDetail] = {}
     noise_publishable = _noise_uncertainty_publishable(context.noise_summary)
@@ -785,6 +956,8 @@ def compute_burst_measurements(
     flux_like_warning_flags = list(context.noise_summary.warning_flags)
     if "low_sn" in measurement_flags:
         flux_like_warning_flags.append("low_sn")
+    flux_like_warning_flags.extend(saturation.warning_flags)
+    saturation_suspected = "saturation_suspected" in saturation.warning_flags
     sefd_fractional_uncertainty = (
         None if sefd_fractional_uncertainty is None else max(0.0, float(sefd_fractional_uncertainty))
     )
@@ -818,7 +991,7 @@ def compute_burst_measurements(
                 "Peak-flux uncertainty combines radiometer-noise statistics with any supplied SEFD fractional systematic. "
                 "Without an SEFD uncertainty input, this remains statistical-only and non-publishable."
             ),
-            publishable=peak_flux_publishable,
+            publishable=peak_flux_publishable and not saturation_suspected,
             warning_flags=flux_like_warning_flags,
         )
     if fluence_jyms is not None and fluence_uncertainty is not None:
@@ -846,7 +1019,7 @@ def compute_burst_measurements(
                 "Fluence uncertainty combines radiometer-noise statistics with any supplied SEFD fractional systematic. "
                 "Without an SEFD uncertainty input, this remains statistical-only and non-publishable."
             ),
-            publishable=fluence_publishable,
+            publishable=fluence_publishable and not saturation_suspected,
             warning_flags=flux_like_warning_flags,
         )
     if iso_e is not None and fluence_jyms not in (None, 0.0):
@@ -1006,6 +1179,7 @@ def compute_burst_measurements(
         spectral_acf=np.asarray(spectral_acf, dtype=float),
         spectral_acf_lags_mhz=np.asarray(spectral_lags_mhz, dtype=float),
         model_fit=None,
+        saturation=saturation,
     )
 
     spectral_extent_mhz = 0.0

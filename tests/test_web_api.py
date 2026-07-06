@@ -1189,6 +1189,14 @@ class WebApiTest(unittest.TestCase):
         self.assertIsNone(payload["view"]["spectral_analysis"])
         self.assertIsNone(payload["view"]["temporal_structure"])
 
+    def test_frontend_has_saturation_warning_labels(self) -> None:
+        source = (STATIC_DIR / "app.js").read_text()
+
+        self.assertIn('saturation_suspected: "Saturation suspected"', source)
+        self.assertIn('negative_recovery_wing: "Negative recovery"', source)
+        self.assertIn('negative_event_tail: "Negative event tail"', source)
+        self.assertIn("detail.warning_flags.map((flag) => formatMeasurementFlag(flag))", source)
+
     def test_delete_session_removes_session(self) -> None:
         session_id = "synthetic-delete"
         SESSIONS[session_id] = _synthetic_session()

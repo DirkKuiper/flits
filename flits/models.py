@@ -1482,6 +1482,60 @@ class ModelFitDiagnostics:
 
 
 @dataclass(frozen=True)
+class SaturationDiagnostic:
+    status: str
+    warning_flags: list[str] = field(default_factory=list)
+    wing_bin_count: int = 0
+    left_wing_min_sn: float | None = None
+    right_wing_min_sn: float | None = None
+    negative_wing_min_sn: float | None = None
+    negative_wing_excess_significance: float | None = None
+    negative_wing_max_run_bins: int = 0
+    negative_wing_run_threshold_bins: int = 0
+    event_negative_fraction: float | None = None
+    event_negative_min_sn: float | None = None
+
+    @classmethod
+    def ok(cls) -> "SaturationDiagnostic":
+        return cls(status="ok")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": str(self.status),
+            "warning_flags": [str(flag) for flag in self.warning_flags],
+            "wing_bin_count": int(self.wing_bin_count),
+            "left_wing_min_sn": _float_or_none(self.left_wing_min_sn),
+            "right_wing_min_sn": _float_or_none(self.right_wing_min_sn),
+            "negative_wing_min_sn": _float_or_none(self.negative_wing_min_sn),
+            "negative_wing_excess_significance": _float_or_none(self.negative_wing_excess_significance),
+            "negative_wing_max_run_bins": int(self.negative_wing_max_run_bins),
+            "negative_wing_run_threshold_bins": int(self.negative_wing_run_threshold_bins),
+            "event_negative_fraction": _float_or_none(self.event_negative_fraction),
+            "event_negative_min_sn": _float_or_none(self.event_negative_min_sn),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any] | None) -> "SaturationDiagnostic":
+        if not isinstance(payload, dict):
+            return cls.ok()
+        return cls(
+            status=str(payload.get("status", "ok")),
+            warning_flags=[str(flag) for flag in payload.get("warning_flags", [])],
+            wing_bin_count=int(payload.get("wing_bin_count", 0)),
+            left_wing_min_sn=_float_or_none(payload.get("left_wing_min_sn")),
+            right_wing_min_sn=_float_or_none(payload.get("right_wing_min_sn")),
+            negative_wing_min_sn=_float_or_none(payload.get("negative_wing_min_sn")),
+            negative_wing_excess_significance=_float_or_none(
+                payload.get("negative_wing_excess_significance")
+            ),
+            negative_wing_max_run_bins=int(payload.get("negative_wing_max_run_bins", 0)),
+            negative_wing_run_threshold_bins=int(payload.get("negative_wing_run_threshold_bins", 0)),
+            event_negative_fraction=_float_or_none(payload.get("event_negative_fraction")),
+            event_negative_min_sn=_float_or_none(payload.get("event_negative_min_sn")),
+        )
+
+
+@dataclass(frozen=True)
 class MeasurementDiagnostics:
     gaussian_fits: list[GaussianFit1D]
     time_axis_ms: np.ndarray
@@ -1495,6 +1549,7 @@ class MeasurementDiagnostics:
     spectral_acf: np.ndarray
     spectral_acf_lags_mhz: np.ndarray
     model_fit: ModelFitDiagnostics | None = None
+    saturation: SaturationDiagnostic = field(default_factory=SaturationDiagnostic.ok)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1510,6 +1565,7 @@ class MeasurementDiagnostics:
             "spectral_acf": _jsonable_1d(self.spectral_acf),
             "spectral_acf_lags_mhz": _jsonable_1d(self.spectral_acf_lags_mhz),
             "model_fit": self.model_fit.to_dict() if self.model_fit is not None else None,
+            "saturation": self.saturation.to_dict(),
         }
 
     @classmethod
@@ -1531,6 +1587,7 @@ class MeasurementDiagnostics:
                 if payload.get("model_fit") is None
                 else ModelFitDiagnostics.from_dict(payload["model_fit"])
             ),
+            saturation=SaturationDiagnostic.from_dict(payload.get("saturation")),
         )
 
 
