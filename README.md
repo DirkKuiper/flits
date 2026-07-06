@@ -42,6 +42,7 @@ pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3
 - Browser-based workflow for burst inspection on SIGPROC, PSRFITS, and CHIME/FRB HDF5 data.
 - CHIME support includes public catalog waterfalls and beamformed `BBData` power products.
 - Interactive crop, event, off-pulse, spectral-window, and masking controls.
+- Automatic burst localization in time and frequency (matched-filter event window, spectral extent, and off-pulse placement in one click).
 - Calibrated fluence and peak-flux outputs when an SEFD is available.
 - DM optimization using integrated-event S/N and DMphase.
 - Temporal-structure, PSD, ACF, and optional selected-event model fitting.
