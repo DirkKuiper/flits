@@ -48,7 +48,9 @@ from flits.web.app import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SAMPLE = ROOT / "blc_s_guppi_60385_53711_DIAG_FRB20240114A_0057_40.265_41.518_b32_I0_D527_851_F192D_K_t30_d1.fil"
+_SAMPLE_NAME = "blc_s_guppi_60385_53711_DIAG_FRB20240114A_0057_40.265_41.518_b32_I0_D527_851_F192D_K_t30_d1.fil"
+_SAMPLE_CANDIDATES = (ROOT / _SAMPLE_NAME, ROOT / "data" / "GBT-L" / _SAMPLE_NAME)
+SAMPLE = next((path for path in _SAMPLE_CANDIDATES if path.exists()), _SAMPLE_CANDIDATES[0])
 DM_CONST = 1 / (2.41 * 10 ** -4)
 
 
