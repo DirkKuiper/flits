@@ -672,6 +672,7 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
     payload = request.payload
     export_manifest: dict[str, Any] | None = None
     export_preview: dict[str, Any] | None = None
+    localization: dict[str, Any] | None = None
 
     try:
         if action == "time_factor":
@@ -708,6 +709,10 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
             session.set_spectral_extent_freq(float(payload["start_freq_mhz"]), float(payload["end_freq_mhz"]))
         elif action == "auto_mask_jess":
             session.auto_mask_jess(payload.get("profile"))
+        elif action == "auto_localize":
+            localization = session.auto_localize(
+                detection_snr_threshold=float(payload.get("detection_snr_threshold", 6.0)),
+            ).to_dict()
         elif action == "set_dm":
             session.set_dm(float(payload["dm"]))
         elif action == "apply_best_dm":
@@ -784,6 +789,7 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
         "view": session.get_view(),
         "export_manifest": export_manifest,
         "export_preview": export_preview,
+        "localization": localization,
     }
 
 

@@ -171,6 +171,7 @@ const buildExportButton = document.getElementById("buildExportButton")
 const resetViewButton = document.getElementById("resetViewButton")
 const clearRegionsButton = document.getElementById("clearRegionsButton")
 const clearOffpulseButton = document.getElementById("clearOffpulseButton")
+const autoLocalizeButton = document.getElementById("autoLocalizeButton")
 const computeButton = document.getElementById("computeButton")
 const undoMaskButton = document.getElementById("undoMaskButton")
 const resetMaskButton = document.getElementById("resetMaskButton")
@@ -556,6 +557,7 @@ function bindControls() {
   resetViewButton.addEventListener("click", () => postAction("reset_view"))
   clearRegionsButton.addEventListener("click", () => postAction("clear_regions"))
   clearOffpulseButton.addEventListener("click", () => postAction("clear_offpulse"))
+  autoLocalizeButton.addEventListener("click", () => postAction("auto_localize"))
   computeButton.addEventListener("click", () => postAction("compute_properties"))
   undoMaskButton.addEventListener("click", () => postAction("undo_mask"))
   resetMaskButton.addEventListener("click", () => postAction("reset_mask"))
@@ -1383,9 +1385,14 @@ async function postAction(type, payload = {}) {
       markSessionDirty()
     }
     setStatus("Ready", "success")
-    const message = type === "auto_mask_jess"
-      ? autoMaskToastText(response.view.state.last_auto_mask)
-      : actionSuccessText(type)
+    let message
+    if (type === "auto_mask_jess") {
+      message = autoMaskToastText(response.view.state.last_auto_mask)
+    } else if (type === "auto_localize") {
+      message = autoLocalizeToastText(response.localization)
+    } else {
+      message = actionSuccessText(type)
+    }
     if (message) {
       showToast(message, "success")
     }
@@ -5249,6 +5256,7 @@ function busyButtonForAction(action) {
   if (action === "open_snapshot") return openSnapshotButton
   if (action === "compute_properties") return computeButton
   if (action === "auto_mask_jess") return jessButton
+  if (action === "auto_localize") return autoLocalizeButton
   if (action === "optimize_dm") return optimizeDmButton
   if (action === "apply_best_dm") return applyBestDmButton
   if (action === "fit_model") return fitModelButton
@@ -5272,6 +5280,7 @@ function busyButtonText(action) {
   if (action === "open_snapshot") return "Opening..."
   if (action === "compute_properties") return "Computing..."
   if (action === "auto_mask_jess") return "Masking..."
+  if (action === "auto_localize") return "Localizing..."
   if (action === "optimize_dm") return "Sweeping DM..."
   if (action === "fit_model") return "Fitting..."
   if (action === "run_temporal_structure_analysis") return "Running..."
@@ -5341,6 +5350,21 @@ function actionSuccessText(action) {
     compute_properties: "Derived properties updated",
   }
   return labels[action] || null
+}
+
+function autoLocalizeToastText(localization) {
+  if (!localization) {
+    return "Auto localize finished"
+  }
+  if (localization.status === "no_detection") {
+    return "Auto localize: no burst above the detection threshold"
+  }
+  const snr = Number(localization.integrated_snr).toFixed(1)
+  const band = localization.band_limited ? "band-limited" : "full band"
+  const flags = (localization.warning_flags || []).length
+    ? ` (${localization.warning_flags.join(", ")})`
+    : ""
+  return `Burst localized: integrated S/N ${snr}, ${band}${flags}`
 }
 
 function autoMaskToastText(summary) {

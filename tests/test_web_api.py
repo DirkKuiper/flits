@@ -704,6 +704,31 @@ class WebApiTest(unittest.TestCase):
 
         session.auto_mask_jess.assert_called_once_with("fast")
 
+    def test_session_action_auto_localize_updates_selections(self) -> None:
+        session_id = "synthetic-localize"
+        session = _synthetic_session()
+        session.event_start = 10
+        session.event_end = 20
+        SESSIONS[session_id] = session
+        try:
+            response = session_action(
+                session_id,
+                ActionRequest(type="auto_localize", payload={}),
+            )
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        localization = response["localization"]
+        self.assertIsNotNone(localization)
+        self.assertEqual(localization["status"], "ok")
+        self.assertGreater(localization["integrated_snr"], 6.0)
+        # The synthetic burst is a dispersed streak spanning bins ~114-162
+        # at DM 0 (the session does not dedisperse the raw array).
+        self.assertLessEqual(session.event_start, 114)
+        self.assertGreaterEqual(session.event_end, 162)
+        self.assertLess(session.event_end - session.event_start, 130)
+        self.assertTrue(session.offpulse_regions)
+
     def test_session_action_optimize_dm_returns_dm_optimization_payload(self) -> None:
         session_id = "synthetic-dm"
         SESSIONS[session_id] = _synthetic_session()

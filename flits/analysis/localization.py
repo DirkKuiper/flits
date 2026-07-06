@@ -205,6 +205,30 @@ def _event_extent(
             elif run_end <= start and start - run_end <= merge_gap:
                 start = run_start
                 changed = True
+
+    # The width-w boxcar carries signal ~w bins beyond the burst, so the
+    # coarse >= exit region overshoots by about the matched width per side
+    # for bright bursts. Shrink the boundaries using significant runs of a
+    # finer smoothing so they land near the true signal edge; isolated
+    # noise bins above the exit threshold do not anchor the boundary.
+    fine_width = max(1, int(width) // 6)
+    if fine_width < width:
+        fine = _boxcar_snr(profile_sn, fine_width)
+        section = fine[start:end]
+        fine_runs = _contiguous_runs(section >= exit_sn)
+        run_gate = 3.0
+        kept = [
+            (run_start, run_end)
+            for run_start, run_end in fine_runs
+            if float(np.nanmax(section[run_start:run_end])) >= run_gate
+            or run_start + start <= peak_bin < run_end + start
+        ]
+        if kept:
+            tight_start = start + min(run_start for run_start, _ in kept)
+            tight_end = start + max(run_end for _, run_end in kept)
+            start = min(tight_start, peak_bin)
+            end = max(tight_end, peak_bin + 1)
+
     return max(0, int(start)), min(ntime, int(end))
 
 
@@ -307,7 +331,7 @@ def _offpulse_windows(
     if ntime - right_lo >= 2:
         windows.append((right_lo, ntime))
     total = sum(hi - lo for lo, hi in windows)
-    if total < min_bins and windows:
+    if total < min_bins:
         # Relax the guard so at least some off-pulse reference exists.
         guard = max(width, (ev_hi - ev_lo) // 2)
         windows = []
