@@ -125,11 +125,21 @@ def _band_profile_sn(z: np.ndarray, spec_lo: int, spec_hi: int, exclude: tuple[i
 
 
 def _boxcar_snr(profile_sn: np.ndarray, width: int) -> np.ndarray:
-    """Matched-filter S/N for a boxcar of `width` bins (same-length output)."""
+    """Matched-filter S/N for a boxcar of `width` bins (same-length output).
+
+    The convolved series is re-normalized by its own robust off-burst
+    scatter rather than the white-noise sqrt(width) expectation: slow
+    baseline wander (red noise) dominates wide smoothing scales, and the
+    white-noise scaling would let broad baseline swells masquerade as
+    significant burst extent. Median/MAD stay valid while the burst
+    occupies a minority of the samples.
+    """
     if width <= 1:
         return profile_sn.copy()
     kernel = np.ones(int(width), dtype=float) / np.sqrt(float(width))
-    return np.convolve(profile_sn, kernel, mode="same")
+    smoothed = np.convolve(profile_sn, kernel, mode="same")
+    center, scale = _robust_stats(smoothed)
+    return (smoothed - center) / scale
 
 
 def _width_ladder(ntime: int, max_width_bins: int | None) -> list[int]:
