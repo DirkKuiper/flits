@@ -97,9 +97,12 @@ def _normalize_channels(masked: np.ndarray, exclude: tuple[int, int] | None) -> 
         fallback = np.nanstd(reference, axis=1, keepdims=True)
     scale = np.where(np.isfinite(scale) & (scale > 0), scale, fallback)
     valid = np.isfinite(scale) & (scale > 0)
-    z = np.full(masked.shape, np.nan, dtype=float)
-    np.subtract(masked, center, out=z, where=valid)
-    np.divide(z, scale, out=z, where=valid)
+    # Keep the input precision: multi-GB float32 waterfalls must not be
+    # silently doubled in memory.
+    dtype = np.result_type(masked.dtype, np.float32)
+    z = np.full(masked.shape, np.nan, dtype=dtype)
+    np.subtract(masked, center.astype(dtype), out=z, where=valid)
+    np.divide(z, scale.astype(dtype), out=z, where=valid)
     return z
 
 
@@ -380,7 +383,9 @@ def localize_burst(
     array. When nothing crosses `detection_snr_threshold` the status is
     "no_detection" and the selections fall back to the array centre.
     """
-    masked = np.asarray(masked, dtype=float)
+    masked = np.asarray(masked)
+    if not np.issubdtype(masked.dtype, np.floating):
+        masked = masked.astype(np.float32)
     if masked.ndim != 2 or masked.size == 0:
         raise ValueError("localize_burst expects a non-empty 2D (channels x time) array")
     nchan, ntime = masked.shape
