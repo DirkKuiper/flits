@@ -17,3 +17,11 @@ data/
 .claude/
 # Agent Rules
 .agentrules
+
+# Research data, outputs, and manuscript working copies (not part of FLITS)
+analysis_outputs/
+R147_paper/
+R147_paper.zip
+R147_notebooks/
+R147_GBT_Dirk/
+*.fits
