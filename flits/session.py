@@ -11,6 +11,7 @@ import warnings
 import numpy as np
 
 from flits.analysis.dm_optimization import DMMetricInput, available_dm_metrics, optimize_dm_trials
+from flits.analysis.localization import BurstLocalization, localize_burst
 from flits.analysis.spectral.core import run_averaged_spectral_analysis
 from flits.analysis.morphology import compute_width_analysis
 from flits.analysis.temporal.core import run_temporal_structure_analysis, temporal_to_spectral_result
@@ -1744,6 +1745,45 @@ class BurstSession:
                 float(context.time_axis_ms[context.event_rel_end - 1] + spacing_ms),
             )
         return (self.bin_to_ms(self.event_start), self.bin_to_ms(self.event_end))
+
+    def auto_localize(
+        self,
+        *,
+        detection_snr_threshold: float = 6.0,
+        apply: bool = True,
+        **kwargs: Any,
+    ) -> BurstLocalization:
+        """Automatically localize the burst inside the current crop.
+
+        Runs the iterative time/frequency search on the masked crop at
+        native resolution and, when a detection is found and `apply` is
+        True, updates the event window, spectral extent, off-pulse
+        windows, and peak selection. The crop itself is unchanged.
+        """
+        masked = self.get_masked_crop()
+        result = localize_burst(
+            masked,
+            detection_snr_threshold=detection_snr_threshold,
+            **kwargs,
+        )
+        if apply and result.status != "no_detection":
+            base = self.crop_start
+            self.event_start = max(self.crop_start, base + int(result.event_start_bin))
+            self.event_end = min(self.crop_end, base + int(result.event_end_bin))
+            if self.event_end <= self.event_start:
+                self.event_end = min(self.crop_end, self.event_start + 2)
+            self.spec_ex_lo, self.spec_ex_hi = self._ordered_channel_bounds(
+                int(result.spec_lo), int(result.spec_hi)
+            )
+            self.offpulse_regions = [
+                (base + int(lo), base + int(hi))
+                for lo, hi in result.offpulse_regions
+                if int(hi) - int(lo) >= 2
+            ]
+            self.peak_positions = []
+            self.manual_peaks = False
+            self.invalidate_analysis_state()
+        return result
 
     def auto_mask_jess(self, profile: str | None = None) -> None:
         if jess.channel_masks.channel_masker is None:
