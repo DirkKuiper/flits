@@ -25,3 +25,13 @@ R147_paper.zip
 R147_notebooks/
 R147_GBT_Dirk/
 *.fits
+
+# Local R147 analysis helpers/manifests
+GBT_bursts.txt
+scripts/analyze_high_time_res_bursts.py
+scripts/fast_morphology_flits_overlay.py
+scripts/gbt_l_fig3_comparison.py
+scripts/nrt_local_fig3_position.py
+scripts/plot_fluence_timescale_relation.py
+scripts/r147_full_band_burst_rate_overlay.py
+scripts/r147_saturation_audit.py
