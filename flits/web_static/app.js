@@ -199,6 +199,7 @@ const plotTheme = Object.freeze({
   accentStrong: "#5f2b88",
   accentAlt: "#327cbc",
   accentAltStrong: "#285f93",
+  spectral: "#D55E00",
   accentSoft: "rgba(114, 53, 162, 0.12)",
   accentAltSoft: "rgba(50, 124, 188, 0.14)",
   warning: "#8e6ebd",
@@ -5100,8 +5101,8 @@ function buildHeatmapShapes(view) {
   const shapes = [
     verticalLine(view.state.event_ms[0], y0, y1, plotTheme.accentAlt, "solid", "x", "y"),
     verticalLine(view.state.event_ms[1], y0, y1, plotTheme.accentAlt, "solid", "x", "y"),
-    horizontalLine(view.state.spectral_extent_mhz[0], x0, x1, plotTheme.accent, "solid", "x", "y"),
-    horizontalLine(view.state.spectral_extent_mhz[1], x0, x1, plotTheme.accent, "solid", "x", "y"),
+    horizontalLine(view.state.spectral_extent_mhz[0], x0, x1, plotTheme.spectral, "solid", "x", "y"),
+    horizontalLine(view.state.spectral_extent_mhz[1], x0, x1, plotTheme.spectral, "solid", "x", "y"),
   ]
 
   for (const region of view.state.offpulse_ms || []) {
@@ -5128,8 +5129,8 @@ function buildSpectrumShapes(view) {
   const xMin = minFinite(view.plot.spectrum.x)
   const xMax = maxFinite(view.plot.spectrum.x)
   return [
-    horizontalLine(view.state.spectral_extent_mhz[0], xMin, xMax, plotTheme.accent, "solid", "x3", "y3"),
-    horizontalLine(view.state.spectral_extent_mhz[1], xMin, xMax, plotTheme.accent, "solid", "x3", "y3"),
+    horizontalLine(view.state.spectral_extent_mhz[0], xMin, xMax, plotTheme.spectral, "solid", "x3", "y3"),
+    horizontalLine(view.state.spectral_extent_mhz[1], xMin, xMax, plotTheme.spectral, "solid", "x3", "y3"),
   ]
 }
 
