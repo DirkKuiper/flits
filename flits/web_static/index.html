@@ -320,6 +320,7 @@
                 <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="dm">DM</button>
                 <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="fitting">Fitting</button>
                 <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="temporal">Temporal</button>
+                <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="polarization">Polarization</button>
                 <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="export">Export</button>
               </div>
             </div>
@@ -520,6 +521,25 @@
               <div class="plot acf-plot temporal-acf-plot is-empty" id="acfPlot"></div>
               <div class="plot dm-optimization-plot temporal-scale-plot is-empty" id="temporalScalePlot"></div>
               <div class="plot dm-optimization-plot temporal-psd-plot is-empty" id="spectralPlot"></div>
+            </section>
+
+            <section class="analysis-panel" id="analysisPolarizationPanel" data-tab-panel="polarization" role="tabpanel" hidden>
+              <div class="analysis-panel-head">
+                <h4>Rotation-Measure Synthesis</h4>
+                <p>Import calibrated channelized Stokes Q/U spectra and inspect the weighted dirty Faraday spectrum and RMSF.</p>
+              </div>
+              <div class="dm-fit-note" data-tone="warning">
+                <strong>Calibration required</strong>
+                <span>FLITS does not infer Q/U from Stokes I. Apply leakage, polarization, and ionospheric corrections upstream before interpreting a source RM.</span>
+              </div>
+              <div class="export-actions">
+                <button class="primary-button" id="rmImportButton" type="button">Import Q/U JSON</button>
+                <input id="rmInput" type="file" accept=".json,application/json" hidden>
+              </div>
+              <div id="rmContent" class="results-content">
+                <div class="empty-state">Import JSON containing freqs_mhz, stokes_q, and stokes_u arrays. Optional sigma_q, sigma_u, and Faraday-grid bounds are supported.</div>
+              </div>
+              <div class="plot dm-optimization-plot is-empty" id="rmPlot"></div>
             </section>
 
             <section class="analysis-panel" id="analysisExportPanel" data-tab-panel="export" role="tabpanel" hidden>

@@ -51,6 +51,7 @@ nav:
       - Measurements: analysis/measurements.md
       - DM Optimization: analysis/dm-optimization.md
       - Temporal and Spectral Analysis: analysis/temporal-spectral.md
+      - Rotation-Measure Synthesis: analysis/rm-synthesis.md
       - Model Fitting: analysis/model-fitting.md
   - Developer:
       - Testing: developer/testing.md
