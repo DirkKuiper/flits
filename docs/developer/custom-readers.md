@@ -4,6 +4,21 @@ FLITS discovers readers through the `flits.readers` entry-point group. A
 third-party package can add support for a new format without patching FLITS —
 `pip install your-plugin` is enough for `detect_reader` to pick it up.
 
+## Built-in reader layout
+
+The built-in implementations keep container integration separate from format
+interpretation:
+
+- `reader.py` owns discovery, sniffing, and the public reader protocol.
+- `your_reader.py` adapts the `your` package for SIGPROC and search-mode data.
+- `psrfits.py` owns PSRFITS detection, header coercion, and folded-data loading.
+- `chime_hdf5_reader.py` coordinates HDF5 inspection and loading.
+- `chime.py` owns CHIME schema detection, metadata coercion, and alignment helpers.
+- `validation.py` applies the metadata invariants shared by every reader.
+
+Keep new schema-specific parsing out of the registry and session layers. Add a
+small format module and expose it through a zero-argument reader class instead.
+
 ## Reader interface
 
 A reader is a zero-argument class implementing the `BurstReader` protocol
