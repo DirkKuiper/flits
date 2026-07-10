@@ -18,6 +18,7 @@ from flits.io.chime import (
     _coerce_int,
     _coerce_optional_float,
     _coerce_optional_int,
+    _catalog_tsamp_seconds,
     _decode_attr,
     _dm_delay_seconds,
     _estimate_freqres,
@@ -444,13 +445,7 @@ class ChimeHdf5Reader:
                 path=resolved,
             )
 
-        time_span = float(extent[1] - extent[0])
-        if time_span <= 0 or ntime <= 0:
-            raise CorruptedDataError(
-                f"Non-positive time span in /frb/extent: {extent[:2]} with ntime={ntime}.",
-                path=resolved,
-            )
-        tsamp = time_span / ntime
+        tsamp = _catalog_tsamp_seconds(extent, ntime, resolved)
         freqres = _estimate_freqres(plot_freq, resolved)
 
         tns_name = _read_attr(root, "tns_name")

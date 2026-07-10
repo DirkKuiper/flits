@@ -342,6 +342,25 @@ def _estimate_freqres(freqs_mhz: np.ndarray, path: Path) -> float:
     return float(np.median(diffs))
 
 
+def _catalog_tsamp_seconds(extent: np.ndarray, ntime: int, path: Path) -> float:
+    """Return the public-catalog sample interval in seconds.
+
+    CHIME public-catalog ``/frb/extent`` stores its time bounds in
+    milliseconds (the same units used by the catalog plotting tutorial), while
+    FLITS metadata and read-window configuration use seconds.
+    """
+    values = np.asarray(extent, dtype=float)
+    if values.shape != (4,):
+        raise CorruptedDataError(f"/frb/extent must have shape (4,); got {values.shape}.", path=path)
+    time_span_ms = float(values[1] - values[0])
+    if not np.isfinite(time_span_ms) or time_span_ms <= 0.0 or int(ntime) <= 0:
+        raise CorruptedDataError(
+            f"Non-positive time span in /frb/extent: {values[:2]} with ntime={ntime}.",
+            path=path,
+        )
+    return time_span_ms / (int(ntime) * 1000.0)
+
+
 def _shift_1d_with_nan(values: np.ndarray, shift_bins: int) -> np.ndarray:
     out = np.full(values.shape, np.nan, dtype=np.float32)
     if values.size == 0:
@@ -376,6 +395,5 @@ def _normalize_waterfall(stokes_i: np.ndarray, tail_fraction: float) -> np.ndarr
     offpulse_start = min(stokes_i.shape[1] - 1, int((1 - tail_fraction) * stokes_i.shape[1]))
     offpulse = stokes_i[:, offpulse_start:]
     return normalize(stokes_i, offpulse).astype(np.float32, copy=False)
-
 
 

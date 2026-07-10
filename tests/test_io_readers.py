@@ -260,7 +260,7 @@ def test_chime_catalog_schema_detected_as_chime_preset(tmp_path):
     with h5py.File(path, "w") as fh:
         frb = fh.create_group("frb")
         frb.attrs["tns_name"] = "FRB20180729A"
-        frb.create_dataset("extent", data=np.array([0.0, 0.1, 400.0, 800.0]))
+        frb.create_dataset("extent", data=np.array([0.0, 100.0, 400.0, 800.0]))
         frb.create_dataset("plot_freq", data=np.linspace(400.0, 800.0, nchan))
         frb.create_dataset(
             "calibrated_wfall",
@@ -395,13 +395,15 @@ def test_chime_catalog_load_does_not_rededisperse(tmp_path):
         frb.attrs["tns_name"] = "FRB20180729A"
         frb.attrs["ra"] = 12.3
         frb.attrs["dec"] = 45.6
-        frb.create_dataset("extent", data=np.array([0.0, 0.064, 400.0, 800.0]))
+        # CHIME public-catalog plotting extents express time in milliseconds.
+        frb.create_dataset("extent", data=np.array([0.0, 64.0, 400.0, 800.0]))
         frb.create_dataset("plot_freq", data=np.linspace(400.0, 800.0, nchan))
         frb.create_dataset("calibrated_wfall", data=waterfall)
 
     inspection = inspect_filterbank(path)
     config = ObservationConfig.from_preset(dm=400.0, preset_key="generic", sefd_jy=1.0)
     data, metadata = load_filterbank_data(path, config, inspection=inspection)
+    assert metadata.tsamp == pytest.approx(1e-3)
     assert int(np.argmax(data.mean(axis=0))) == 32
     assert inspection.source_ra_deg == pytest.approx(12.3)
     assert inspection.source_dec_deg == pytest.approx(45.6)
@@ -409,3 +411,27 @@ def test_chime_catalog_load_does_not_rededisperse(tmp_path):
     assert metadata.source_dec_deg == pytest.approx(45.6)
     assert metadata.dedispersion_reference_frequency_mhz is None
     assert metadata.dedispersion_reference_basis == "unknown_public_chime_catalog_reference"
+
+
+def test_chime_catalog_read_window_uses_seconds_against_millisecond_extent(tmp_path):
+    path = tmp_path / "catalog-window.h5"
+    nchan, ntime = 8, 100
+    waterfall = np.arange(nchan * ntime, dtype=np.float32).reshape(nchan, ntime)
+    with h5py.File(path, "w") as fh:
+        frb = fh.create_group("frb")
+        frb.attrs["tns_name"] = "FRB20180729A"
+        frb.create_dataset("extent", data=np.array([-50.0, 50.0, 400.0, 800.0]))
+        frb.create_dataset("plot_freq", data=np.linspace(400.0, 800.0, nchan))
+        frb.create_dataset("calibrated_wfall", data=waterfall)
+
+    config = ObservationConfig.from_preset(
+        dm=0.0,
+        preset_key="generic",
+        sefd_jy=1.0,
+        read_start_sec=0.020,
+        read_end_sec=0.040,
+    )
+    data, metadata = load_filterbank_data(path, config)
+
+    assert metadata.tsamp == pytest.approx(1e-3)
+    assert data.shape == (nchan, 20)
