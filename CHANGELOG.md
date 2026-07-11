@@ -11,7 +11,6 @@ This file is managed by Release Please.
 
 * **analysis:** add weighted RM synthesis ([dd7d89d](https://github.com/DirkKuiper/flits/commit/dd7d89df4f3e54fa2d1004836c1cc1668f6135d3))
 * **analysis:** automatic burst localization in time and frequency ([6c271b3](https://github.com/DirkKuiper/flits/commit/6c271b321295225307cc0fe5952645a1d04211d0))
-* **polarization:** expand RM synthesis workflow ([8018344](https://github.com/DirkKuiper/flits/commit/8018344dca8ba4a84132a9e846a7f4f070082355))
 * **polarization:** expand RM synthesis workflow ([c61bb47](https://github.com/DirkKuiper/flits/commit/c61bb47fc5bf66ea3ba1e87098eb564b113284ca))
 * **web:** Auto Localize action; tighten event boundaries ([d5e3823](https://github.com/DirkKuiper/flits/commit/d5e3823613de1533f93015c911c1fd5fa63161c8))
 
@@ -21,7 +20,6 @@ This file is managed by Release Please.
 * **analysis:** calibrate matched-filter scales against red noise ([7158dd2](https://github.com/DirkKuiper/flits/commit/7158dd25a968704c797c54a10cb88907c48d3112))
 * **io:** correct CHIME catalog time units ([f4c3556](https://github.com/DirkKuiper/flits/commit/f4c35569a2a42a7916f7daf3cafe88be5bc177be))
 * **measurements:** noise-calibrated saturation diagnostic ([c4f9ec5](https://github.com/DirkKuiper/flits/commit/c4f9ec547fc4b33cb2fd1f97ea9f87ded3e85ada))
-* resolve open issues and correct CHIME timing ([6d83960](https://github.com/DirkKuiper/flits/commit/6d83960d56033f4ae60dda3930a03d71c0e980b3))
 * **web:** harden desktop session workflow ([#83](https://github.com/DirkKuiper/flits/issues/83)) ([3eaedc3](https://github.com/DirkKuiper/flits/commit/3eaedc3b2321ae3ab669a9aedad2a9faa2210e8d))
 * **web:** improve spectral window contrast ([6e1f1c4](https://github.com/DirkKuiper/flits/commit/6e1f1c4055d747da765a37cf6e6523daa23e0ebf))
 
