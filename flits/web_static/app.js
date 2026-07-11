@@ -26,6 +26,7 @@ const state = {
   selectedSnapshotId: "",
   activeSnapshot: null,
   sessionDirty: false,
+  notesDraftDirty: false,
   rmResult: null,
   rmInputData: null,
   rmInputName: "",
@@ -59,6 +60,8 @@ const statusChip = document.getElementById("statusChip")
 const modeChip = document.getElementById("modeChip")
 const modeHelpEl = document.getElementById("modeHelp")
 const pendingBox = document.getElementById("pendingBox")
+const workspaceLoadDetails = document.getElementById("workspaceLoadDetails")
+const workspaceLoadSummary = document.getElementById("workspaceLoadSummary")
 const loadButton = document.getElementById("loadButton")
 const updateTimingButton = document.getElementById("updateTimingButton")
 const directorySelect = document.getElementById("directorySelect")
@@ -86,6 +89,7 @@ const dmHalfRangeInput = document.getElementById("dmHalfRangeInput")
 const dmStepInput = document.getElementById("dmStepInput")
 const detectionHint = document.getElementById("detectionHint")
 const resolutionLabel = document.getElementById("resolutionLabel")
+const appliedDmLabel = document.getElementById("appliedDmLabel")
 const dmOptimizeBadge = document.getElementById("dmOptimizeBadge")
 const sessionSummary = document.getElementById("sessionSummary")
 const sessionFacts = document.getElementById("sessionFacts")
@@ -201,12 +205,22 @@ const timeDownButton = document.getElementById("timeDownButton")
 const timeUpButton = document.getElementById("timeUpButton")
 const freqDownButton = document.getElementById("freqDownButton")
 const freqUpButton = document.getElementById("freqUpButton")
+const exactSelectionMode = document.getElementById("exactSelectionMode")
+const exactStartInput = document.getElementById("exactStartInput")
+const exactEndInput = document.getElementById("exactEndInput")
+const exactStartLabel = document.getElementById("exactStartLabel")
+const exactEndLabel = document.getElementById("exactEndLabel")
+const exactEndField = document.getElementById("exactEndField")
+const applyExactSelectionButton = document.getElementById("applyExactSelectionButton")
+const viewerPlot = document.getElementById("viewerPlot")
 const toastStack = document.getElementById("toastStack")
 const presetDefaults = new Map()
 let syncingPresetSelection = false
 let syncingDmInput = false
 let exportPreviewTimer = null
 let exportPreviewRequestId = 0
+let detectionRequestId = 0
+let detectionAbortController = null
 const ROOT_DIRECTORY_VALUE = "__flits_root__"
 const viewerDomains = {
   heatmap: { x: [0.0, 0.78], y: [0.0, 0.78] },
@@ -278,6 +292,18 @@ const FIT_PARAMETER_LABELS = Object.freeze({
 const modeButtons = Array.from(document.querySelectorAll(".mode-button"))
 const analysisTabButtons = Array.from(document.querySelectorAll("[data-analysis-tab]"))
 const analysisPanels = Array.from(document.querySelectorAll("[data-tab-panel]"))
+const loadDraftControls = [
+  telescopeInput,
+  sefdInput,
+  sefdFractionalUncertaintyInput,
+  npolInput,
+  readStartInput,
+  readEndInput,
+  distanceInput,
+  distanceFractionalUncertaintyInput,
+  redshiftInput,
+  autoMaskProfileInput,
+]
 const sessionControls = [
   setDmButton,
   optimizeDmButton,
@@ -318,6 +344,7 @@ const sessionControls = [
   timeUpButton,
   freqDownButton,
   freqUpButton,
+  applyExactSelectionButton,
   ...modeButtons,
 ]
 const busyLockControls = [
@@ -367,13 +394,18 @@ const busyLockControls = [
   fitFoldedInput,
   fitExactJacobianInput,
   fitSolutionInput,
+  exactSelectionMode,
+  exactStartInput,
+  exactEndInput,
 ]
 
 document.addEventListener("DOMContentLoaded", async () => {
   rememberButtonLabels()
+  upgradeTooltips()
   bindControls()
   syncScintillationParameterControls()
   updateFitParameterSummary()
+  syncExactSelectionFields()
   setMode(state.mode)
   setAnalysisTab(initialAnalysisTab())
   setStatus("Idle", "neutral")
@@ -393,11 +425,13 @@ function initialAnalysisTab() {
 
 function bindControls() {
   fileInput.addEventListener("input", () => {
+    invalidateDetectionRequest()
     syncKnownFileSelection(fileInput.value.trim())
     updateControlStates()
   })
 
   directorySelect.addEventListener("change", () => {
+    invalidateDetectionRequest()
     renderFileOptions(directoryPathFromValue(directorySelect.value), { resetSelection: true })
     fileInput.value = ""
     state.detection = null
@@ -411,7 +445,11 @@ function bindControls() {
     syncKnownFileSelection(fileSelect.value)
     state.userSelectedPreset = false
     state.dmUserEditedForPath = null
-    await detectSelectedFile()
+    try {
+      await detectSelectedFile()
+    } catch (_error) {
+      // The inline detection panel already contains the actionable error.
+    }
     updateControlStates()
   })
 
@@ -419,7 +457,11 @@ function bindControls() {
     syncKnownFileSelection(fileInput.value.trim())
     state.userSelectedPreset = false
     state.dmUserEditedForPath = null
-    await detectSelectedFile()
+    try {
+      await detectSelectedFile()
+    } catch (_error) {
+      // The inline detection panel already contains the actionable error.
+    }
     updateControlStates()
   })
 
@@ -466,9 +508,11 @@ function bindControls() {
       renderDmOptimization(state.view)
     }
   })
-  saveNotesButton.addEventListener("click", () => {
-    postAction("set_notes", { notes: notesInput.value })
+  notesInput.addEventListener("input", () => {
+    state.notesDraftDirty = notesInput.value !== String(state.view?.state?.notes || "")
+    renderSessionSaveStatus()
   })
+  saveNotesButton.addEventListener("click", () => saveNotesDraft())
   setDmButton.addEventListener("click", () => {
     const dm = requireDmValue("applying DM")
     if (dm === null) {
@@ -602,6 +646,8 @@ function bindControls() {
   timeUpButton.addEventListener("click", () => scaleFactor("time", 2))
   freqDownButton.addEventListener("click", () => scaleFactor("freq", 0.5))
   freqUpButton.addEventListener("click", () => scaleFactor("freq", 2))
+  exactSelectionMode.addEventListener("change", () => syncExactSelectionFields())
+  applyExactSelectionButton.addEventListener("click", () => applyExactSelection())
 
   modeButtons.forEach((button) => {
     button.addEventListener("click", () => setMode(button.dataset.mode))
@@ -609,6 +655,16 @@ function bindControls() {
 
   analysisTabButtons.forEach((button) => {
     button.addEventListener("click", () => setAnalysisTab(button.dataset.analysisTab))
+    button.addEventListener("keydown", (event) => handleAnalysisTabKeydown(event, button))
+  })
+
+  window.addEventListener("hashchange", () => setAnalysisTab(initialAnalysisTab(), { updateHash: false }))
+  window.addEventListener("beforeunload", (event) => {
+    if (!hasUnsavedWork()) {
+      return
+    }
+    event.preventDefault()
+    event.returnValue = ""
   })
 }
 
@@ -627,7 +683,7 @@ function exportRequestPayload() {
 
 function resetExportSelection() {
   state.exportSelection = {
-    include: [],
+    include: ["json"],
     plot_formats: [],
     window_formats: [],
     window_resolutions: [],
@@ -862,6 +918,7 @@ async function downloadSessionSnapshot() {
   setBusy("export_session")
   setStatus("Exporting session", "info")
   try {
+    await persistNotesDraft()
     const response = await fetch(`/api/sessions/${state.sessionId}/snapshot`)
     if (!response.ok) {
       const payload = await response.json()
@@ -888,9 +945,70 @@ async function downloadSessionSnapshot() {
   }
 }
 
+function hasUnsavedWork() {
+  return Boolean(
+    state.sessionId
+    && (!state.activeSnapshot || state.sessionDirty || state.notesDraftDirty),
+  )
+}
+
+function confirmDiscardUnsaved(actionLabel) {
+  if (!hasUnsavedWork()) {
+    return true
+  }
+  return window.confirm(
+    `This session has unsaved work. ${actionLabel} will discard it. Continue?`,
+  )
+}
+
+function setWorkspaceLoadCollapsed(collapsed) {
+  if (!workspaceLoadDetails) {
+    return
+  }
+  workspaceLoadDetails.open = !collapsed
+  workspaceLoadSummary.textContent = state.sessionId ? "Load Another Session" : "New Session"
+}
+
+async function persistNotesDraft({ force = false } = {}) {
+  if (!state.sessionId || (!force && !state.notesDraftDirty)) {
+    return false
+  }
+  const response = await api(`/api/sessions/${state.sessionId}/actions`, {
+    method: "POST",
+    body: JSON.stringify({ type: "set_notes", payload: { notes: notesInput.value } }),
+  })
+  state.notesDraftDirty = false
+  applyView(response.view, { preserveNotesDraft: false, preserveLoadDraft: true })
+  markSessionDirty()
+  return true
+}
+
+async function saveNotesDraft() {
+  if (!state.sessionId) {
+    showToast("Load a session first", "error")
+    return
+  }
+  setBusy("set_notes")
+  setStatus("Applying notes", "info")
+  try {
+    await persistNotesDraft({ force: true })
+    setStatus("Notes applied", "success")
+    showToast("Notes applied to the live session", "success")
+  } catch (error) {
+    setStatus(error.message, "error")
+    showToast(error.message, "error")
+  } finally {
+    setBusy(null)
+  }
+}
+
 async function importSessionSnapshot(event) {
   const file = event.target.files?.[0]
   if (!file) {
+    return
+  }
+  if (!confirmDiscardUnsaved("Importing a session")) {
+    importSessionInput.value = ""
     return
   }
 
@@ -908,9 +1026,11 @@ async function importSessionSnapshot(event) {
     state.sessionId = payload.session_id
     state.activeSnapshot = null
     state.sessionDirty = false
+    state.notesDraftDirty = false
     state.exportManifest = null
     resetExportSelection()
-    applyView(payload.view)
+    applyView(payload.view, { preserveNotesDraft: false })
+    setWorkspaceLoadCollapsed(true)
     if (previousSessionId && previousSessionId !== payload.session_id) {
       try {
         await api(`/api/sessions/${previousSessionId}`, { method: "DELETE" })
@@ -965,12 +1085,14 @@ async function saveSessionSnapshot(saveAs = false) {
   setBusy(saveAs ? "save_session_copy" : "save_session")
   setStatus(saveAs ? "Saving copy" : "Saving session", "info")
   try {
+    await persistNotesDraft()
     const payload = await api(`/api/sessions/${state.sessionId}/snapshot/save`, {
       method: "POST",
       body: JSON.stringify({ save_as: Boolean(saveAs) }),
     })
     state.activeSnapshot = payload.snapshot || null
     state.sessionDirty = false
+    state.notesDraftDirty = false
     state.selectedSnapshotDirectory = snapshotDirectoryForSnapshot(state.activeSnapshot)
     state.selectedSnapshotId = state.activeSnapshot?.id || state.selectedSnapshotId
     if (payload.library) {
@@ -991,6 +1113,9 @@ async function openStoredSession(snapshotId) {
   if (!snapshotId) {
     return
   }
+  if (!confirmDiscardUnsaved("Opening a saved session")) {
+    return
+  }
 
   const previousSessionId = state.sessionId
   setBusy("open_snapshot")
@@ -1001,11 +1126,13 @@ async function openStoredSession(snapshotId) {
     state.sessionId = payload.session_id
     state.activeSnapshot = payload.snapshot || null
     state.sessionDirty = false
+    state.notesDraftDirty = false
     state.selectedSnapshotDirectory = snapshotDirectoryForSnapshot(state.activeSnapshot)
     state.selectedSnapshotId = state.activeSnapshot?.id || snapshotId
     state.exportManifest = null
     resetExportSelection()
-    applyView(payload.view)
+    applyView(payload.view, { preserveNotesDraft: false })
+    setWorkspaceLoadCollapsed(true)
     if (previousSessionId && previousSessionId !== payload.session_id) {
       try {
         await api(`/api/sessions/${previousSessionId}`, { method: "DELETE" })
@@ -1034,9 +1161,20 @@ async function api(path, options = {}) {
     headers: { "Content-Type": "application/json" },
     ...options,
   })
-  const payload = await response.json()
+  const responseText = await response.text()
+  let payload = {}
+  if (responseText) {
+    try {
+      payload = JSON.parse(responseText)
+    } catch (_error) {
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`)
+      }
+      throw new Error("The server returned an invalid response")
+    }
+  }
   if (!response.ok) {
-    throw new Error(payload.detail || "Request failed")
+    throw new Error(payload.detail || `Request failed (${response.status})`)
   }
   return payload
 }
@@ -1097,6 +1235,25 @@ function setDmInputValue(value) {
   syncingDmInput = true
   dmInput.value = value === null || value === undefined ? "" : String(value)
   syncingDmInput = false
+  syncApplyDmButtonLabel()
+}
+
+function syncApplyDmButtonLabel() {
+  const dm = parsedDmValue()
+  const label = dm === null ? "Apply DM" : `Apply DM ${fmt(dm, 3)}`
+  setDmButton.dataset.idleText = label
+  if (!state.busyAction || state.busyAction !== "set_dm") {
+    setDmButton.textContent = label
+  }
+}
+
+function resolutionLabelText(view) {
+  const timeFactor = Number(view?.state?.time_factor || 1)
+  const frequencyFactor = Number(view?.state?.freq_factor || 1)
+  if (timeFactor === 1 && frequencyFactor === 1) {
+    return "Native resolution"
+  }
+  return `Time ${timeFactor}× coarser · Frequency ${frequencyFactor}× coarser`
 }
 
 function maybeApplySuggestedDm(payload, bfile) {
@@ -1244,6 +1401,12 @@ function syncKnownFileSelection(path) {
   fileSelect.value = normalizedPath
 }
 
+function invalidateDetectionRequest() {
+  detectionRequestId += 1
+  detectionAbortController?.abort()
+  detectionAbortController = null
+}
+
 async function detectSelectedFile() {
   const bfile = fileInput.value.trim() || fileSelect.value
   if (!bfile) {
@@ -1252,11 +1415,19 @@ async function detectSelectedFile() {
     return null
   }
 
+  invalidateDetectionRequest()
+  const requestId = detectionRequestId
+  const normalizedPath = normalizeKnownFilePath(bfile)
+  detectionAbortController = new AbortController()
   try {
     const payload = await api("/api/detect", {
       method: "POST",
       body: JSON.stringify({ bfile }),
+      signal: detectionAbortController.signal,
     })
+    if (requestId !== detectionRequestId || selectedBurstPath() !== normalizedPath) {
+      return null
+    }
     state.detection = payload
     if (!state.userSelectedPreset) {
       setPresetSelection(payload.detected_preset_key)
@@ -1275,10 +1446,17 @@ async function detectSelectedFile() {
     updateControlStates()
     return payload
   } catch (error) {
+    if (error.name === "AbortError" || requestId !== detectionRequestId) {
+      return null
+    }
     state.detection = null
     renderDetectionHint(error.message)
     updateControlStates()
     throw error
+  } finally {
+    if (requestId === detectionRequestId) {
+      detectionAbortController = null
+    }
   }
 }
 
@@ -1314,6 +1492,9 @@ async function loadSession(options = {}) {
     }
     return
   }
+  if (previousSessionId && !confirmDiscardUnsaved("Loading another file")) {
+    return
+  }
 
   setBusy("load")
   setStatus("Loading", "info")
@@ -1345,9 +1526,11 @@ async function loadSession(options = {}) {
     state.sessionId = payload.session_id
     state.activeSnapshot = null
     state.sessionDirty = false
+    state.notesDraftDirty = false
     state.exportManifest = null
     resetExportSelection()
-    applyView(payload.view)
+    applyView(payload.view, { preserveNotesDraft: false })
+    setWorkspaceLoadCollapsed(true)
     if (previousSessionId && previousSessionId !== payload.session_id) {
       try {
         await api(`/api/sessions/${previousSessionId}`, { method: "DELETE" })
@@ -1386,10 +1569,16 @@ async function postAction(type, payload = {}) {
     showToast("Load a session first", "error")
     return
   }
+  if (state.busyAction) {
+    return
+  }
 
   setBusy(type)
   setStatus(actionBusyText(type), "info")
   try {
+    if (type === "export_results") {
+      await persistNotesDraft()
+    }
     const response = await api(`/api/sessions/${state.sessionId}/actions`, {
       method: "POST",
       body: JSON.stringify({ type, payload }),
@@ -1413,7 +1602,7 @@ async function postAction(type, payload = {}) {
     } else {
       markExportPreviewStale()
     }
-    applyView(response.view)
+    applyView(response.view, { preserveNotesDraft: state.notesDraftDirty, preserveLoadDraft: true })
     if (actionChangesSessionSnapshot(type)) {
       markSessionDirty()
     }
@@ -1437,7 +1626,12 @@ async function postAction(type, payload = {}) {
   }
 }
 
-function applyView(view) {
+function applyView(view, options = {}) {
+  const { preserveNotesDraft = false, preserveLoadDraft = false } = options
+  const notesDraft = preserveNotesDraft ? notesInput.value : null
+  const loadDraft = preserveLoadDraft
+    ? new Map(loadDraftControls.map((control) => [control, control.value]))
+    : null
   state.view = view
   if (view.meta.auto_mask_profile) {
     autoMaskProfileInput.value = view.meta.auto_mask_profile
@@ -1459,9 +1653,16 @@ function applyView(view) {
   observatoryLongitudeInput.value = view.meta.observatory_longitude_deg === null || view.meta.observatory_longitude_deg === undefined ? "" : String(view.meta.observatory_longitude_deg)
   observatoryLatitudeInput.value = view.meta.observatory_latitude_deg === null || view.meta.observatory_latitude_deg === undefined ? "" : String(view.meta.observatory_latitude_deg)
   observatoryHeightInput.value = view.meta.observatory_height_m === null || view.meta.observatory_height_m === undefined ? "" : String(view.meta.observatory_height_m)
-  notesInput.value = view.state.notes || ""
+  if (loadDraft) {
+    for (const [control, value] of loadDraft) {
+      control.value = value
+    }
+  }
+  notesInput.value = preserveNotesDraft ? notesDraft : (view.state.notes || "")
+  state.notesDraftDirty = preserveNotesDraft
   syncSpectralSegmentInput(view)
-  resolutionLabel.textContent = `t x${view.state.time_factor} / f x${view.state.freq_factor}`
+  resolutionLabel.textContent = resolutionLabelText(view)
+  appliedDmLabel.textContent = `Applied DM ${fmt(view.meta.dm, 3)} pc cm⁻³`
   burstTitle.textContent = view.meta.burst_name
   burstSubtitle.textContent =
     `${fmt(view.meta.shape[0], 0)} channels x ${fmt(view.meta.shape[1], 0)} time bins. ` +
@@ -1649,8 +1850,8 @@ function renderSessionSaveStatus() {
     sessionSaveStatus.title = ""
     return
   }
-  if (state.activeSnapshot && state.sessionDirty) {
-    sessionSaveStatus.textContent = "Unsaved changes"
+  if (state.activeSnapshot && (state.sessionDirty || state.notesDraftDirty)) {
+    sessionSaveStatus.textContent = state.notesDraftDirty ? "Unsaved note edits" : "Unsaved changes"
     sessionSaveStatus.dataset.tone = "warning"
     sessionSaveStatus.title = state.activeSnapshot.path || ""
     return
@@ -1661,8 +1862,8 @@ function renderSessionSaveStatus() {
     sessionSaveStatus.title = state.activeSnapshot.path || ""
     return
   }
-  sessionSaveStatus.textContent = state.sessionDirty ? "Unsaved new session" : "Not saved to library"
-  sessionSaveStatus.dataset.tone = state.sessionDirty ? "warning" : "neutral"
+  sessionSaveStatus.textContent = state.notesDraftDirty ? "Unsaved note edits" : "Unsaved new session"
+  sessionSaveStatus.dataset.tone = "warning"
   sessionSaveStatus.title = ""
 }
 
@@ -4874,6 +5075,9 @@ function bindPlotEvent(elementId, handler) {
 }
 
 function handleViewerPlotClick(event) {
+  if (state.busyAction) {
+    return
+  }
   const point = event.points?.[0]
   if (!point) return
   const panel = panelFromPoint(point)
@@ -4954,30 +5158,95 @@ function clearPending() {
   pendingBox.classList.remove("is-active")
 }
 
+function exactSelectionDefinition(mode) {
+  const frequencyMode = ["mask-channel", "mask-range", "spec-extent"].includes(mode)
+  const singleValue = ["add-peak", "remove-peak", "mask-channel"].includes(mode)
+  return {
+    frequencyMode,
+    singleValue,
+    unit: frequencyMode ? "MHz" : "ms",
+  }
+}
+
+function syncExactSelectionFields() {
+  const mode = exactSelectionMode.value || state.mode
+  const definition = exactSelectionDefinition(mode)
+  exactStartLabel.textContent = `${definition.singleValue ? "Value" : "Start"} (${definition.unit})`
+  exactEndLabel.textContent = `End (${definition.unit})`
+  exactEndField.hidden = definition.singleValue
+  exactEndInput.disabled = definition.singleValue || Boolean(state.busyAction) || !state.sessionId
+}
+
+function applyExactSelection() {
+  if (!state.sessionId || state.busyAction) {
+    return
+  }
+  const mode = exactSelectionMode.value
+  const definition = exactSelectionDefinition(mode)
+  const start = Number(exactStartInput.value)
+  const end = Number(exactEndInput.value)
+  if (!Number.isFinite(start) || (!definition.singleValue && !Number.isFinite(end))) {
+    showToast(`Enter ${definition.singleValue ? "a value" : "start and end values"} in ${definition.unit}.`, "error")
+    exactStartInput.focus()
+    return
+  }
+
+  const actionByMode = {
+    event: "set_event",
+    crop: "set_crop",
+    offpulse: "add_offpulse",
+    region: "add_region",
+    "add-peak": "add_peak",
+    "remove-peak": "remove_peak",
+    "mask-channel": "mask_channel",
+    "mask-range": "mask_range",
+    "spec-extent": "set_spectral_extent",
+  }
+  let payload
+  if (["event", "crop", "offpulse", "region"].includes(mode)) {
+    payload = { start_ms: start, end_ms: end }
+  } else if (mode === "add-peak" || mode === "remove-peak") {
+    payload = { time_ms: start }
+  } else if (mode === "mask-channel") {
+    payload = { freq_mhz: start }
+  } else {
+    payload = { start_freq_mhz: start, end_freq_mhz: end }
+  }
+  postAction(actionByMode[mode], payload)
+}
+
 function setMode(mode) {
   state.mode = mode
   clearPending()
   modeChip.textContent = `Mode: ${modeLabels[mode]}`
   modeHelpEl.textContent = modeHelp[mode]
   modeButtons.forEach((button) => {
-    button.classList.toggle("active", button.dataset.mode === mode)
+    const isActive = button.dataset.mode === mode
+    button.classList.toggle("active", isActive)
+    button.setAttribute("aria-pressed", String(isActive))
   })
+  if (exactSelectionMode.querySelector(`option[value="${mode}"]`)) {
+    exactSelectionMode.value = mode
+    syncExactSelectionFields()
+  }
 }
 
-function setAnalysisTab(tab) {
+function setAnalysisTab(tab, options = {}) {
+  const { updateHash = true } = options
   const normalizedTab = ["prepare", "dm", "fitting", "temporal", "polarization", "export"].includes(tab) ? tab : "prepare"
   state.activeAnalysisTab = normalizedTab
   analysisTabButtons.forEach((button) => {
     const isActive = button.dataset.analysisTab === normalizedTab
     button.classList.toggle("active", isActive)
     button.setAttribute("aria-selected", String(isActive))
+    button.tabIndex = isActive ? 0 : -1
   })
   analysisPanels.forEach((panel) => {
     const isActive = panel.dataset.tabPanel === normalizedTab
     panel.classList.toggle("active", isActive)
     panel.hidden = !isActive
   })
-  if (window.location.hash !== `#${normalizedTab}`) {
+  if (updateHash && window.location.hash !== `#${normalizedTab}`) {
     window.history.replaceState(null, "", `#${normalizedTab}`)
   }
   if (normalizedTab === "dm") {
@@ -5498,7 +5767,7 @@ function dmOptimizationLabel(text, x, y, color) {
     showarrow: false,
     text: `<b>${escapeHtml(text)}</b>`,
     font: {
-      family: '"IBM Plex Mono", monospace',
+      family: '"SFMono-Regular", Consolas, monospace',
       size: 11,
       color,
     },
@@ -5521,7 +5790,7 @@ function panelLabel(text, x, y) {
     showarrow: false,
     text: `<b>${text}</b>`,
     font: {
-      family: '"IBM Plex Mono", monospace',
+      family: '"SFMono-Regular", Consolas, monospace',
       size: 11,
       color: plotTheme.muted,
     },
@@ -5637,6 +5906,24 @@ function horizontalLine(y, x0, x1, color, dash = "solid", xref = "x", yref = "y"
   }
 }
 
+function upgradeTooltips() {
+  document.querySelectorAll(".tooltip-icon[data-tooltip]").forEach((tooltip) => {
+    if (!tooltip.hasAttribute("aria-label")) {
+      tooltip.setAttribute("aria-label", tooltip.dataset.tooltip)
+    }
+    if (tooltip.tagName !== "BUTTON") {
+      tooltip.setAttribute("role", "note")
+      tooltip.tabIndex = 0
+    }
+  })
+  document.querySelectorAll("label[data-tooltip]").forEach((label) => {
+    const control = label.querySelector("input, select, textarea")
+    if (control && !control.hasAttribute("aria-description")) {
+      control.setAttribute("aria-description", label.dataset.tooltip)
+    }
+  })
+}
+
 function rememberButtonLabels() {
   document.querySelectorAll("button").forEach((button) => {
     button.dataset.idleText = button.textContent
@@ -5693,7 +5980,14 @@ function updateControlStates() {
   snapshotDirectorySelect.disabled = isBusy || state.snapshotLibrary.length === 0
   snapshotFileSelect.disabled = isBusy || snapshotsForDirectory(state.selectedSnapshotDirectory).length === 0
   openSnapshotButton.disabled = isBusy || !state.selectedSnapshotId
+  exactSelectionMode.disabled = !hasSession || isBusy
+  exactStartInput.disabled = !hasSession || isBusy
+  exactEndInput.disabled = !hasSession || isBusy || exactSelectionDefinition(exactSelectionMode.value).singleValue
+  applyExactSelectionButton.disabled = !hasSession || isBusy
+  viewerPlot.classList.toggle("is-busy", isBusy)
+  viewerPlot.setAttribute("aria-busy", String(isBusy))
   workspaceHeader.classList.toggle("is-loaded", hasSession)
+  workspaceLoadSummary.textContent = hasSession ? "Load Another Session" : "New Session"
 
   if (!hasSession) {
     sessionBadge.textContent = "Not loaded"
@@ -5704,6 +5998,8 @@ function updateControlStates() {
 
   renderSessionSaveStatus()
   renderSnapshotLibrary()
+  syncApplyDmButtonLabel()
+  syncExactSelectionFields()
   syncBusyButtons()
 }
 
@@ -5875,6 +6171,7 @@ function showToast(message, tone = "info") {
   const toast = document.createElement("div")
   toast.className = "toast"
   toast.dataset.tone = tone
+  toast.setAttribute("role", tone === "error" ? "alert" : "status")
   toast.textContent = String(message)
   toastStack.appendChild(toast)
 
@@ -5882,14 +6179,15 @@ function showToast(message, tone = "info") {
     toast.classList.add("is-visible")
   })
 
+  const visibleDuration = tone === "error" ? 6500 : 4500
   window.setTimeout(() => {
     toast.classList.remove("is-visible")
     toast.classList.add("is-leaving")
-  }, 3200)
+  }, visibleDuration)
 
   window.setTimeout(() => {
     toast.remove()
-  }, 3600)
+  }, visibleDuration + 400)
 
   while (toastStack.children.length > 4) {
     toastStack.firstElementChild?.remove()

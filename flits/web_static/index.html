@@ -4,14 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>FLITS</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
     <script src="/static/vendor/plotly-2.35.2.min.js"></script>
     <script defer src="/static/app.js"></script>
   </head>
   <body>
+    <a class="skip-link" href="#workspaceMain">Skip to workspace</a>
     <div class="page-glow"></div>
     <div class="app-shell">
       <aside class="sidebar card">
@@ -23,10 +21,12 @@
           </p>
         </div>
 
-        <section class="panel">
+        <section class="panel acquisition-panel">
           <div class="panel-head">
-            <h2>Acquisition</h2>
+            <h2>Next Load</h2>
+            <span class="panel-badge" data-tone="neutral">Setup</span>
           </div>
+          <p class="panel-copy">These values are used when loading a new file. Timing metadata can also be applied to the live session.</p>
           <details class="details-card load-details" id="acquisitionOverridesDetails">
             <summary>Acquisition Overrides</summary>
             <div class="load-details-body">
@@ -118,7 +118,7 @@
           </details>
         </section>
 
-        <section class="panel">
+        <section class="panel session-panel">
           <div class="panel-head">
             <h2>Session</h2>
             <span class="panel-badge" id="sessionBadge">Not loaded</span>
@@ -162,7 +162,8 @@
             <span>Analyst Notes</span>
             <textarea id="notesInput" rows="4" placeholder="optional notes"></textarea>
           </label>
-          <button class="ghost-button" id="saveNotesButton">Save Notes</button>
+          <p class="field-note" id="notesSaveHint">Notes are included automatically when you save the session.</p>
+          <button class="ghost-button" id="saveNotesButton">Apply Notes</button>
           <details class="details-card">
             <summary>Advanced metadata</summary>
             <div class="kv-list" id="sessionFacts">
@@ -172,7 +173,7 @@
         </section>
       </aside>
 
-      <main class="main-content">
+      <main class="main-content" id="workspaceMain">
         <section class="workspace-header card">
           <div class="workspace-title">
             <div class="workspace-title-line">
@@ -180,7 +181,7 @@
                 <div class="eyebrow">Workspace</div>
                 <h2 id="burstTitle">Load a burst file to begin</h2>
               </div>
-              <span class="panel-badge" id="statusChip">Idle</span>
+              <span class="panel-badge" id="statusChip" role="status" aria-live="polite">Idle</span>
             </div>
             <div class="workspace-tags" id="heroTags"></div>
             <p class="muted" id="burstSubtitle">
@@ -190,29 +191,37 @@
               <div class="detection-copy">Detection: waiting for a file.</div>
             </div>
           </div>
-          <div class="workspace-load">
-            <label class="field">
-              <span>Mounted folder</span>
-              <select id="directorySelect"></select>
-            </label>
-            <label class="field">
-              <span>Known files</span>
-              <select id="fileSelect" required></select>
-            </label>
-            <label class="field workspace-file-path">
-              <span>File path</span>
-              <input id="fileInput" type="text" placeholder="relative or absolute path">
-            </label>
-            <label class="field workspace-dm-field">
-              <span>DM <span class="tooltip-icon" data-tooltip="Dispersion Measure (pc/cm³) used to de-disperse the burst data. Some formats provide an automatic suggestion. Enter 0 for files that are already dedispersed (e.g. CHIME/FRB catalog waterfalls). For CHIME beamformed BBData files, use the suggested DM_coherent unless you want a residual DM offset.">?</span></span>
-              <input id="dmInput" type="number" step="0.001" placeholder="enter DM or 0 if already dedispersed">
-            </label>
-            <label class="field">
-              <span>Preset</span>
-              <select id="telescopeInput"></select>
-            </label>
-            <button class="primary-button workspace-load-button" id="loadButton">Load Session</button>
-          </div>
+          <details class="workspace-load-details" id="workspaceLoadDetails" open>
+            <summary>
+              <span>
+                <strong id="workspaceLoadSummary">New Session</strong>
+                <small>Select a file and the DM to use when loading it.</small>
+              </span>
+            </summary>
+            <div class="workspace-load">
+              <label class="field">
+                <span>Mounted folder</span>
+                <select id="directorySelect"></select>
+              </label>
+              <label class="field">
+                <span>Known files</span>
+                <select id="fileSelect" required></select>
+              </label>
+              <label class="field workspace-file-path">
+                <span>File path</span>
+                <input id="fileInput" type="text" placeholder="relative or absolute path">
+              </label>
+              <label class="field workspace-dm-field">
+                <span>DM <span class="tooltip-icon" data-tooltip="Dispersion Measure (pc/cm³) used to de-disperse the burst data. Some formats provide an automatic suggestion. Enter 0 for files that are already dedispersed (e.g. CHIME/FRB catalog waterfalls). For CHIME beamformed BBData files, use the suggested DM_coherent unless you want a residual DM offset.">?</span></span>
+                <input id="dmInput" type="number" step="0.001" placeholder="enter DM or 0 if already dedispersed">
+              </label>
+              <label class="field">
+                <span>Preset</span>
+                <select id="telescopeInput"></select>
+              </label>
+              <button class="primary-button workspace-load-button" id="loadButton">Load Session</button>
+            </div>
+          </details>
           <div class="workspace-metrics" id="heroMetrics">
             <div class="metric-card">
               <span>Time Resolution</span>
@@ -244,36 +253,36 @@
                   Click twice on the top time profile to mark the start and end of the event window.
                 </p>
               </div>
-              <div class="pending-box viewer-pending" id="pendingBox">Waiting for first click.</div>
+              <div class="pending-box viewer-pending" id="pendingBox" role="status" aria-live="polite">Waiting for first click.</div>
             </div>
             <div class="viewer-mode-panel" aria-label="Viewer interaction modes">
               <section class="mode-group">
                 <h3>Time</h3>
                 <div class="mode-button-row">
-                  <button class="mode-button active" data-mode="event">Event Window</button>
-                  <button class="mode-button" data-mode="crop">Crop Window</button>
-                  <button class="mode-button" data-mode="offpulse">Off-Pulse</button>
+                  <button class="mode-button active" type="button" aria-pressed="true" data-mode="event">Event Window</button>
+                  <button class="mode-button" type="button" aria-pressed="false" data-mode="crop">Crop Window</button>
+                  <button class="mode-button" type="button" aria-pressed="false" data-mode="offpulse">Off-Pulse</button>
                 </div>
               </section>
               <section class="mode-group">
                 <h3>Frequency</h3>
                 <div class="mode-button-row">
-                  <button class="mode-button" data-mode="mask-channel">Mask Channel</button>
-                  <button class="mode-button" data-mode="mask-range">Mask Range</button>
-                  <button class="mode-button" data-mode="spec-extent">Spectral Window</button>
+                  <button class="mode-button" type="button" aria-pressed="false" data-mode="mask-channel">Mask Channel</button>
+                  <button class="mode-button" type="button" aria-pressed="false" data-mode="mask-range">Mask Range</button>
+                  <button class="mode-button" type="button" aria-pressed="false" data-mode="spec-extent">Spectral Window</button>
                 </div>
               </section>
               <section class="mode-group">
                 <h3>Peaks</h3>
                 <div class="mode-button-row">
-                  <button class="mode-button" data-mode="add-peak">Add Peak</button>
-                  <button class="mode-button" data-mode="remove-peak">Remove Peak</button>
+                  <button class="mode-button" type="button" aria-pressed="false" data-mode="add-peak">Add Peak</button>
+                  <button class="mode-button" type="button" aria-pressed="false" data-mode="remove-peak">Remove Peak</button>
                 </div>
               </section>
               <section class="mode-group">
                 <h3>Components</h3>
                 <div class="mode-button-row">
-                  <button class="mode-button" data-mode="region">Component Region</button>
+                  <button class="mode-button" type="button" aria-pressed="false" data-mode="region">Component Region</button>
                 </div>
               </section>
             </div>
@@ -285,11 +294,12 @@
               <div class="legend-item"><span class="legend-swatch spectral"></span><span>Spectral window</span></div>
             </div>
             <div class="viewer-toolbar viewer-toolbar-top">
-              <span class="panel-badge" id="resolutionLabel">t x1 / f x1</span>
-              <button class="ghost-button" id="timeDownButton">Time -</button>
-              <button class="ghost-button" id="timeUpButton">Time +</button>
-              <button class="ghost-button" id="freqDownButton">Freq -</button>
-              <button class="ghost-button" id="freqUpButton">Freq +</button>
+              <span class="panel-badge" id="resolutionLabel">Native resolution</span>
+              <span class="panel-badge" id="appliedDmLabel" data-tone="neutral">Applied DM: -</span>
+              <button class="ghost-button" id="timeDownButton">Finer Time</button>
+              <button class="ghost-button" id="timeUpButton">Coarser Time</button>
+              <button class="ghost-button" id="freqDownButton">Finer Frequency</button>
+              <button class="ghost-button" id="freqUpButton">Coarser Frequency</button>
               <button class="ghost-button" id="setDmButton">Apply DM</button>
               <button class="ghost-button" id="resetViewButton">Reset View</button>
               <button class="ghost-button" id="clearRegionsButton">Clear Components</button>
@@ -306,7 +316,38 @@
               </label>
               <button class="ghost-button" id="jessButton">Auto Mask</button>
             </div>
-            <div class="plot viewer-plot" id="viewerPlot"></div>
+            <details class="exact-selection details-card" id="exactSelectionDetails">
+              <summary>Exact Selection</summary>
+              <div class="exact-selection-body">
+                <p class="field-note">Keyboard-accessible alternative to selecting coordinates directly in the plot.</p>
+                <div class="exact-selection-grid">
+                  <label class="field">
+                    <span>Selection</span>
+                    <select id="exactSelectionMode">
+                      <option value="event">Event window</option>
+                      <option value="crop">Crop window</option>
+                      <option value="offpulse">Add off-pulse window</option>
+                      <option value="region">Add component region</option>
+                      <option value="add-peak">Add peak</option>
+                      <option value="remove-peak">Remove peak</option>
+                      <option value="mask-channel">Mask channel</option>
+                      <option value="mask-range">Mask frequency range</option>
+                      <option value="spec-extent">Spectral window</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span id="exactStartLabel">Start (ms)</span>
+                    <input id="exactStartInput" type="number" step="any">
+                  </label>
+                  <label class="field" id="exactEndField">
+                    <span id="exactEndLabel">End (ms)</span>
+                    <input id="exactEndInput" type="number" step="any">
+                  </label>
+                  <button class="primary-button exact-selection-apply" id="applyExactSelectionButton" type="button">Apply Selection</button>
+                </div>
+              </div>
+            </details>
+            <div class="plot viewer-plot" id="viewerPlot" aria-label="Interactive burst viewer"></div>
           </div>
 
           <div class="card results-card analysis-card">
@@ -335,7 +376,7 @@
               </div>
             </section>
 
-            <section class="analysis-panel" id="analysisDmPanel" data-tab-panel="dm" role="tabpanel" hidden>
+            <section class="analysis-panel" id="analysisDmPanel" data-tab-panel="dm" role="tabpanel" aria-labelledby="analysisDmTab" hidden>
               <div class="analysis-panel-head">
                 <h4>DM Optimization</h4>
                 <p>Run a DM sweep with either integrated-event S/N or DMphase, inspect the selected metric curve, compare residual drift before and after, and review per-component DM estimates for complex bursts.</p>
@@ -372,12 +413,17 @@
               </div>
             </section>
 
-            <section class="analysis-panel" id="analysisFittingPanel" data-tab-panel="fitting" role="tabpanel" hidden>
+            <section class="analysis-panel" id="analysisFittingPanel" data-tab-panel="fitting" role="tabpanel" aria-labelledby="analysisFittingTab" hidden>
               <div class="analysis-panel-head">
                 <h4>Model Fitting</h4>
                 <p>Run a 2D model fit on the current selected event window, crop, mask, and spectral window.</p>
               </div>
-              <div class="field-row">
+              <section class="fit-setup-section" aria-labelledby="fitStructureHeading">
+                <div class="fit-setup-heading">
+                  <h5 id="fitStructureHeading">Model Structure</h5>
+                  <p>Set component detection, then refine the generated initial guesses below.</p>
+                </div>
+                <div class="field-row fit-structure-grid">
                 <label class="field">
                   <span>Components <span class="tooltip-icon" data-tooltip="Number of gaussian components to model in this fit.">?</span></span>
                   <input id="fitComponentsInput" type="number" min="1" max="10" step="1" value="1">
@@ -390,9 +436,13 @@
                   <span>Peak Distance <span class="tooltip-icon" data-tooltip="Minimum separation between detected component peaks, in time bins.">?</span></span>
                   <input id="fitDetectDistanceInput" type="number" min="1" max="512" step="1" value="5">
                 </label>
-              </div>
-              <div class="field" style="grid-column: 1 / -1; margin-top: 4px;">
-                <span>Parameters to Fit <span class="tooltip-icon" data-tooltip="Checked parameters will be varied by the optimizer. Leave poorly constrained terms fixed unless the data can support them.">?</span></span>
+                </div>
+              </section>
+              <section class="fit-setup-section" aria-labelledby="fitParametersHeading">
+                <div class="fit-setup-heading">
+                  <h5 id="fitParametersHeading">Parameters to Fit <span class="tooltip-icon" data-tooltip="Checked parameters will be varied by the optimizer. Leave poorly constrained terms fixed unless the data can support them.">?</span></h5>
+                  <p>Core temporal terms are enabled by default; add propagation or spectral terms when the data support them.</p>
+                </div>
                 <div class="checkbox-grid" id="fitFreeParamsContainer">
                   <label class="checkbox-label" data-tooltip="Overall amplitude of each component. Disabled in scintillation mode.">
                     <input type="checkbox" name="free_param" value="amplitude" checked> Amplitude
@@ -422,7 +472,7 @@
                     <input type="checkbox" name="free_param" value="spectral_running"> Spectral Running
                   </label>
                 </div>
-              </div>
+              </section>
               <div id="fitParameterSummary" class="fit-parameter-summary"></div>
               <div id="fitModelSummary" class="fit-model-summary"></div>
               <div class="fit-advanced-options">
@@ -438,7 +488,7 @@
                 <div class="empty-state">Load a session to inspect model initial guesses.</div>
               </div>
               <div class="plot fitting-guess-plot is-empty" id="fitGuessPlot"></div>
-              <details class="fit-advanced-panel">
+              <details class="details-card fit-advanced-panel">
                 <summary>Advanced Fit Setup</summary>
                 <div class="field-row">
                   <label class="field">
@@ -501,7 +551,7 @@
               <div class="plot fitting-plot is-empty" id="fittingProfilePlot"></div>
             </section>
 
-            <section class="analysis-panel" id="analysisTemporalPanel" data-tab-panel="temporal" role="tabpanel" hidden>
+            <section class="analysis-panel" id="analysisTemporalPanel" data-tab-panel="temporal" role="tabpanel" aria-labelledby="analysisTemporalTab" hidden>
               <div class="analysis-panel-head">
                 <h4>Temporal Structure</h4>
                 <p>Measure the shortest statistically supported burst structure and inspect the fluctuation-frequency distribution with raw and averaged power spectra.</p>
