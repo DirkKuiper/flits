@@ -46,6 +46,7 @@ pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3
 - Calibrated fluence and peak-flux outputs when an SEFD is available.
 - DM optimization using integrated-event S/N and DMphase.
 - Temporal-structure, PSD, ACF, and optional selected-event model fitting.
+- Weighted Q/U RM synthesis with optional RM-CLEAN, significance and quality diagnostics, and JSON/CSV products.
 - Export bundles and JSON session snapshots for reproducible analysis.
 
 ## Documentation

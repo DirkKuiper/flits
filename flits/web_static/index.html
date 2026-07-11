@@ -316,16 +316,16 @@
                 <p>Stay in one live session and move from preparation through specialist analyses without losing the current burst state.</p>
               </div>
               <div class="analysis-tabs" role="tablist" aria-label="Analysis views">
-                <button class="analysis-tab active" type="button" role="tab" aria-selected="true" data-analysis-tab="prepare">Prepare</button>
-                <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="dm">DM</button>
-                <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="fitting">Fitting</button>
-                <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="temporal">Temporal</button>
-                <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="polarization">Polarization</button>
-                <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-analysis-tab="export">Export</button>
+                <button class="analysis-tab active" id="analysisPrepareTab" type="button" role="tab" aria-selected="true" aria-controls="analysisPreparePanel" tabindex="0" data-analysis-tab="prepare">Prepare</button>
+                <button class="analysis-tab" id="analysisDmTab" type="button" role="tab" aria-selected="false" aria-controls="analysisDmPanel" tabindex="-1" data-analysis-tab="dm">DM</button>
+                <button class="analysis-tab" id="analysisFittingTab" type="button" role="tab" aria-selected="false" aria-controls="analysisFittingPanel" tabindex="-1" data-analysis-tab="fitting">Fitting</button>
+                <button class="analysis-tab" id="analysisTemporalTab" type="button" role="tab" aria-selected="false" aria-controls="analysisTemporalPanel" tabindex="-1" data-analysis-tab="temporal">Temporal</button>
+                <button class="analysis-tab" id="analysisPolarizationTab" type="button" role="tab" aria-selected="false" aria-controls="analysisPolarizationPanel" tabindex="-1" data-analysis-tab="polarization">Polarization</button>
+                <button class="analysis-tab" id="analysisExportTab" type="button" role="tab" aria-selected="false" aria-controls="analysisExportPanel" tabindex="-1" data-analysis-tab="export">Export</button>
               </div>
             </div>
 
-            <section class="analysis-panel active" id="analysisPreparePanel" data-tab-panel="prepare" role="tabpanel">
+            <section class="analysis-panel active" id="analysisPreparePanel" data-tab-panel="prepare" role="tabpanel" aria-labelledby="analysisPrepareTab">
               <div class="analysis-panel-head">
                 <h4>Prepare</h4>
                 <p>Define the burst state, confirm readiness, and review compact measurement summaries before moving into specialist analysis tabs.</p>
@@ -523,26 +523,86 @@
               <div class="plot dm-optimization-plot temporal-psd-plot is-empty" id="spectralPlot"></div>
             </section>
 
-            <section class="analysis-panel" id="analysisPolarizationPanel" data-tab-panel="polarization" role="tabpanel" hidden>
+            <section class="analysis-panel" id="analysisPolarizationPanel" data-tab-panel="polarization" role="tabpanel" aria-labelledby="analysisPolarizationTab" hidden>
               <div class="analysis-panel-head">
                 <h4>Rotation-Measure Synthesis</h4>
-                <p>Import calibrated channelized Stokes Q/U spectra and inspect the weighted dirty Faraday spectrum and RMSF.</p>
+                <p>Import calibrated channelized Stokes Q/U spectra, configure the Faraday-depth search, and validate a dirty or RM-CLEAN result.</p>
               </div>
               <div class="dm-fit-note" data-tone="warning">
                 <strong>Calibration required</strong>
-                <span>FLITS does not infer Q/U from Stokes I. Apply leakage, polarization, and ionospheric corrections upstream before interpreting a source RM.</span>
+                <span>FLITS does not infer Q/U from Stokes I. Correct instrumental leakage and polarization calibration upstream. Apply or record an ionospheric correction before reporting an intrinsic source RM.</span>
               </div>
-              <div class="export-actions">
-                <button class="primary-button" id="rmImportButton" type="button">Import Q/U JSON</button>
-                <input id="rmInput" type="file" accept=".json,application/json" hidden>
+              <div class="rm-workflow-grid">
+                <section class="rm-config-panel">
+                  <div class="analysis-panel-head compact">
+                    <h5>1. Load Q/U Spectrum</h5>
+                    <p>JSON arrays or a CSV table with frequency, Q, and U columns.</p>
+                  </div>
+                  <div class="export-actions rm-actions">
+                    <button class="primary-button" id="rmImportButton" type="button">Import JSON or CSV</button>
+                    <button class="secondary-button" id="rmExampleButton" type="button">Example Format</button>
+                    <input id="rmInput" type="file" accept=".json,.csv,application/json,text/csv" hidden>
+                  </div>
+                  <div id="rmInputSummary" class="rm-input-summary">
+                    <span class="panel-badge">No data loaded</span>
+                    <p>Required fields: <code>freqs_mhz</code>, <code>stokes_q</code>, and <code>stokes_u</code>. Uncertainties and channel width are strongly recommended.</p>
+                  </div>
+                </section>
+                <section class="rm-config-panel">
+                  <div class="analysis-panel-head compact">
+                    <h5>2. Configure Synthesis</h5>
+                    <p>Blank grid values use wavelength-coverage defaults.</p>
+                  </div>
+                  <div class="field-row rm-grid-fields">
+                    <label class="field">
+                      <span>Minimum φ (rad m⁻²)</span>
+                      <input id="rmPhiMinInput" type="number" step="any" placeholder="auto">
+                    </label>
+                    <label class="field">
+                      <span>Maximum φ (rad m⁻²)</span>
+                      <input id="rmPhiMaxInput" type="number" step="any" placeholder="auto">
+                    </label>
+                    <label class="field">
+                      <span>φ Step (rad m⁻²)</span>
+                      <input id="rmPhiStepInput" type="number" min="0" step="any" placeholder="FWHM / 5">
+                    </label>
+                    <label class="field">
+                      <span>Channel Width (MHz)</span>
+                      <input id="rmChannelWidthInput" type="number" min="0" step="any" placeholder="from file / inferred">
+                    </label>
+                  </div>
+                  <div class="rm-clean-row">
+                    <label class="checkbox-label" data-tooltip="Deconvolve RMSF sidelobes and retain both dirty and restored spectra.">
+                      <input id="rmCleanInput" type="checkbox" checked> Apply RM-CLEAN
+                    </label>
+                    <label class="field compact-field">
+                      <span>Gain</span>
+                      <input id="rmCleanGainInput" type="number" min="0.01" max="1" step="0.01" value="0.1">
+                    </label>
+                    <label class="field compact-field">
+                      <span>Cutoff (σ)</span>
+                      <input id="rmCleanThresholdInput" type="number" min="0.5" step="0.5" value="3">
+                    </label>
+                    <label class="field compact-field">
+                      <span>Max Iterations</span>
+                      <input id="rmCleanIterationsInput" type="number" min="1" max="100000" step="1" value="1000">
+                    </label>
+                  </div>
+                  <div class="export-actions rm-actions">
+                    <button class="primary-button" id="rmRunButton" type="button" disabled>Run RM Synthesis</button>
+                    <button class="secondary-button" id="rmDownloadJsonButton" type="button" disabled>Download JSON</button>
+                    <button class="secondary-button" id="rmDownloadCsvButton" type="button" disabled>Download Spectrum CSV</button>
+                  </div>
+                </section>
               </div>
               <div id="rmContent" class="results-content">
-                <div class="empty-state">Import JSON containing freqs_mhz, stokes_q, and stokes_u arrays. Optional sigma_q, sigma_u, and Faraday-grid bounds are supported.</div>
+                <div class="empty-state">Load calibrated Q/U data to begin. FLITS will report the usable channels, Faraday resolution and limits, peak significance, model goodness, RMSF sidelobes, and all analysis caveats.</div>
               </div>
               <div class="plot dm-optimization-plot is-empty" id="rmPlot"></div>
+              <div class="plot dm-optimization-plot is-empty" id="rmQuPlot"></div>
             </section>
 
-            <section class="analysis-panel" id="analysisExportPanel" data-tab-panel="export" role="tabpanel" hidden>
+            <section class="analysis-panel" id="analysisExportPanel" data-tab-panel="export" role="tabpanel" aria-labelledby="analysisExportTab" hidden>
               <div class="analysis-panel-head">
                 <h4>Export Results</h4>
                 <p>Choose the outputs you actually need, inspect the exact artifact set, and then build the immutable bundle from the current session state.</p>

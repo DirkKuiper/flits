@@ -375,7 +375,8 @@ button:disabled {
 
 .ghost-button,
 .mode-button,
-.file-button {
+.file-button,
+.secondary-button {
   background: rgba(255, 255, 255, 0.75);
   border: 1px solid rgba(24, 33, 38, 0.1);
   color: var(--ink);
@@ -1478,6 +1479,97 @@ button.is-busy::after {
 .dm-fit-note[data-tone="warning"] {
   background: rgba(247, 243, 252, 0.92);
   border-color: rgba(142, 110, 189, 0.18);
+}
+
+.rm-workflow-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(460px, 1.2fr);
+  gap: 16px;
+}
+
+.rm-config-panel {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid rgba(24, 33, 38, 0.08);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.rm-actions {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rm-input-summary {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.rm-input-summary p {
+  margin: 0;
+}
+
+.rm-input-summary code {
+  color: var(--ink);
+}
+
+.rm-grid-fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rm-clean-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) repeat(3, minmax(105px, 0.6fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.rm-clean-row .checkbox-label {
+  min-height: 43px;
+  align-items: center;
+}
+
+.rm-quality-list {
+  display: grid;
+  gap: 8px;
+}
+
+.rm-quality-item {
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  gap: 9px;
+  align-items: start;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.rm-quality-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: var(--accent-alt);
+}
+
+.rm-quality-item[data-tone="warning"] .rm-quality-dot {
+  background: var(--alert);
+}
+
+@media (max-width: 980px) {
+  .rm-workflow-grid,
+  .rm-clean-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .rm-grid-fields {
+    grid-template-columns: 1fr;
+  }
 }
 
 .residual-table-wrap {
