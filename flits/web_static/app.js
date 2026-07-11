@@ -144,6 +144,7 @@ const rmContent = document.getElementById("rmContent")
 const rmPlot = document.getElementById("rmPlot")
 const rmQuPlot = document.getElementById("rmQuPlot")
 const rmInputSummary = document.getElementById("rmInputSummary")
+const rmCalibrationConfirmedInput = document.getElementById("rmCalibrationConfirmedInput")
 const rmExampleButton = document.getElementById("rmExampleButton")
 const rmRunButton = document.getElementById("rmRunButton")
 const rmDownloadJsonButton = document.getElementById("rmDownloadJsonButton")
@@ -610,6 +611,10 @@ function bindControls() {
   })
   rmImportButton.addEventListener("click", () => rmInput.click())
   rmInput.addEventListener("change", () => importRmSpectrum())
+  rmCalibrationConfirmedInput.addEventListener("change", () => {
+    rmRunButton.disabled = !state.rmInputData || !rmCalibrationConfirmedInput.checked
+    renderRmInputSummary()
+  })
   rmExampleButton.addEventListener("click", () => downloadRmExample())
   rmRunButton.addEventListener("click", () => runRmSynthesis())
   rmDownloadJsonButton.addEventListener("click", () => downloadRmResultJson())
@@ -5307,6 +5312,10 @@ const rmWarningMessages = {
   faraday_grid_undersampled: "The Faraday grid has fewer than four samples per RMSF FWHM.",
   single_faraday_component_poor_fit: "A single Faraday-thin component is a poor fit to Q/U; inspect complexity or calibration.",
   high_rmsf_sidelobes: "The RMSF has sidelobes above 50%; use RM-CLEAN and interpret secondary peaks cautiously.",
+  effective_lambda2_coverage_reduced: "Actual channel weights broaden the RMSF well beyond the uniform-coverage estimate.",
+  channel_weights_highly_concentrated: "A small number of channels dominate the result; the nominal S/N and uncertainty are fragile.",
+  rmsf_fwhm_unresolved: "The RMSF does not fall below half maximum within the observable RM range; its width and the RM error are lower bounds.",
+  rm_clean_skipped_rmsf_unresolved: "RM-CLEAN was skipped because a finite restoring-beam width could not be measured.",
 }
 
 function normalizedRmKey(value) {
@@ -5421,6 +5430,9 @@ function normalizeRmPayload(raw) {
   }
   resolved.input_row_count = count
   resolved.rejected_input_rows = count - kept.length
+  resolved.calibration_status = normalizedRmKey(payload?.calibration_status || "unknown")
+  resolved.data_semantics = payload?.data_semantics ? String(payload.data_semantics) : "channelized_stokes_q_u"
+  resolved.provenance = typeof payload?.provenance === "object" && payload.provenance !== null ? payload.provenance : {}
   for (const field of ["phi_min_rad_m2", "phi_max_rad_m2", "phi_step_rad_m2"]) {
     const value = rmObjectValue(payload, [field])
     if (Number.isFinite(Number(value))) resolved[field] = Number(value)
@@ -5440,18 +5452,25 @@ async function importRmSpectrum() {
     state.rmInputData = payload
     state.rmInputName = file.name
     state.rmResult = null
+    rmCalibrationConfirmedInput.checked = payload.calibration_status === "calibrated"
     if (payload.phi_min_rad_m2 !== undefined) rmPhiMinInput.value = payload.phi_min_rad_m2
     if (payload.phi_max_rad_m2 !== undefined) rmPhiMaxInput.value = payload.phi_max_rad_m2
     if (payload.phi_step_rad_m2 !== undefined) rmPhiStepInput.value = payload.phi_step_rad_m2
     renderRmInputSummary()
-    rmRunButton.disabled = false
+    rmRunButton.disabled = !rmCalibrationConfirmedInput.checked
     rmDownloadJsonButton.disabled = true
     rmDownloadCsvButton.disabled = true
-    await runRmSynthesis()
+    if (rmCalibrationConfirmedInput.checked) {
+      await runRmSynthesis()
+    } else {
+      renderRmSynthesis(null, "Calibration status is unknown. Confirm that polarization calibration was applied before running RM synthesis.")
+      showToast("Confirm polarization calibration before RM synthesis", "info")
+    }
   } catch (error) {
     state.rmInputData = null
     state.rmInputName = ""
     state.rmResult = null
+    rmCalibrationConfirmedInput.checked = false
     renderRmInputSummary(error.message || "Unable to read RM input.")
     renderRmSynthesis(null, error.message || "Unable to read RM input.")
     showToast(error.message || "Unable to read RM input.", "error")
@@ -5476,9 +5495,10 @@ function renderRmInputSummary(errorMessage = null) {
   )
   const hasNoise = data.sigma_q !== undefined && data.sigma_u !== undefined
   const hasWidth = data.channel_width_mhz !== undefined
+  const calibrationReady = rmCalibrationConfirmedInput.checked
   rmInputSummary.innerHTML = `
     <span class="panel-badge">${escapeHtml(state.rmInputName)} · ${frequencies.length} usable channels</span>
-    <p>${fmt(frequencyBounds[0], 3)}–${fmt(frequencyBounds[1], 3)} MHz · ${hasNoise ? "uncertainty weighted" : "no Q/U uncertainties"} · ${hasWidth ? "channel width supplied" : "channel width will be inferred"}${data.rejected_input_rows ? ` · ${data.rejected_input_rows} rows rejected` : ""}</p>
+    <p>${fmt(frequencyBounds[0], 3)}–${fmt(frequencyBounds[1], 3)} MHz · ${hasNoise ? "uncertainty weighted" : "no Q/U uncertainties"} · ${hasWidth ? "channel width supplied" : "channel width will be inferred"} · ${calibrationReady ? "calibration confirmed" : "calibration confirmation required"}${data.rejected_input_rows ? ` · ${data.rejected_input_rows} rows rejected` : ""}</p>
   `
 }
 
@@ -5491,6 +5511,7 @@ function optionalRmNumber(input, label, { positive = false } = {}) {
 
 function rmRequestPayload() {
   if (!state.rmInputData) throw new Error("Import Q/U data first.")
+  if (!rmCalibrationConfirmedInput.checked) throw new Error("Confirm that polarization calibration was applied before RM synthesis.")
   const payload = {
     freqs_mhz: state.rmInputData.freqs_mhz,
     stokes_q: state.rmInputData.stokes_q,
@@ -5547,7 +5568,7 @@ async function runRmSynthesis() {
     rmDownloadCsvButton.disabled = true
     showToast(error.message || "RM synthesis failed.", "error")
   } finally {
-    rmRunButton.disabled = !state.rmInputData
+    rmRunButton.disabled = !state.rmInputData || !rmCalibrationConfirmedInput.checked
     rmRunButton.textContent = "Run RM Synthesis"
   }
 }
@@ -5582,7 +5603,13 @@ function renderRmSynthesis(result, errorMessage = null) {
     clearRmPlots()
     return
   }
-  const uncertainty = result.peak_rm_uncertainty_rad_m2 === null ? "uncertainty unavailable" : `± ${fmt(result.peak_rm_uncertainty_rad_m2, 3)} rad m⁻²`
+  const boundPrefix = result.rmsf_fwhm_is_lower_bound ? "> " : ""
+  const uncertainty = result.peak_rm_uncertainty_rad_m2 === null
+    ? "uncertainty unavailable"
+    : result.rmsf_fwhm_is_lower_bound
+      ? `≥ ${fmt(result.peak_rm_uncertainty_rad_m2, 3)} rad m⁻²`
+      : `± ${fmt(result.peak_rm_uncertainty_rad_m2, 3)} rad m⁻²`
+  const rmsfWidth = `${boundPrefix}${fmt(result.rmsf_fwhm_rad_m2, 3)} rad m⁻²`
   const chiSquare = result.reduced_chi_square === null ? "n/a (no σQ/U)" : fmt(result.reduced_chi_square, 3)
   const cleanLabel = result.clean_applied ? `${result.clean_iterations} iterations · cutoff ${fmt(result.clean_cutoff, 4)}` : "Not applied"
   rmContent.innerHTML = `
@@ -5593,7 +5620,7 @@ function renderRmSynthesis(result, errorMessage = null) {
     </div>
     <div class="results-secondary">
       ${resultTile("RM Uncertainty", uncertainty, "secondary")}
-      ${resultTile("RMSF FWHM", `${fmt(result.rmsf_fwhm_rad_m2, 3)} rad m⁻²`, "secondary")}
+      ${resultTile("RMSF FWHM", rmsfWidth, "secondary")}
       ${resultTile("Max |RM|", `${fmt(result.max_abs_rm_rad_m2, 2)} rad m⁻²`, "secondary")}
       ${resultTile("Largest Faraday Scale", `${fmt(result.max_scale_rad_m2, 2)} rad m⁻²`, "secondary")}
       ${resultTile("Debiased Polarized Amp.", fmt(result.peak_polarized_amplitude_debiased, 5), "secondary")}
@@ -5603,6 +5630,8 @@ function renderRmSynthesis(result, errorMessage = null) {
       ${resultTile("Angle at λ₀²", `${fmt(result.polarization_angle_deg, 2)}°`, "secondary")}
       ${resultTile("Intrinsic Angle", `${fmt(result.intrinsic_polarization_angle_deg, 2)}°`, "secondary")}
       ${resultTile("Usable Channels", `${result.channel_count}${result.rejected_channel_count ? ` (${result.rejected_channel_count} rejected)` : ""}`, "secondary")}
+      ${resultTile("Effective Channels", fmt(result.effective_channel_count, 2), "secondary")}
+      ${resultTile("Largest Weight", `${fmt(100 * result.maximum_weight_fraction, 1)}%`, "secondary")}
       ${resultTile("RM-CLEAN", cleanLabel, "secondary")}
     </div>
     <div class="dm-fit-note" data-tone="warning">
@@ -5681,13 +5710,14 @@ function downloadRmExample() {
     sigma_q: 0.05,
     sigma_u: 0.05,
     channel_width_mhz: 1,
+    calibration_status: "unknown",
   }
   downloadBlob(`${JSON.stringify(example, null, 2)}\n`, "application/json", "flits_rm_input_example.json")
 }
 
 function downloadRmResultJson() {
   if (!state.rmResult) return
-  const payload = { source_file: state.rmInputName || null, input: state.rmInputData, result: state.rmResult }
+  const payload = { source_file: state.rmInputName || null, calibration_confirmed: rmCalibrationConfirmedInput.checked, input: state.rmInputData, result: state.rmResult }
   downloadBlob(`${JSON.stringify(payload, null, 2)}\n`, "application/json", `${rmDownloadStem()}_rm_synthesis.json`)
 }
 

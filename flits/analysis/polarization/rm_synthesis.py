@@ -36,6 +36,8 @@ class RMSynthesisResult:
     intrinsic_polarization_angle_deg: float | None
     reference_lambda2_m2: float | None
     rmsf_fwhm_rad_m2: float | None
+    rmsf_fwhm_theoretical_rad_m2: float | None
+    rmsf_fwhm_is_lower_bound: bool
     rmsf_max_sidelobe: float | None
     max_scale_rad_m2: float | None
     max_abs_rm_rad_m2: float | None
@@ -44,6 +46,8 @@ class RMSynthesisResult:
     reduced_chi_square: float | None
     channel_count: int
     rejected_channel_count: int
+    effective_channel_count: float | None
+    maximum_weight_fraction: float | None
     independent_faraday_samples: int
     phi_step_rad_m2: float | None
     phi_rad_m2: np.ndarray
@@ -78,6 +82,8 @@ class RMSynthesisResult:
             "intrinsic_polarization_angle_deg": self.intrinsic_polarization_angle_deg,
             "reference_lambda2_m2": self.reference_lambda2_m2,
             "rmsf_fwhm_rad_m2": self.rmsf_fwhm_rad_m2,
+            "rmsf_fwhm_theoretical_rad_m2": self.rmsf_fwhm_theoretical_rad_m2,
+            "rmsf_fwhm_is_lower_bound": self.rmsf_fwhm_is_lower_bound,
             "rmsf_max_sidelobe": self.rmsf_max_sidelobe,
             "max_scale_rad_m2": self.max_scale_rad_m2,
             "max_abs_rm_rad_m2": self.max_abs_rm_rad_m2,
@@ -86,6 +92,8 @@ class RMSynthesisResult:
             "reduced_chi_square": self.reduced_chi_square,
             "channel_count": self.channel_count,
             "rejected_channel_count": self.rejected_channel_count,
+            "effective_channel_count": self.effective_channel_count,
+            "maximum_weight_fraction": self.maximum_weight_fraction,
             "independent_faraday_samples": self.independent_faraday_samples,
             "phi_step_rad_m2": self.phi_step_rad_m2,
             "phi_rad_m2": self.phi_rad_m2.tolist(),
@@ -134,6 +142,8 @@ def _failure(
         intrinsic_polarization_angle_deg=None,
         reference_lambda2_m2=None,
         rmsf_fwhm_rad_m2=None,
+        rmsf_fwhm_theoretical_rad_m2=None,
+        rmsf_fwhm_is_lower_bound=False,
         rmsf_max_sidelobe=None,
         max_scale_rad_m2=None,
         max_abs_rm_rad_m2=None,
@@ -142,6 +152,8 @@ def _failure(
         reduced_chi_square=None,
         channel_count=int(channel_count),
         rejected_channel_count=int(rejected_channel_count),
+        effective_channel_count=None,
+        maximum_weight_fraction=None,
         independent_faraday_samples=0,
         phi_step_rad_m2=None,
         phi_rad_m2=empty,
@@ -238,6 +250,54 @@ def _robust_noise_from_residual(residual: np.ndarray, weights: np.ndarray) -> fl
     # Approximate the propagated noise after combining heteroscedastic channels.
     normalized = weights / np.sum(weights)
     return float(component_sigma * np.sqrt(np.sum(normalized**2)))
+
+
+def _measure_rmsf_fwhm(
+    lambda2: np.ndarray,
+    lambda0: float,
+    weights: np.ndarray,
+    theoretical_fwhm: float,
+    max_abs_rm: float,
+) -> tuple[float, bool]:
+    """Measure the central RMSF FWHM using the actual channel weights.
+
+    The usual ``2 sqrt(3) / Delta(lambda^2)`` expression assumes uniform
+    wavelength-squared coverage. Flagging and inverse-variance weights can make
+    the effective main lobe substantially broader, so uncertainty and CLEAN
+    restoration must use the measured width instead.
+    """
+    normalized = weights / np.sum(weights)
+    variance = float(np.sum(normalized * np.square(lambda2 - lambda0)))
+    gaussian_fwhm = (
+        float(np.sqrt(2.0 * np.log(2.0) / variance))
+        if np.isfinite(variance) and variance > np.finfo(float).eps
+        else theoretical_fwhm
+    )
+    resolution = max(np.finfo(float).eps, min(theoretical_fwhm, gaussian_fwhm) / 50.0)
+    # Channel width controls the observable |RM| limit, not RMSF resolution.
+    # Searching all the way to a very large limit would make the capped grid
+    # too coarse to resolve the central half-maximum crossing.
+    central_lobe_limit = max(5.0 * theoretical_fwhm, 2.0 * gaussian_fwhm)
+    search_limit = min(float(max_abs_rm), central_lobe_limit)
+    sample_count = min(20_001, max(251, int(np.ceil(search_limit / resolution)) + 1))
+    offsets = np.linspace(0.0, search_limit, sample_count, dtype=float)
+    amplitude = np.abs(
+        _transform(offsets, lambda2, lambda0, weights.astype(complex), float(np.sum(weights)))
+    )
+    crossings = np.flatnonzero(amplitude <= 0.5)
+    if crossings.size == 0:
+        return 2.0 * search_limit, True
+    right = int(crossings[0])
+    if right == 0:
+        return theoretical_fwhm, False
+    left = right - 1
+    x0, x1 = float(offsets[left]), float(offsets[right])
+    y0, y1 = float(amplitude[left]), float(amplitude[right])
+    half_width = x1 if y1 == y0 else x0 + ((0.5 - y0) * (x1 - x0) / (y1 - y0))
+    measured = 2.0 * half_width
+    if np.isfinite(measured) and measured > 0.0:
+        return measured, False
+    return theoretical_fwhm, False
 
 
 def _rm_clean(
@@ -365,18 +425,32 @@ def run_rm_synthesis(
             rejected_channel_count=rejected_count,
         )
 
-    rmsf_fwhm = float(2.0 * np.sqrt(3.0) / span)
+    rmsf_fwhm_theoretical = float(2.0 * np.sqrt(3.0) / span)
     max_scale = float(np.pi / lambda2[0])
     inferred_widths = widths if widths is not None else _infer_channel_widths_mhz(freq)
     if inferred_widths is None:
-        max_abs_rm = rmsf_fwhm
+        max_abs_rm = rmsf_fwhm_theoretical
     else:
         lambda2_width = _lambda2_channel_width(freq, inferred_widths)
         max_abs_rm = float(np.sqrt(3.0) / np.max(lambda2_width))
+    rmsf_fwhm, rmsf_fwhm_is_lower_bound = _measure_rmsf_fwhm(
+        lambda2,
+        lambda0,
+        weights,
+        rmsf_fwhm_theoretical,
+        max_abs_rm,
+    )
+    normalized_weights = weights / weight_sum
+    effective_channel_count = float(1.0 / np.sum(np.square(normalized_weights)))
+    maximum_weight_fraction = float(np.max(normalized_weights))
 
     phi_min = -max_abs_rm if phi_min_rad_m2 is None else float(phi_min_rad_m2)
     phi_max = max_abs_rm if phi_max_rad_m2 is None else float(phi_max_rad_m2)
-    phi_step = rmsf_fwhm / _DEFAULT_OVERSAMPLING if phi_step_rad_m2 is None else float(phi_step_rad_m2)
+    phi_step = (
+        rmsf_fwhm_theoretical / _DEFAULT_OVERSAMPLING
+        if phi_step_rad_m2 is None
+        else float(phi_step_rad_m2)
+    )
     if not all(np.isfinite(value) for value in (phi_min, phi_max, phi_step)) or phi_max <= phi_min or phi_step <= 0.0:
         return _failure(
             "invalid_phi_grid",
@@ -455,7 +529,7 @@ def run_rm_synthesis(
     clean_iterations = 0
     clean_cutoff = None
     if clean:
-        if faraday_noise is not None:
+        if faraday_noise is not None and not rmsf_fwhm_is_lower_bound:
             clean_cutoff = float(clean_threshold_sigma * faraday_noise)
             cleaned, components, _, clean_iterations = _rm_clean(
                 faraday,
@@ -474,6 +548,8 @@ def run_rm_synthesis(
         warnings.append("dirty_spectrum_not_rm_cleaned")
     elif faraday_noise is None:
         warnings.append("rm_clean_skipped_noise_unavailable")
+    elif rmsf_fwhm_is_lower_bound:
+        warnings.append("rm_clean_skipped_rmsf_unresolved")
     elif clean_iterations >= int(clean_max_iterations):
         warnings.append("rm_clean_iteration_limit")
     if widths is None:
@@ -494,6 +570,12 @@ def run_rm_synthesis(
         warnings.append("single_faraday_component_poor_fit")
     if rmsf_max_sidelobe is not None and rmsf_max_sidelobe > 0.5:
         warnings.append("high_rmsf_sidelobes")
+    if rmsf_fwhm_is_lower_bound:
+        warnings.append("rmsf_fwhm_unresolved")
+    if rmsf_fwhm > 1.5 * rmsf_fwhm_theoretical:
+        warnings.append("effective_lambda2_coverage_reduced")
+    if maximum_weight_fraction > 0.2 or effective_channel_count < 8.0:
+        warnings.append("channel_weights_highly_concentrated")
 
     return RMSynthesisResult(
         status="ok",
@@ -510,6 +592,8 @@ def run_rm_synthesis(
         intrinsic_polarization_angle_deg=_wrap_angle_deg(intrinsic_angle),
         reference_lambda2_m2=lambda0,
         rmsf_fwhm_rad_m2=rmsf_fwhm,
+        rmsf_fwhm_theoretical_rad_m2=rmsf_fwhm_theoretical,
+        rmsf_fwhm_is_lower_bound=rmsf_fwhm_is_lower_bound,
         rmsf_max_sidelobe=rmsf_max_sidelobe,
         max_scale_rad_m2=max_scale,
         max_abs_rm_rad_m2=max_abs_rm,
@@ -518,6 +602,8 @@ def run_rm_synthesis(
         reduced_chi_square=None if reduced_chi_square is None else float(reduced_chi_square),
         channel_count=int(freq.size),
         rejected_channel_count=rejected_count,
+        effective_channel_count=effective_channel_count,
+        maximum_weight_fraction=maximum_weight_fraction,
         independent_faraday_samples=independent_samples,
         phi_step_rad_m2=float(phi_step),
         phi_rad_m2=phi,

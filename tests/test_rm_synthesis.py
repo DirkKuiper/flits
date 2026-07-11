@@ -243,3 +243,57 @@ def test_rm_synthesis_filters_invalid_channels_and_reports_count() -> None:
     assert result.channel_count == freqs.size - 3
     assert result.rejected_channel_count == 3
     assert "invalid_channels_rejected" in result.warnings
+
+
+def test_rm_synthesis_reports_weight_concentration_and_measured_rmsf_width() -> None:
+    freqs, q, u = _synthetic_qu(125.0)
+    sigma = np.ones(freqs.size)
+    sigma[:4] = 0.01
+    result = run_rm_synthesis(
+        freqs_mhz=freqs,
+        stokes_q=q,
+        stokes_u=u,
+        sigma_q=sigma,
+        sigma_u=sigma,
+        channel_width_mhz=float(freqs[1] - freqs[0]),
+        phi_min_rad_m2=-1000.0,
+        phi_max_rad_m2=1000.0,
+        phi_step_rad_m2=2.0,
+    )
+
+    assert result.status == "ok"
+    assert result.effective_channel_count is not None and result.effective_channel_count < 8.0
+    assert result.maximum_weight_fraction is not None and result.maximum_weight_fraction > 0.2
+    assert result.rmsf_fwhm_rad_m2 > result.rmsf_fwhm_theoretical_rad_m2
+    assert "channel_weights_highly_concentrated" in result.warnings
+    assert "effective_lambda2_coverage_reduced" in result.warnings
+
+
+def test_rmsf_measurement_is_not_coarsened_by_large_instrumental_rm_limit() -> None:
+    freqs, q, u = _synthetic_qu(125.0)
+    regular = run_rm_synthesis(
+        freqs_mhz=freqs,
+        stokes_q=q,
+        stokes_u=u,
+        sigma_q=0.02,
+        sigma_u=0.02,
+        channel_width_mhz=float(freqs[1] - freqs[0]),
+        phi_min_rad_m2=-500.0,
+        phi_max_rad_m2=500.0,
+        phi_step_rad_m2=1.0,
+    )
+    narrow_channels = run_rm_synthesis(
+        freqs_mhz=freqs,
+        stokes_q=q,
+        stokes_u=u,
+        sigma_q=0.02,
+        sigma_u=0.02,
+        channel_width_mhz=0.001,
+        phi_min_rad_m2=-500.0,
+        phi_max_rad_m2=500.0,
+        phi_step_rad_m2=1.0,
+    )
+
+    assert regular.status == narrow_channels.status == "ok"
+    assert narrow_channels.max_abs_rm_rad_m2 > 1_000_000.0
+    assert narrow_channels.rmsf_fwhm_rad_m2 == pytest.approx(regular.rmsf_fwhm_rad_m2, rel=1e-8)

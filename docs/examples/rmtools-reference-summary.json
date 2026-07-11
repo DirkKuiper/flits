@@ -1,0 +1,64 @@
+{
+  "schema_version": "flits_rmtools_reference_example_v1",
+  "interpretation_status": "validation_passed",
+  "provenance": {
+    "creator": "CIRADA RM-Tools project",
+    "data_kind": "official synthetic RM-synthesis validation spectrum",
+    "source_url": "https://raw.githubusercontent.com/CIRADA-Tools/RM-Tools/34cf6fac43f5dac943439fa653327fc7b9fe6c46/tests/RMsynth1D_testdata.dat",
+    "source_distribution_url": "https://github.com/DirkKuiper/flits/releases/download/tutorial-data-v1/flits-tutorial-rmtools-reference-v1.dat",
+    "source_sha256": "765f0d9cf9935203b88ef93e2dea046a4d1cec9d32746b7b3b54318ecd5cba7a",
+    "reference_url": "https://raw.githubusercontent.com/CIRADA-Tools/RM-Tools/34cf6fac43f5dac943439fa653327fc7b9fe6c46/tests/RMsynth1D_referencevalues.json",
+    "reference_distribution_url": "https://github.com/DirkKuiper/flits/releases/download/tutorial-data-v1/flits-tutorial-rmtools-reference-values-v1.json",
+    "reference_sha256": "f9648280658165a042b02a8e57d591c3f8d267c944ed91f3b36582e09652290e",
+    "rmtools_commit": "34cf6fac43f5dac943439fa653327fc7b9fe6c46",
+    "license": "MIT",
+    "license_url": "https://raw.githubusercontent.com/CIRADA-Tools/RM-Tools/34cf6fac43f5dac943439fa653327fc7b9fe6c46/LICENSE.txt"
+  },
+  "input": {
+    "channel_count": 288,
+    "frequency_range_mhz": [
+      800.0,
+      1088.0
+    ],
+    "channel_width_mhz": 1.0034843205575044,
+    "columns": [
+      "frequency_hz",
+      "stokes_i",
+      "stokes_q",
+      "stokes_u",
+      "sigma_i",
+      "sigma_q",
+      "sigma_u"
+    ]
+  },
+  "rmtools_reference": {
+    "peak_rm_rad_m2": 200.29003676576465,
+    "peak_rm_uncertainty_rad_m2": 0.24806386441280062,
+    "peak_polarized_amplitude": 0.6996739296667636,
+    "peak_snr": 118.73859924259541,
+    "reference_lambda2_m2": 0.10327484831236765,
+    "rmsf_fwhm_rad_m2": 58.90951156616211
+  },
+  "flits_result": {
+    "peak_rm_rad_m2": 200.28830896365568,
+    "peak_rm_uncertainty_rad_m2": 0.2521199895844485,
+    "peak_polarized_amplitude": 0.6996783486533217,
+    "peak_snr": 118.7393531957206,
+    "reference_lambda2_m2": 0.1032748626373082,
+    "rmsf_fwhm_rad_m2": 59.87312898193845,
+    "reduced_chi_square": 1.2066680021782035,
+    "effective_channel_count": 288.0,
+    "clean_iterations": 50
+  },
+  "differences": {
+    "absolute_rm_rad_m2": 0.0017278021089737194,
+    "absolute_peak_amplitude": 4.418986558119009e-06,
+    "absolute_peak_snr": 0.0007539531251836706
+  },
+  "validation_checks": {
+    "channel_count_matches": true,
+    "rm_difference_below_0_5_rad_m2": true,
+    "amplitude_difference_below_0_001": true,
+    "snr_difference_below_0_1": true
+  }
+}

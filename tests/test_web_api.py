@@ -430,6 +430,7 @@ class WebApiTest(unittest.TestCase):
         self.assertIn('id="rmImportButton"', index_html)
         self.assertIn('id="rmInput"', index_html)
         self.assertIn('id="rmRunButton"', index_html)
+        self.assertIn('id="rmCalibrationConfirmedInput"', index_html)
         self.assertIn('id="rmCleanInput"', index_html)
         self.assertIn('id="rmPhiMinInput"', index_html)
         self.assertIn('id="rmPhiMaxInput"', index_html)

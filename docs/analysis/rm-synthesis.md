@@ -32,7 +32,9 @@ component. This is less reliable for complex sources.
 Open **Polarization** in the Analysis Workspace:
 
 1. Click **Import JSON or CSV**. The analysis runs once immediately with the
-   displayed defaults.
+   displayed defaults when the input declares `calibration_status: calibrated`.
+   Otherwise confirm **Polarization calibration applied** after checking the
+   dataset provenance; FLITS deliberately will not run before that confirmation.
 2. Review the detected channel count, frequency range, uncertainty status, and
    channel-width status.
 3. Adjust the Faraday-depth bounds or step when the automatic coverage is not
@@ -54,7 +56,8 @@ The browser accepts either column-oriented JSON:
   "stokes_u": [-0.03, 0.09, 0.13],
   "sigma_q": 0.01,
   "sigma_u": 0.01,
-  "channel_width_mhz": 1.0
+  "channel_width_mhz": 1.0,
+  "calibration_status": "calibrated"
 }
 ```
 
@@ -109,6 +112,8 @@ By default FLITS:
 - samples the FDF at five points per theoretical RMSF FWHM;
 - computes the maximum observable absolute RM from the widest channel in
   wavelength-squared space;
+- measures the RMSF FWHM from the actual flagged, weighted channel set (while
+  also retaining the ideal uniform-coverage estimate);
 - uses the supplied channel widths, or infers local widths from channel-centre
   spacing and emits `channel_width_inferred`; and
 - evaluates large transforms in bounded chunks. Grids above 100,001 points are
@@ -138,6 +143,8 @@ Key fields include:
 - polarization angle at the weighted reference wavelength squared and the
   extrapolated zero-wavelength angle;
 - RMSF FWHM and maximum sidelobe;
+- effective channel count and maximum single-channel weight, which expose
+  fragile results dominated by a small part of the band;
 - largest recoverable Faraday scale and maximum observable absolute RM;
 - dirty complex FDF, complex RMSF, restored RM-CLEAN FDF, and CLEAN
   components; and
@@ -151,3 +158,73 @@ Key fields include:
     poor noise model, or unresolved Faraday complexity. Apply those corrections
     upstream and preserve them in the analysis provenance before publishing a
     source RM.
+
+## Reproducible RM-Tools validation example
+
+The checked-in worked example uses the official synthetic one-dimensional
+validation spectrum from [CIRADA RM-Tools](https://github.com/CIRADA-Tools/RM-Tools).
+It is not an observation or a claim about an astrophysical source. It is a
+controlled, analysis-ready Q/U dataset with a reference result from an
+independent implementation, which makes it suitable for verifying the entire
+FLITS path.
+
+The raw source and reference values are distributed like the GBT guided-workflow
+file: as versioned assets on the FLITS `tutorial-data-v1` GitHub release. To
+download explicit working copies:
+
+```bash
+mkdir -p tutorial-data
+curl -L -o tutorial-data/flits-tutorial-rmtools-reference-v1.dat \
+  https://github.com/DirkKuiper/flits/releases/download/tutorial-data-v1/flits-tutorial-rmtools-reference-v1.dat
+curl -L -o tutorial-data/flits-tutorial-rmtools-reference-values-v1.json \
+  https://github.com/DirkKuiper/flits/releases/download/tutorial-data-v1/flits-tutorial-rmtools-reference-values-v1.json
+```
+
+Run the validation from the repository root with those files:
+
+```bash
+python examples/rmtools_reference_workflow.py \
+  --source tutorial-data/flits-tutorial-rmtools-reference-v1.dat \
+  --reference tutorial-data/flits-tutorial-rmtools-reference-values-v1.json
+```
+
+With no file arguments, the script first looks under the ignored local
+`data/RM-Tools` directory and otherwise downloads the same release assets.
+
+The script performs the complete reproducibility chain:
+
+1. reads local tutorial files or downloads their versioned FLITS release assets;
+2. rejects either file unless its SHA-256 checksum matches;
+3. parses all 288 frequency, Q, U, and uncertainty samples;
+4. writes [browser-importable JSON](../examples/rmtools-reference-input.json);
+5. runs weighted RM synthesis and RM-CLEAN in FLITS;
+6. compares RM, peak amplitude, S/N, and channel count with the official
+   reference; and
+7. fails instead of writing a passing summary when any tolerance is exceeded.
+
+The source covers 800–1088 MHz and is distributed by RM-Tools under the
+[MIT license](../examples/rmtools-LICENSE.txt). The pinned source URL, commit,
+checksum, upstream URL, FLITS distribution URL, and license URL are retained
+inside both generated JSON artifacts.
+The data is marked `calibrated` for the browser gate because it is a synthetic
+validation product with fully specified Q/U uncertainties; instrument
+calibration is not applicable.
+
+The [machine-readable validation summary](../examples/rmtools-reference-summary.json)
+records the following independently checked result:
+
+| Quantity | RM-Tools reference | FLITS | Absolute difference |
+| --- | ---: | ---: | ---: |
+| Peak RM (rad m⁻²) | `200.29004` | `200.28831` | `0.00173` |
+| RM uncertainty (rad m⁻²) | `0.24806` | `0.25212` | — |
+| Peak amplitude | `0.699674` | `0.699678` | `0.000004` |
+| Peak S/N | `118.73860` | `118.73935` | `0.00075` |
+| Channels | `288` | `288` | `0` |
+
+![FLITS dirty and RM-CLEAN spectra, RMSF, and fitted Q/U model for the official RM-Tools validation data.](../assets/rm-synthesis/rmtools-reference-example.png)
+
+The FLITS–RM-Tools RM difference is about 0.7% of the quoted 1σ uncertainty and
+well inside the executable example's 0.5 rad m⁻² acceptance limit. The example
+also verifies amplitude to 0.001 and S/N to 0.1. Tests rerun the checked-in
+browser input through FLITS, so documentation cannot silently drift away from
+the implementation.
