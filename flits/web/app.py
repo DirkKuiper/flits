@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import numpy as np
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +17,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from flits.analysis.polarization import run_rm_synthesis
 from flits.io import inspect_filterbank, list_readers
 from flits.session import BurstSession
 from flits.settings import available_auto_mask_profiles, available_presets, get_preset
@@ -70,6 +72,17 @@ class ImportSessionRequest(BaseModel):
 
 class SaveSessionSnapshotRequest(BaseModel):
     save_as: bool = False
+
+
+class RMSynthesisRequest(BaseModel):
+    freqs_mhz: list[float]
+    stokes_q: list[float]
+    stokes_u: list[float]
+    sigma_q: list[float] | float | None = None
+    sigma_u: list[float] | float | None = None
+    phi_min_rad_m2: float | None = None
+    phi_max_rad_m2: float | None = None
+    phi_step_rad_m2: float | None = None
 
 
 app = FastAPI(title="FLITS")
@@ -464,6 +477,21 @@ def index() -> FileResponse:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/api/rm-synthesis")
+def rm_synthesis(request: RMSynthesisRequest) -> dict[str, Any]:
+    """Run weighted dirty RM synthesis on explicit channelized Q/U spectra."""
+    return run_rm_synthesis(
+        freqs_mhz=np.asarray(request.freqs_mhz, dtype=float),
+        stokes_q=np.asarray(request.stokes_q, dtype=float),
+        stokes_u=np.asarray(request.stokes_u, dtype=float),
+        sigma_q=None if request.sigma_q is None else np.asarray(request.sigma_q, dtype=float),
+        sigma_u=None if request.sigma_u is None else np.asarray(request.sigma_u, dtype=float),
+        phi_min_rad_m2=request.phi_min_rad_m2,
+        phi_max_rad_m2=request.phi_max_rad_m2,
+        phi_step_rad_m2=request.phi_step_rad_m2,
+    ).to_dict()
 
 
 @app.get("/api/files")

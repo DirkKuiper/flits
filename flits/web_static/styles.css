@@ -22,8 +22,8 @@
   --alert-soft: rgba(162, 59, 97, 0.12);
   --signal-event: #327cbc;
   --signal-event-soft: rgba(50, 124, 188, 0.14);
-  --signal-spectral: #7235a2;
-  --signal-spectral-soft: rgba(114, 53, 162, 0.12);
+  --signal-spectral: #d55e00;
+  --signal-spectral-soft: rgba(213, 94, 0, 0.12);
   --signal-region: #8e6ebd;
   --signal-region-soft: rgba(142, 110, 189, 0.18);
   --signal-peak: #a23b61;

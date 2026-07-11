@@ -104,6 +104,9 @@ register a custom reader via an entry point (see
 
 - Public catalog files under `/frb` with `plot_freq`, `extent`, and
   `calibrated_wfall` / `wfall` are supported directly.
+- The first two `extent` values are interpreted as milliseconds, matching the
+  CHIME public-catalog plotting convention, and converted to seconds for FLITS
+  sample-time and read-window metadata.
 - These waterfalls are treated as already dedispersed for FLITS loading.
   In the UI, the detection step suggests `DM = 0`.
 - Their dedispersion reference frequency is marked unknown unless an explicit

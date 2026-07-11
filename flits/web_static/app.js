@@ -26,6 +26,7 @@ const state = {
   selectedSnapshotId: "",
   activeSnapshot: null,
   sessionDirty: false,
+  rmResult: null,
 }
 
 const modeLabels = {
@@ -131,6 +132,10 @@ const temporalScalePlot = document.getElementById("temporalScalePlot")
 const spectralPlot = document.getElementById("spectralPlot")
 const spectralSegmentInput = document.getElementById("spectralSegmentInput")
 const runSpectralButton = document.getElementById("runSpectralButton")
+const rmImportButton = document.getElementById("rmImportButton")
+const rmInput = document.getElementById("rmInput")
+const rmContent = document.getElementById("rmContent")
+const rmPlot = document.getElementById("rmPlot")
 const exportIncludeJson = document.getElementById("exportIncludeJson")
 const exportIncludeCsv = document.getElementById("exportIncludeCsv")
 const exportIncludeNpz = document.getElementById("exportIncludeNpz")
@@ -199,6 +204,7 @@ const plotTheme = Object.freeze({
   accentStrong: "#5f2b88",
   accentAlt: "#327cbc",
   accentAltStrong: "#285f93",
+  spectral: "#D55E00",
   accentSoft: "rgba(114, 53, 162, 0.12)",
   accentAltSoft: "rgba(50, 124, 188, 0.14)",
   warning: "#8e6ebd",
@@ -365,7 +371,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 function initialAnalysisTab() {
   const fromHash = window.location.hash.replace(/^#/, "").trim().toLowerCase()
-  const valid = new Set(["prepare", "dm", "fitting", "temporal", "export"])
+  const valid = new Set(["prepare", "dm", "fitting", "temporal", "polarization", "export"])
   return valid.has(fromHash) ? fromHash : state.activeAnalysisTab
 }
 
@@ -542,6 +548,8 @@ function bindControls() {
       segment_length_ms: Number(spectralSegmentInput.value),
     })
   })
+  rmImportButton.addEventListener("click", () => rmInput.click())
+  rmInput.addEventListener("change", () => importRmSpectrum())
   exportIncludeJson.addEventListener("change", () => updateExportSelection("json", exportIncludeJson.checked))
   exportIncludeCsv.addEventListener("change", () => updateExportSelection("csv", exportIncludeCsv.checked))
   exportIncludeNpz.addEventListener("change", () => updateExportSelection("npz", exportIncludeNpz.checked))
@@ -4932,7 +4940,7 @@ function setMode(mode) {
 }
 
 function setAnalysisTab(tab) {
-  const normalizedTab = ["prepare", "dm", "fitting", "temporal", "export"].includes(tab) ? tab : "prepare"
+  const normalizedTab = ["prepare", "dm", "fitting", "temporal", "polarization", "export"].includes(tab) ? tab : "prepare"
   state.activeAnalysisTab = normalizedTab
   analysisTabButtons.forEach((button) => {
     const isActive = button.dataset.analysisTab === normalizedTab
@@ -4953,9 +4961,78 @@ function setAnalysisTab(tab) {
     syncFittingPlot()
   } else if (normalizedTab === "temporal") {
     syncSpectralPlot()
+  } else if (normalizedTab === "polarization") {
+    renderRmSynthesis(state.rmResult)
   } else if (normalizedTab === "export" && state.sessionId && exportSelectionCount() > 0 && (state.exportPreviewStale || !state.exportPreview)) {
     scheduleExportPreview({ immediate: true })
   }
+}
+
+async function importRmSpectrum() {
+  const file = rmInput.files?.[0]
+  if (!file) return
+  rmImportButton.disabled = true
+  rmImportButton.textContent = "Running RM synthesis..."
+  try {
+    const payload = JSON.parse(await file.text())
+    for (const field of ["freqs_mhz", "stokes_q", "stokes_u"]) {
+      if (!Array.isArray(payload[field])) {
+        throw new Error(`RM input must contain a ${field} array.`)
+      }
+    }
+    const response = await fetch("/api/rm-synthesis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    const result = await response.json()
+    if (!response.ok) {
+      throw new Error(result.detail || "RM synthesis request failed.")
+    }
+    state.rmResult = result
+    renderRmSynthesis(result)
+    showToast(result.status === "ok" ? "RM synthesis completed" : result.message, result.status === "ok" ? "success" : "error")
+  } catch (error) {
+    state.rmResult = null
+    renderRmSynthesis(null, error.message || "Unable to read the RM input.")
+    showToast(error.message || "Unable to read the RM input.", "error")
+  } finally {
+    rmInput.value = ""
+    rmImportButton.disabled = false
+    rmImportButton.textContent = "Import Q/U JSON"
+  }
+}
+
+function renderRmSynthesis(result, errorMessage = null) {
+  if (!result || result.status !== "ok") {
+    rmContent.innerHTML = `<div class="empty-state">${escapeHtml(errorMessage || result?.message || "Import calibrated channelized Q/U JSON to run RM synthesis.")}</div>`
+    rmPlot.classList.add("is-empty")
+    Plotly.purge(rmPlot)
+    rmPlot.replaceChildren()
+    return
+  }
+  const warningText = (result.warnings || []).map((warning) => warning.replaceAll("_", " ")).join(" · ")
+  rmContent.innerHTML = `
+    <div class="results-primary">
+      ${resultTile("Peak RM", `${fmt(result.peak_rm_rad_m2, 3)} ± ${fmt(result.peak_rm_uncertainty_rad_m2, 3)} rad m⁻²`, "primary")}
+      ${resultTile("Peak S/N", fmt(result.peak_snr, 2), "secondary")}
+      ${resultTile("RMSF FWHM", `${fmt(result.rmsf_fwhm_rad_m2, 3)} rad m⁻²`, "secondary")}
+      ${resultTile("Channels", String(result.channel_count), "secondary")}
+    </div>
+    <div class="dm-fit-note" data-tone="warning"><strong>Dirty-spectrum limits</strong><span>${escapeHtml(warningText)}</span></div>
+  `
+  rmPlot.classList.remove("is-empty")
+  Plotly.react(rmPlot, [
+    { x: result.phi_rad_m2, y: result.polarized_amplitude, type: "scatter", mode: "lines", name: "|F(φ)|", line: { color: plotTheme.accent, width: 2.2 } },
+    { x: result.phi_rad_m2, y: result.rmsf_amplitude, type: "scatter", mode: "lines", name: "|RMSF|", line: { color: plotTheme.accentAlt, width: 1.7, dash: "dot" } },
+  ], {
+    margin: { l: 66, r: 24, t: 28, b: 58 },
+    paper_bgcolor: plotTheme.paperBg,
+    plot_bgcolor: plotTheme.plotBg,
+    xaxis: { title: "Faraday depth (rad m⁻²)", gridcolor: plotTheme.grid },
+    yaxis: { title: "Normalized amplitude", gridcolor: plotTheme.grid },
+    legend: { orientation: "h", x: 0, y: 1.12 },
+  }, { responsive: true, displaylogo: false })
 }
 
 function scaleFactor(axis, multiplier) {
@@ -5100,8 +5177,8 @@ function buildHeatmapShapes(view) {
   const shapes = [
     verticalLine(view.state.event_ms[0], y0, y1, plotTheme.accentAlt, "solid", "x", "y"),
     verticalLine(view.state.event_ms[1], y0, y1, plotTheme.accentAlt, "solid", "x", "y"),
-    horizontalLine(view.state.spectral_extent_mhz[0], x0, x1, plotTheme.accent, "solid", "x", "y"),
-    horizontalLine(view.state.spectral_extent_mhz[1], x0, x1, plotTheme.accent, "solid", "x", "y"),
+    horizontalLine(view.state.spectral_extent_mhz[0], x0, x1, plotTheme.spectral, "solid", "x", "y"),
+    horizontalLine(view.state.spectral_extent_mhz[1], x0, x1, plotTheme.spectral, "solid", "x", "y"),
   ]
 
   for (const region of view.state.offpulse_ms || []) {
@@ -5128,8 +5205,8 @@ function buildSpectrumShapes(view) {
   const xMin = minFinite(view.plot.spectrum.x)
   const xMax = maxFinite(view.plot.spectrum.x)
   return [
-    horizontalLine(view.state.spectral_extent_mhz[0], xMin, xMax, plotTheme.accent, "solid", "x3", "y3"),
-    horizontalLine(view.state.spectral_extent_mhz[1], xMin, xMax, plotTheme.accent, "solid", "x3", "y3"),
+    horizontalLine(view.state.spectral_extent_mhz[0], xMin, xMax, plotTheme.spectral, "solid", "x3", "y3"),
+    horizontalLine(view.state.spectral_extent_mhz[1], xMin, xMax, plotTheme.spectral, "solid", "x3", "y3"),
   ]
 }
 
