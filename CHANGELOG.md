@@ -4,6 +4,13 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [0.9.0](https://github.com/DirkKuiper/flits/compare/flits-v0.8.0...flits-v0.9.0) (2026-07-11)
+
+
+### Features
+
+* **polarization:** complete RM synthesis workflow ([823bbd1](https://github.com/DirkKuiper/flits/commit/823bbd15aec25c1626251f7c9b50185d7ab39f23))
+
 ## [0.8.0](https://github.com/DirkKuiper/flits/compare/flits-v0.7.3...flits-v0.8.0) (2026-07-11)
 
 

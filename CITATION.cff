@@ -9,7 +9,7 @@ abstract: Browser-based scientific software for interactive FRB filterbank inspe
 repository-code: https://github.com/DirkKuiper/flits
 url: https://github.com/DirkKuiper/flits
 license: GPL-3.0-only
-version: 0.8.0 # x-release-please-version
+version: 0.9.0 # x-release-please-version
 date-released: 2026-07-11 # x-release-please-date
 keywords:
   - fast radio bursts
