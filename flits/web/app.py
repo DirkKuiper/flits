@@ -80,9 +80,14 @@ class RMSynthesisRequest(BaseModel):
     stokes_u: list[float]
     sigma_q: list[float] | float | None = None
     sigma_u: list[float] | float | None = None
+    channel_width_mhz: list[float] | float | None = None
     phi_min_rad_m2: float | None = None
     phi_max_rad_m2: float | None = None
     phi_step_rad_m2: float | None = None
+    clean: bool = False
+    clean_gain: float = 0.1
+    clean_threshold_sigma: float = 3.0
+    clean_max_iterations: int = 1000
 
 
 app = FastAPI(title="FLITS")
@@ -488,9 +493,16 @@ def rm_synthesis(request: RMSynthesisRequest) -> dict[str, Any]:
         stokes_u=np.asarray(request.stokes_u, dtype=float),
         sigma_q=None if request.sigma_q is None else np.asarray(request.sigma_q, dtype=float),
         sigma_u=None if request.sigma_u is None else np.asarray(request.sigma_u, dtype=float),
+        channel_width_mhz=(
+            None if request.channel_width_mhz is None else np.asarray(request.channel_width_mhz, dtype=float)
+        ),
         phi_min_rad_m2=request.phi_min_rad_m2,
         phi_max_rad_m2=request.phi_max_rad_m2,
         phi_step_rad_m2=request.phi_step_rad_m2,
+        clean=request.clean,
+        clean_gain=request.clean_gain,
+        clean_threshold_sigma=request.clean_threshold_sigma,
+        clean_max_iterations=request.clean_max_iterations,
     ).to_dict()
 
 

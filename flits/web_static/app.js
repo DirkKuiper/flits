@@ -27,6 +27,8 @@ const state = {
   activeSnapshot: null,
   sessionDirty: false,
   rmResult: null,
+  rmInputData: null,
+  rmInputName: "",
 }
 
 const modeLabels = {
@@ -136,6 +138,20 @@ const rmImportButton = document.getElementById("rmImportButton")
 const rmInput = document.getElementById("rmInput")
 const rmContent = document.getElementById("rmContent")
 const rmPlot = document.getElementById("rmPlot")
+const rmQuPlot = document.getElementById("rmQuPlot")
+const rmInputSummary = document.getElementById("rmInputSummary")
+const rmExampleButton = document.getElementById("rmExampleButton")
+const rmRunButton = document.getElementById("rmRunButton")
+const rmDownloadJsonButton = document.getElementById("rmDownloadJsonButton")
+const rmDownloadCsvButton = document.getElementById("rmDownloadCsvButton")
+const rmPhiMinInput = document.getElementById("rmPhiMinInput")
+const rmPhiMaxInput = document.getElementById("rmPhiMaxInput")
+const rmPhiStepInput = document.getElementById("rmPhiStepInput")
+const rmChannelWidthInput = document.getElementById("rmChannelWidthInput")
+const rmCleanInput = document.getElementById("rmCleanInput")
+const rmCleanGainInput = document.getElementById("rmCleanGainInput")
+const rmCleanThresholdInput = document.getElementById("rmCleanThresholdInput")
+const rmCleanIterationsInput = document.getElementById("rmCleanIterationsInput")
 const exportIncludeJson = document.getElementById("exportIncludeJson")
 const exportIncludeCsv = document.getElementById("exportIncludeCsv")
 const exportIncludeNpz = document.getElementById("exportIncludeNpz")
@@ -550,6 +566,15 @@ function bindControls() {
   })
   rmImportButton.addEventListener("click", () => rmInput.click())
   rmInput.addEventListener("change", () => importRmSpectrum())
+  rmExampleButton.addEventListener("click", () => downloadRmExample())
+  rmRunButton.addEventListener("click", () => runRmSynthesis())
+  rmDownloadJsonButton.addEventListener("click", () => downloadRmResultJson())
+  rmDownloadCsvButton.addEventListener("click", () => downloadRmSpectrumCsv())
+  rmCleanInput.addEventListener("change", () => {
+    for (const input of [rmCleanGainInput, rmCleanThresholdInput, rmCleanIterationsInput]) {
+      input.disabled = !rmCleanInput.checked
+    }
+  })
   exportIncludeJson.addEventListener("change", () => updateExportSelection("json", exportIncludeJson.checked))
   exportIncludeCsv.addEventListener("change", () => updateExportSelection("csv", exportIncludeCsv.checked))
   exportIncludeNpz.addEventListener("change", () => updateExportSelection("npz", exportIncludeNpz.checked))
@@ -4968,71 +4993,447 @@ function setAnalysisTab(tab) {
   }
 }
 
+function handleAnalysisTabKeydown(event, currentButton) {
+  const currentIndex = analysisTabButtons.indexOf(currentButton)
+  let nextIndex = null
+  if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+    nextIndex = (currentIndex + 1) % analysisTabButtons.length
+  } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+    nextIndex = (currentIndex - 1 + analysisTabButtons.length) % analysisTabButtons.length
+  } else if (event.key === "Home") {
+    nextIndex = 0
+  } else if (event.key === "End") {
+    nextIndex = analysisTabButtons.length - 1
+  }
+  if (nextIndex === null) {
+    return
+  }
+  event.preventDefault()
+  const nextButton = analysisTabButtons[nextIndex]
+  setAnalysisTab(nextButton.dataset.analysisTab)
+  nextButton.focus()
+}
+
+const rmFieldAliases = {
+  freqs_mhz: ["freqs_mhz", "freq_mhz", "frequency_mhz", "frequency", "freq"],
+  stokes_q: ["stokes_q", "q"],
+  stokes_u: ["stokes_u", "u"],
+  sigma_q: ["sigma_q", "q_err", "q_error"],
+  sigma_u: ["sigma_u", "u_err", "u_error"],
+  channel_width_mhz: ["channel_width_mhz", "chan_width_mhz", "width_mhz"],
+}
+
+const rmWarningMessages = {
+  ionospheric_rm_not_corrected: "The reported Faraday depth has not been corrected for the ionosphere.",
+  instrumental_leakage_not_corrected: "Instrumental polarization leakage is not corrected by FLITS.",
+  dirty_spectrum_not_rm_cleaned: "This result is the dirty spectrum; RMSF sidelobes have not been deconvolved.",
+  rm_clean_skipped_noise_unavailable: "RM-CLEAN was skipped because the noise level could not be estimated.",
+  rm_clean_iteration_limit: "RM-CLEAN reached its iteration limit before the cutoff.",
+  channel_width_inferred: "Channel widths were inferred from frequency spacing; provide true widths for a reliable maximum |RM|.",
+  channel_uncertainties_not_provided: "Q/U uncertainties were not supplied; equal weights and residual-based noise were used.",
+  invalid_channels_rejected: "One or more invalid channels were excluded before synthesis.",
+  low_significance_peak: "Peak S/N is below 8; false detections can be material across a broad Faraday search.",
+  peak_near_instrumental_rm_limit: "The peak is close to the bandwidth-depolarization limit.",
+  peak_near_search_boundary: "The peak is close to a search boundary; widen the Faraday-depth range.",
+  faraday_grid_undersampled: "The Faraday grid has fewer than four samples per RMSF FWHM.",
+  single_faraday_component_poor_fit: "A single Faraday-thin component is a poor fit to Q/U; inspect complexity or calibration.",
+  high_rmsf_sidelobes: "The RMSF has sidelobes above 50%; use RM-CLEAN and interpret secondary peaks cautiously.",
+}
+
+function normalizedRmKey(value) {
+  return String(value || "").trim().toLowerCase().replaceAll(/[^a-z0-9]+/g, "_").replaceAll(/^_|_$/g, "")
+}
+
+function rmObjectValue(payload, aliases) {
+  const entries = Object.entries(payload || {})
+  for (const alias of aliases) {
+    const match = entries.find(([key]) => normalizedRmKey(key) === alias)
+    if (match) return match[1]
+  }
+  return undefined
+}
+
+function parseDelimitedLine(line, delimiter) {
+  const cells = []
+  let value = ""
+  let quoted = false
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]
+    if (char === '"') {
+      if (quoted && line[index + 1] === '"') {
+        value += '"'
+        index += 1
+      } else {
+        quoted = !quoted
+      }
+    } else if (char === delimiter && !quoted) {
+      cells.push(value.trim())
+      value = ""
+    } else {
+      value += char
+    }
+  }
+  cells.push(value.trim())
+  return cells
+}
+
+function parseRmCsv(text) {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith("#"))
+  if (lines.length < 2) throw new Error("RM CSV needs a header and at least one data row.")
+  const candidates = [",", "\t", ";"]
+  const delimiter = candidates.sort((a, b) => lines[0].split(b).length - lines[0].split(a).length)[0]
+  const headers = parseDelimitedLine(lines[0], delimiter).map(normalizedRmKey)
+  return lines.slice(1).map((line) => {
+    const cells = parseDelimitedLine(line, delimiter)
+    return Object.fromEntries(headers.map((header, index) => [header, cells[index]]))
+  })
+}
+
+function rowsToRmPayload(rows) {
+  if (!Array.isArray(rows) || !rows.length || typeof rows[0] !== "object") {
+    throw new Error("Row-oriented RM data must contain objects with frequency, Q, and U fields.")
+  }
+  const payload = {}
+  for (const [field, aliases] of Object.entries(rmFieldAliases)) {
+    const values = rows.map((row) => rmObjectValue(row, aliases))
+    if (values.some((value) => value !== undefined && value !== "")) {
+      payload[field] = values
+    }
+  }
+  return payload
+}
+
+function normalizeRmPayload(raw) {
+  let payload = raw
+  if (Array.isArray(raw)) payload = rowsToRmPayload(raw)
+  if (Array.isArray(raw?.data)) payload = { ...raw, ...rowsToRmPayload(raw.data) }
+  const resolved = {}
+  for (const [field, aliases] of Object.entries(rmFieldAliases)) {
+    const value = rmObjectValue(payload, aliases)
+    if (value !== undefined) resolved[field] = value
+  }
+  for (const field of ["freqs_mhz", "stokes_q", "stokes_u"]) {
+    if (!Array.isArray(resolved[field])) throw new Error(`RM input must contain a ${field} array.`)
+  }
+  const count = resolved.freqs_mhz.length
+  if (!count || resolved.stokes_q.length !== count || resolved.stokes_u.length !== count) {
+    throw new Error("Frequency, Stokes Q, and Stokes U must have the same non-zero length.")
+  }
+  for (const field of ["sigma_q", "sigma_u", "channel_width_mhz"]) {
+    if (resolved[field] !== undefined && !Array.isArray(resolved[field]) && !Number.isFinite(Number(resolved[field]))) {
+      delete resolved[field]
+    }
+    if (Array.isArray(resolved[field]) && resolved[field].length !== count) {
+      throw new Error(`${field} must be a scalar or have ${count} values.`)
+    }
+  }
+  if ((resolved.sigma_q === undefined) !== (resolved.sigma_u === undefined)) {
+    throw new Error("Provide both sigma_q and sigma_u, or neither.")
+  }
+
+  const optionalArrays = ["sigma_q", "sigma_u", "channel_width_mhz"]
+  const kept = []
+  for (let index = 0; index < count; index += 1) {
+    const required = [resolved.freqs_mhz[index], resolved.stokes_q[index], resolved.stokes_u[index]].map(Number)
+    if (required.every(Number.isFinite) && required[0] > 0) kept.push(index)
+  }
+  if (kept.length < 8) throw new Error("Fewer than eight rows contain usable frequency, Q, and U values.")
+  for (const field of ["freqs_mhz", "stokes_q", "stokes_u"]) {
+    resolved[field] = kept.map((index) => Number(resolved[field][index]))
+  }
+  for (const field of optionalArrays) {
+    if (Array.isArray(resolved[field])) {
+      const values = kept.map((index) => Number(resolved[field][index]))
+      if (values.every((value) => Number.isFinite(value) && value > 0)) resolved[field] = values
+      else delete resolved[field]
+    } else if (resolved[field] !== undefined) {
+      resolved[field] = Number(resolved[field])
+    }
+  }
+  resolved.input_row_count = count
+  resolved.rejected_input_rows = count - kept.length
+  for (const field of ["phi_min_rad_m2", "phi_max_rad_m2", "phi_step_rad_m2"]) {
+    const value = rmObjectValue(payload, [field])
+    if (Number.isFinite(Number(value))) resolved[field] = Number(value)
+  }
+  return resolved
+}
+
 async function importRmSpectrum() {
   const file = rmInput.files?.[0]
   if (!file) return
   rmImportButton.disabled = true
-  rmImportButton.textContent = "Running RM synthesis..."
+  rmImportButton.textContent = "Reading data..."
   try {
-    const payload = JSON.parse(await file.text())
-    for (const field of ["freqs_mhz", "stokes_q", "stokes_u"]) {
-      if (!Array.isArray(payload[field])) {
-        throw new Error(`RM input must contain a ${field} array.`)
-      }
-    }
-    const response = await fetch("/api/rm-synthesis", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-    const result = await response.json()
-    if (!response.ok) {
-      throw new Error(result.detail || "RM synthesis request failed.")
-    }
-    state.rmResult = result
-    renderRmSynthesis(result)
-    showToast(result.status === "ok" ? "RM synthesis completed" : result.message, result.status === "ok" ? "success" : "error")
-  } catch (error) {
+    const text = await file.text()
+    const raw = file.name.toLowerCase().endsWith(".csv") ? rowsToRmPayload(parseRmCsv(text)) : JSON.parse(text)
+    const payload = normalizeRmPayload(raw)
+    state.rmInputData = payload
+    state.rmInputName = file.name
     state.rmResult = null
-    renderRmSynthesis(null, error.message || "Unable to read the RM input.")
-    showToast(error.message || "Unable to read the RM input.", "error")
+    if (payload.phi_min_rad_m2 !== undefined) rmPhiMinInput.value = payload.phi_min_rad_m2
+    if (payload.phi_max_rad_m2 !== undefined) rmPhiMaxInput.value = payload.phi_max_rad_m2
+    if (payload.phi_step_rad_m2 !== undefined) rmPhiStepInput.value = payload.phi_step_rad_m2
+    renderRmInputSummary()
+    rmRunButton.disabled = false
+    rmDownloadJsonButton.disabled = true
+    rmDownloadCsvButton.disabled = true
+    await runRmSynthesis()
+  } catch (error) {
+    state.rmInputData = null
+    state.rmInputName = ""
+    state.rmResult = null
+    renderRmInputSummary(error.message || "Unable to read RM input.")
+    renderRmSynthesis(null, error.message || "Unable to read RM input.")
+    showToast(error.message || "Unable to read RM input.", "error")
   } finally {
     rmInput.value = ""
     rmImportButton.disabled = false
-    rmImportButton.textContent = "Import Q/U JSON"
+    rmImportButton.textContent = "Import JSON or CSV"
+  }
+}
+
+function renderRmInputSummary(errorMessage = null) {
+  if (!state.rmInputData) {
+    rmInputSummary.innerHTML = `<span class="panel-badge">${escapeHtml(errorMessage || "No data loaded")}</span><p>Required fields: <code>freqs_mhz</code>, <code>stokes_q</code>, and <code>stokes_u</code>.</p>`
+    rmRunButton.disabled = true
+    return
+  }
+  const data = state.rmInputData
+  const frequencies = data.freqs_mhz
+  const frequencyBounds = frequencies.reduce(
+    (bounds, value) => [Math.min(bounds[0], value), Math.max(bounds[1], value)],
+    [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY],
+  )
+  const hasNoise = data.sigma_q !== undefined && data.sigma_u !== undefined
+  const hasWidth = data.channel_width_mhz !== undefined
+  rmInputSummary.innerHTML = `
+    <span class="panel-badge">${escapeHtml(state.rmInputName)} · ${frequencies.length} usable channels</span>
+    <p>${fmt(frequencyBounds[0], 3)}–${fmt(frequencyBounds[1], 3)} MHz · ${hasNoise ? "uncertainty weighted" : "no Q/U uncertainties"} · ${hasWidth ? "channel width supplied" : "channel width will be inferred"}${data.rejected_input_rows ? ` · ${data.rejected_input_rows} rows rejected` : ""}</p>
+  `
+}
+
+function optionalRmNumber(input, label, { positive = false } = {}) {
+  if (input.value.trim() === "") return undefined
+  const value = Number(input.value)
+  if (!Number.isFinite(value) || (positive && value <= 0)) throw new Error(`${label} must be ${positive ? "a positive" : "a finite"} number.`)
+  return value
+}
+
+function rmRequestPayload() {
+  if (!state.rmInputData) throw new Error("Import Q/U data first.")
+  const payload = {
+    freqs_mhz: state.rmInputData.freqs_mhz,
+    stokes_q: state.rmInputData.stokes_q,
+    stokes_u: state.rmInputData.stokes_u,
+    ...(state.rmInputData.sigma_q === undefined ? {} : { sigma_q: state.rmInputData.sigma_q }),
+    ...(state.rmInputData.sigma_u === undefined ? {} : { sigma_u: state.rmInputData.sigma_u }),
+    ...(state.rmInputData.channel_width_mhz === undefined ? {} : { channel_width_mhz: state.rmInputData.channel_width_mhz }),
+    clean: rmCleanInput.checked,
+    clean_gain: optionalRmNumber(rmCleanGainInput, "RM-CLEAN gain", { positive: true }) ?? 0.1,
+    clean_threshold_sigma: optionalRmNumber(rmCleanThresholdInput, "RM-CLEAN cutoff", { positive: true }) ?? 3.0,
+    clean_max_iterations: Math.round(optionalRmNumber(rmCleanIterationsInput, "RM-CLEAN iterations", { positive: true }) ?? 1000),
+  }
+  const values = [
+    ["phi_min_rad_m2", rmPhiMinInput, "Minimum φ", false],
+    ["phi_max_rad_m2", rmPhiMaxInput, "Maximum φ", false],
+    ["phi_step_rad_m2", rmPhiStepInput, "φ step", true],
+    ["channel_width_mhz", rmChannelWidthInput, "Channel width", true],
+  ]
+  for (const [field, input, label, positive] of values) {
+    const value = optionalRmNumber(input, label, { positive })
+    if (value !== undefined) payload[field] = value
+  }
+  if (payload.phi_min_rad_m2 !== undefined && payload.phi_max_rad_m2 !== undefined && payload.phi_max_rad_m2 <= payload.phi_min_rad_m2) {
+    throw new Error("Maximum φ must be greater than minimum φ.")
+  }
+  return payload
+}
+
+async function runRmSynthesis() {
+  if (!state.rmInputData) return
+  rmRunButton.disabled = true
+  rmRunButton.textContent = "Synthesizing..."
+  try {
+    const response = await fetch("/api/rm-synthesis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(rmRequestPayload()),
+    })
+    const result = await response.json()
+    if (!response.ok) {
+      const detail = Array.isArray(result.detail) ? result.detail.map((item) => item.msg).join("; ") : result.detail
+      throw new Error(detail || "RM synthesis request failed.")
+    }
+    if (result.status !== "ok") throw new Error(result.message || "RM synthesis failed.")
+    state.rmResult = result
+    renderRmSynthesis(result)
+    rmDownloadJsonButton.disabled = false
+    rmDownloadCsvButton.disabled = false
+    showToast("RM synthesis completed", "success")
+  } catch (error) {
+    state.rmResult = null
+    renderRmSynthesis(null, error.message || "RM synthesis failed.")
+    rmDownloadJsonButton.disabled = true
+    rmDownloadCsvButton.disabled = true
+    showToast(error.message || "RM synthesis failed.", "error")
+  } finally {
+    rmRunButton.disabled = !state.rmInputData
+    rmRunButton.textContent = "Run RM Synthesis"
+  }
+}
+
+function formatProbability(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "n/a"
+  if (Number(value) === 0) return "< 1e-300"
+  return Number(value).toExponential(2)
+}
+
+function rmWarningMarkup(warnings) {
+  if (!warnings?.length) return `<div class="rm-quality-item"><span class="rm-quality-dot"></span><span>No automated quality warnings.</span></div>`
+  return warnings.map((warning) => `
+    <div class="rm-quality-item" data-tone="warning">
+      <span class="rm-quality-dot"></span>
+      <span>${escapeHtml(rmWarningMessages[warning] || warning.replaceAll("_", " "))}</span>
+    </div>
+  `).join("")
+}
+
+function clearRmPlots() {
+  for (const plot of [rmPlot, rmQuPlot]) {
+    plot.classList.add("is-empty")
+    Plotly.purge(plot)
+    plot.replaceChildren()
   }
 }
 
 function renderRmSynthesis(result, errorMessage = null) {
   if (!result || result.status !== "ok") {
-    rmContent.innerHTML = `<div class="empty-state">${escapeHtml(errorMessage || result?.message || "Import calibrated channelized Q/U JSON to run RM synthesis.")}</div>`
-    rmPlot.classList.add("is-empty")
-    Plotly.purge(rmPlot)
-    rmPlot.replaceChildren()
+    rmContent.innerHTML = `<div class="empty-state">${escapeHtml(errorMessage || result?.message || (state.rmInputData ? "Configure and run RM synthesis." : "Load calibrated Q/U data to begin."))}</div>`
+    clearRmPlots()
     return
   }
-  const warningText = (result.warnings || []).map((warning) => warning.replaceAll("_", " ")).join(" · ")
+  const uncertainty = result.peak_rm_uncertainty_rad_m2 === null ? "uncertainty unavailable" : `± ${fmt(result.peak_rm_uncertainty_rad_m2, 3)} rad m⁻²`
+  const chiSquare = result.reduced_chi_square === null ? "n/a (no σQ/U)" : fmt(result.reduced_chi_square, 3)
+  const cleanLabel = result.clean_applied ? `${result.clean_iterations} iterations · cutoff ${fmt(result.clean_cutoff, 4)}` : "Not applied"
   rmContent.innerHTML = `
     <div class="results-primary">
-      ${resultTile("Peak RM", `${fmt(result.peak_rm_rad_m2, 3)} ± ${fmt(result.peak_rm_uncertainty_rad_m2, 3)} rad m⁻²`, "primary")}
-      ${resultTile("Peak S/N", fmt(result.peak_snr, 2), "secondary")}
-      ${resultTile("RMSF FWHM", `${fmt(result.rmsf_fwhm_rad_m2, 3)} rad m⁻²`, "secondary")}
-      ${resultTile("Channels", String(result.channel_count), "secondary")}
+      ${resultTile("Peak Faraday Depth", `${fmt(result.peak_rm_rad_m2, 4)} rad m⁻²`, "primary", { detail: null, tooltip: `Sub-grid parabolic refinement; ${uncertainty}` })}
+      ${resultTile("Peak S/N", fmt(result.peak_snr, 2), "primary", "Peak polarized amplitude divided by propagated or residual-estimated Faraday noise.")}
+      ${resultTile("Global False-Alarm", formatProbability(result.false_alarm_probability), "primary", `${result.independent_faraday_samples} independent RMSF-sized trials.`)}
     </div>
-    <div class="dm-fit-note" data-tone="warning"><strong>Dirty-spectrum limits</strong><span>${escapeHtml(warningText)}</span></div>
+    <div class="results-secondary">
+      ${resultTile("RM Uncertainty", uncertainty, "secondary")}
+      ${resultTile("RMSF FWHM", `${fmt(result.rmsf_fwhm_rad_m2, 3)} rad m⁻²`, "secondary")}
+      ${resultTile("Max |RM|", `${fmt(result.max_abs_rm_rad_m2, 2)} rad m⁻²`, "secondary")}
+      ${resultTile("Largest Faraday Scale", `${fmt(result.max_scale_rad_m2, 2)} rad m⁻²`, "secondary")}
+      ${resultTile("Debiased Polarized Amp.", fmt(result.peak_polarized_amplitude_debiased, 5), "secondary")}
+      ${resultTile("Faraday Noise", `${fmt(result.faraday_noise, 5)} · ${String(result.noise_source || "unknown").replaceAll("_", " ")}`, "secondary")}
+      ${resultTile("χ²ν Thin Model", chiSquare, "secondary")}
+      ${resultTile("RMSF Max Sidelobe", fmt(result.rmsf_max_sidelobe, 3), "secondary")}
+      ${resultTile("Angle at λ₀²", `${fmt(result.polarization_angle_deg, 2)}°`, "secondary")}
+      ${resultTile("Intrinsic Angle", `${fmt(result.intrinsic_polarization_angle_deg, 2)}°`, "secondary")}
+      ${resultTile("Usable Channels", `${result.channel_count}${result.rejected_channel_count ? ` (${result.rejected_channel_count} rejected)` : ""}`, "secondary")}
+      ${resultTile("RM-CLEAN", cleanLabel, "secondary")}
+    </div>
+    <div class="dm-fit-note" data-tone="warning">
+      <strong>Quality and interpretation</strong>
+      <div class="rm-quality-list">${rmWarningMarkup(result.warnings)}</div>
+    </div>
   `
+  renderRmPlots(result)
+}
+
+function renderRmPlots(result) {
   rmPlot.classList.remove("is-empty")
-  Plotly.react(rmPlot, [
-    { x: result.phi_rad_m2, y: result.polarized_amplitude, type: "scatter", mode: "lines", name: "|F(φ)|", line: { color: plotTheme.accent, width: 2.2 } },
-    { x: result.phi_rad_m2, y: result.rmsf_amplitude, type: "scatter", mode: "lines", name: "|RMSF|", line: { color: plotTheme.accentAlt, width: 1.7, dash: "dot" } },
-  ], {
-    margin: { l: 66, r: 24, t: 28, b: 58 },
+  const traces = [
+    { x: result.phi_rad_m2, y: result.polarized_amplitude, type: "scatter", mode: "lines", name: "Dirty |F(φ)|", line: { color: plotTheme.accent, width: 2.0 } },
+  ]
+  if (result.clean_applied && result.cleaned_polarized_amplitude?.length === result.phi_rad_m2.length) {
+    traces.push({ x: result.phi_rad_m2, y: result.cleaned_polarized_amplitude, type: "scatter", mode: "lines", name: "RM-CLEAN |F(φ)|", line: { color: plotTheme.alert, width: 2.2 } })
+  }
+  traces.push({ x: result.phi_rad_m2, y: result.rmsf_amplitude, type: "scatter", mode: "lines", name: "|RMSF|", yaxis: "y2", line: { color: plotTheme.accentAlt, width: 1.4, dash: "dot" } })
+  Plotly.react(rmPlot, traces, {
+    margin: { l: 72, r: 64, t: 40, b: 60 },
     paper_bgcolor: plotTheme.paperBg,
     plot_bgcolor: plotTheme.plotBg,
-    xaxis: { title: "Faraday depth (rad m⁻²)", gridcolor: plotTheme.grid },
-    yaxis: { title: "Normalized amplitude", gridcolor: plotTheme.grid },
-    legend: { orientation: "h", x: 0, y: 1.12 },
+    xaxis: { title: "Faraday depth φ (rad m⁻²)", gridcolor: plotTheme.grid },
+    yaxis: { title: "Polarized amplitude", gridcolor: plotTheme.grid, rangemode: "tozero" },
+    yaxis2: { title: "RMSF amplitude", overlaying: "y", side: "right", range: [0, 1.08], showgrid: false },
+    legend: { orientation: "h", x: 0, y: 1.14 },
+    shapes: [{ type: "line", x0: result.peak_rm_rad_m2, x1: result.peak_rm_rad_m2, y0: 0, y1: 1, yref: "paper", line: { color: plotTheme.alert, width: 1, dash: "dash" } }],
   }, { responsive: true, displaylogo: false })
+
+  const input = state.rmInputData
+  if (!input) return
+  const lambda2 = input.freqs_mhz.map((frequency) => (299792458 / (frequency * 1e6)) ** 2)
+  const chiRef = Number(result.polarization_angle_deg) * Math.PI / 180
+  const modelPhase = lambda2.map((value) => 2 * (chiRef + result.peak_rm_rad_m2 * (value - result.reference_lambda2_m2)))
+  const modelQ = modelPhase.map((phase) => result.peak_polarized_amplitude * Math.cos(phase))
+  const modelU = modelPhase.map((phase) => result.peak_polarized_amplitude * Math.sin(phase))
+  const order = lambda2.map((_, index) => index).sort((a, b) => lambda2[a] - lambda2[b])
+  rmQuPlot.classList.remove("is-empty")
+  Plotly.react(rmQuPlot, [
+    { x: order.map((index) => lambda2[index]), y: order.map((index) => input.stokes_q[index]), type: "scatter", mode: "markers", name: "Stokes Q", marker: { color: plotTheme.accent, size: 5, opacity: 0.65 } },
+    { x: order.map((index) => lambda2[index]), y: order.map((index) => input.stokes_u[index]), type: "scatter", mode: "markers", name: "Stokes U", marker: { color: plotTheme.accentAlt, size: 5, opacity: 0.65 } },
+    { x: order.map((index) => lambda2[index]), y: order.map((index) => modelQ[index]), type: "scatter", mode: "lines", name: "Thin model Q", line: { color: plotTheme.accent, width: 1.5 } },
+    { x: order.map((index) => lambda2[index]), y: order.map((index) => modelU[index]), type: "scatter", mode: "lines", name: "Thin model U", line: { color: plotTheme.accentAlt, width: 1.5 } },
+  ], {
+    margin: { l: 72, r: 24, t: 40, b: 60 },
+    paper_bgcolor: plotTheme.paperBg,
+    plot_bgcolor: plotTheme.plotBg,
+    xaxis: { title: "Wavelength squared λ² (m²)", gridcolor: plotTheme.grid },
+    yaxis: { title: "Stokes Q / U", gridcolor: plotTheme.grid },
+    legend: { orientation: "h", x: 0, y: 1.14 },
+  }, { responsive: true, displaylogo: false })
+}
+
+function rmDownloadStem() {
+  return (state.rmInputName || "flits_rm").replace(/\.[^.]+$/, "").replaceAll(/[^a-zA-Z0-9._-]+/g, "_")
+}
+
+function downloadBlob(content, contentType, fileName) {
+  const blob = new Blob([content], { type: contentType })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+function downloadRmExample() {
+  const example = {
+    freqs_mhz: [900, 901, 902, 903, 904, 905, 906, 907],
+    stokes_q: [1, 0.8, 0.3, -0.3, -0.8, -1, -0.7, -0.1],
+    stokes_u: [0, 0.6, 0.95, 0.95, 0.6, 0, -0.7, -1],
+    sigma_q: 0.05,
+    sigma_u: 0.05,
+    channel_width_mhz: 1,
+  }
+  downloadBlob(`${JSON.stringify(example, null, 2)}\n`, "application/json", "flits_rm_input_example.json")
+}
+
+function downloadRmResultJson() {
+  if (!state.rmResult) return
+  const payload = { source_file: state.rmInputName || null, input: state.rmInputData, result: state.rmResult }
+  downloadBlob(`${JSON.stringify(payload, null, 2)}\n`, "application/json", `${rmDownloadStem()}_rm_synthesis.json`)
+}
+
+function downloadRmSpectrumCsv() {
+  const result = state.rmResult
+  if (!result) return
+  const rows = ["phi_rad_m2,dirty_real,dirty_imag,dirty_amplitude,rmsf_real,rmsf_imag,rmsf_amplitude,clean_real,clean_imag,clean_amplitude"]
+  for (let index = 0; index < result.phi_rad_m2.length; index += 1) {
+    rows.push([
+      result.phi_rad_m2[index], result.faraday_real[index], result.faraday_imag[index], result.polarized_amplitude[index],
+      result.rmsf_real[index], result.rmsf_imag[index], result.rmsf_amplitude[index],
+      result.cleaned_faraday_real[index] ?? "", result.cleaned_faraday_imag[index] ?? "", result.cleaned_polarized_amplitude[index] ?? "",
+    ].join(","))
+  }
+  downloadBlob(`${rows.join("\n")}\n`, "text/csv", `${rmDownloadStem()}_faraday_spectrum.csv`)
 }
 
 function scaleFactor(axis, multiplier) {
