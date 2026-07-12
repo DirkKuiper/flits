@@ -13,6 +13,11 @@ from flits.analysis.spectral.core import default_segment_bins, run_averaged_spec
 from flits.analysis.morphology import compute_width_analysis
 from flits.analysis.polarization import extract_normalized_linear_spectrum, run_rm_synthesis
 from flits.analysis.temporal.core import run_temporal_structure_analysis
+from flits.analysis.temporal.multiscale import (
+    HaarExcessPowerResult,
+    excess_power_fraction_below,
+    haar_excess_power,
+)
 
 __all__ = [
     "compute_width_analysis",
@@ -21,5 +26,8 @@ __all__ = [
     "run_averaged_spectral_analysis",
     "run_rm_synthesis",
     "extract_normalized_linear_spectrum",
+    "HaarExcessPowerResult",
+    "excess_power_fraction_below",
+    "haar_excess_power",
     "run_temporal_structure_analysis",
 ]

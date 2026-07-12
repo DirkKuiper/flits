@@ -1750,6 +1750,7 @@ class BurstSession:
         self,
         *,
         detection_snr_threshold: float = 6.0,
+        search_window_bins: tuple[int, int] | None = None,
         apply: bool = True,
         **kwargs: Any,
     ) -> BurstLocalization:
@@ -1764,6 +1765,7 @@ class BurstSession:
         result = localize_burst(
             masked,
             detection_snr_threshold=detection_snr_threshold,
+            search_window_bins=search_window_bins,
             **kwargs,
         )
         if apply and result.status != "no_detection":

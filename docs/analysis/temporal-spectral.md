@@ -41,3 +41,7 @@ full burst duration.
 
 The PSD fit is intentionally simple. When the fit is poorly constrained, the
 stored fit status matters more than the nominal parameter values.
+
+For population comparisons where the first significant scale would be strongly
+S/N dependent, use the [noise-subtracted multiscale power
+estimator](temporal-multiscale.md) and calibrate it with injections.

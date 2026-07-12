@@ -87,3 +87,9 @@ The event duration is the manually selected event-window span. It is useful
 session metadata, but it is not automatically the same thing as a
 model-independent burst-duration estimate or the same thing as a fitted
 component width.
+
+Width methods normally run the configured off-pulse Monte Carlo uncertainty
+trials. Large population pipelines that calibrate uncertainties end-to-end can
+set `WidthAnalysisSettings(uncertainty_trials=0)` to compute the width values
+without this per-burst bootstrap. Such results carry the
+`uncertainty_disabled` quality flag and do not report a width uncertainty.

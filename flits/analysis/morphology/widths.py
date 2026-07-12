@@ -285,6 +285,8 @@ def compute_width_analysis(
     All width values and uncertainties are reported in milliseconds.
     """
     settings = WidthAnalysisSettings() if settings is None else settings
+    if int(settings.uncertainty_trials) < 0:
+        raise ValueError("uncertainty_trials must be non-negative")
     event_profile, event_times_ms = _prepare_event_profile(
         np.asarray(selected_profile, dtype=float),
         np.asarray(time_axis_ms, dtype=float),
@@ -302,6 +304,9 @@ def compute_width_analysis(
         if value is None or not np.isfinite(value):
             method_flags.append("measurement_unavailable")
             uncertainty = None
+        elif int(settings.uncertainty_trials) <= 0:
+            uncertainty = None
+            method_flags.append("uncertainty_disabled")
         else:
             uncertainty, uncertainty_flags = _trial_uncertainty(
                 calculator,
