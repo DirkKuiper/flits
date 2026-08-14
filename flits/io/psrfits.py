@@ -14,6 +14,8 @@ from flits.signal import dedisperse, normalize
 
 _PSRFITS_FOLD_MODES = frozenset({"PSR", "FOLD"})
 
+_NRT_PRESET_KEY = "nrt"
+
 
 def _normalise_polarization_order(value: str | None) -> str | None:
     if value is None:
@@ -22,8 +24,38 @@ def _normalise_polarization_order(value: str | None) -> str | None:
     return text.upper() if text else None
 
 
-def _build_stokes_i(raw: np.ndarray, polarization_order: str | None = None) -> tuple[np.ndarray, int]:
+def _normalise_preset_key(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    return text or None
+
+
+def _effective_preset_key(config: object, inspection: object) -> str | None:
+    """Preset the data should be interpreted with: explicit config wins over detection."""
+    configured = _normalise_preset_key(getattr(config, "preset_key", None))
+    if configured is not None and configured != "generic":
+        return configured
+    return _normalise_preset_key(getattr(inspection, "detected_preset_key", None))
+
+
+def _polarization_order_for_preset(
+    polarization_order: str | None, preset_key: str | None
+) -> str | None:
+    """NRT headers declare POL_TYPE/poln_order as IQUV, but the data are AA/BB
+    coherency products. Drop the bogus label so Stokes I is built as AA+BB."""
     normalized_order = _normalise_polarization_order(polarization_order)
+    if normalized_order == "IQUV" and _normalise_preset_key(preset_key) == _NRT_PRESET_KEY:
+        return None
+    return normalized_order
+
+
+def _build_stokes_i(
+    raw: np.ndarray,
+    polarization_order: str | None = None,
+    preset_key: str | None = None,
+) -> tuple[np.ndarray, int]:
+    normalized_order = _polarization_order_for_preset(polarization_order, preset_key)
     if raw.ndim == 2:
         effective_npol = 2 if normalized_order == "IQUV" else 1
         return raw.T, effective_npol
@@ -484,8 +516,12 @@ def _folded_psrfits_raw_data(row: object, *, nbin: int, nchan: int, npol: int, p
     return raw.reshape(npol, nchan, nbin)
 
 
-def _build_folded_stokes_i(raw: np.ndarray, polarization_order: str | None) -> tuple[np.ndarray, int]:
-    normalized_order = _normalise_polarization_order(polarization_order)
+def _build_folded_stokes_i(
+    raw: np.ndarray,
+    polarization_order: str | None,
+    preset_key: str | None = None,
+) -> tuple[np.ndarray, int]:
+    normalized_order = _polarization_order_for_preset(polarization_order, preset_key)
     if raw.shape[0] == 1:
         return raw[0, :, :], 1
     if normalized_order == "IQUV":
@@ -493,7 +529,9 @@ def _build_folded_stokes_i(raw: np.ndarray, polarization_order: str | None) -> t
     return raw[0, :, :] + raw[1, :, :], 2
 
 
-def _folded_psrfits_waterfall(subint: object, path: Path) -> tuple[np.ndarray, int]:
+def _folded_psrfits_waterfall(
+    subint: object, path: Path, preset_key: str | None = None
+) -> tuple[np.ndarray, int]:
     nbin, nchan, npol = _folded_psrfits_dimensions(subint, path)
     polarization_order = _normalise_polarization_order(str(subint.header.get("POL_TYPE", "")).strip())
     column_names = set(getattr(subint, "columns", ()).names or ())
@@ -518,7 +556,9 @@ def _folded_psrfits_waterfall(subint: object, path: Path) -> tuple[np.ndarray, i
             field_name="DAT_OFFS",
         )
         scaled = raw * scl[:, :, np.newaxis] + offs[:, :, np.newaxis]
-        stokes_i, effective_npol = _build_folded_stokes_i(scaled, polarization_order)
+        stokes_i, effective_npol = _build_folded_stokes_i(
+            scaled, polarization_order, preset_key=preset_key
+        )
         rows.append(stokes_i)
 
     if not rows:
@@ -583,6 +623,9 @@ def _load_folded_psrfits(
     except Exception as exc:
         raise RuntimeError("The 'astropy' package is required for folded PSRFITS files.") from exc
 
+    filterbank_inspection = inspection or _inspect_folded_psrfits(path)
+    preset_key = _effective_preset_key(config, filterbank_inspection)
+
     with fits.open(path, memmap=False) as hdul:
         subint = _find_psrfits_subint(hdul)
         if subint is None:
@@ -593,9 +636,8 @@ def _load_folded_psrfits(
         freqs_mhz = _folded_psrfits_freqs_mhz(hdul, subint, path)
         polarization_order = _normalise_polarization_order(str(subint.header.get("POL_TYPE", "")).strip())
         chan_bw = _safe_float(subint.header.get("CHAN_BW"))
-        stokes_i, effective_npol = _folded_psrfits_waterfall(subint, path)
+        stokes_i, effective_npol = _folded_psrfits_waterfall(subint, path, preset_key=preset_key)
 
-    filterbank_inspection = inspection or _inspect_folded_psrfits(path)
     timing_metadata = _psrfits_primary_fallback(path)
     start_mjd = _safe_float(timing_metadata.get("tstart"))
     if start_mjd is None:

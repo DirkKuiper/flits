@@ -21,6 +21,7 @@ from flits.io.psrfits import (
     _build_stokes_i,
     _decode_source_name,
     _decode_telescope_name,
+    _effective_preset_key,
     _inspect_folded_psrfits,
     _is_psrfits_fold_mode,
     _is_psrfits_search_mode,
@@ -334,7 +335,11 @@ class YourFilterbankReader:
                 nread = min(nread, requested_nread)
 
             raw = reader.get_data(nstart, nread, npoln=header_npol)
-            stokes_i, effective_npol = _build_stokes_i(raw, polarization_order=polarization_order)
+            stokes_i, effective_npol = _build_stokes_i(
+                raw,
+                polarization_order=polarization_order,
+                preset_key=_effective_preset_key(config, filterbank_inspection),
+            )
             effective_npol = (
                 max(1, int(config.npol_override)) if config.npol_override is not None else effective_npol
             )
