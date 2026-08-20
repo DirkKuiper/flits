@@ -149,6 +149,30 @@ class ViewerAndMaskingTest(unittest.TestCase):
         self.assertEqual(metadata.polarization_order, "IQUV")
 
     @patch("flits.io.your_reader.your.Your")
+    def test_load_filterbank_data_sums_aa_bb_for_nrt_iquv_header_typo(self, mock_your: object) -> None:
+        raw = np.zeros((8, 4, 3), dtype=float)
+        raw[:, 0, :] = np.arange(24, dtype=float).reshape(8, 3)
+        raw[:, 1, :] = 100.0 + np.arange(24, dtype=float).reshape(8, 3)
+        raw[:, 2, :] = -5.0
+        raw[:, 3, :] = 2.0
+        mock_your.return_value = _mock_reader(raw, npol=4, poln_order="IQUV")
+        config = ObservationConfig.from_preset(dm=0.0, preset_key="nrt", sefd_jy=1.0)
+
+        data, metadata = load_filterbank_data(
+            "synthetic-nrt-iquv.fil",
+            config,
+            inspection=_synthetic_inspection("synthetic-nrt-iquv.fil"),
+        )
+
+        aa_plus_bb = (raw[:, 0, :] + raw[:, 1, :]).T
+        tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
+        offpulse_start = min(aa_plus_bb.shape[1] - 1, int((1 - tail_fraction) * aa_plus_bb.shape[1]))
+        expected = normalize(aa_plus_bb, aa_plus_bb[:, offpulse_start:])
+        np.testing.assert_allclose(data, expected)
+        self.assertEqual(metadata.npol, 2)
+        self.assertEqual(metadata.polarization_order, "IQUV")
+
+    @patch("flits.io.your_reader.your.Your")
     def test_load_filterbank_data_preserves_non_iquv_first_two_plane_sum(self, mock_your: object) -> None:
         raw = np.array(
             [
