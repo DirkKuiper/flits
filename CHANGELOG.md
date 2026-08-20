@@ -4,6 +4,18 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [0.9.0](https://github.com/DirkKuiper/flits/compare/flits-v0.8.0...flits-v0.9.0) (2026-08-20)
+
+
+### Features
+
+* **polarization:** complete RM synthesis workflow ([823bbd1](https://github.com/DirkKuiper/flits/commit/823bbd15aec25c1626251f7c9b50185d7ab39f23))
+
+
+### Bug Fixes
+
+* **io:** treat NRT IQUV pol headers as AA/BB coherency ([#88](https://github.com/DirkKuiper/flits/issues/88)) ([ddaab63](https://github.com/DirkKuiper/flits/commit/ddaab6339f651ec27efde1febc143482e18950e4))
+
 ## [0.8.0](https://github.com/DirkKuiper/flits/compare/flits-v0.7.3...flits-v0.8.0) (2026-07-11)
 
 
