@@ -43,7 +43,7 @@ dependencies = [
 ]
 
 [project.scripts]
-flits = "flits.web.app:main"
+flits = "flits.cli:main"
 
 [project.entry-points."flits.readers"]
 sigproc = "flits.io.your_reader:YourFilterbankReader"

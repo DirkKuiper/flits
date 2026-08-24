@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -899,41 +900,14 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run FLITS.")
-    parser.add_argument(
-        "--data-dir",
-        default=None,
-        help="Directory used for relative filterbank paths and known-file discovery.",
-    )
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument(
-        "--allow-outside-data-dir",
-        action="store_true",
-        help=(
-            "Allow opening files outside --data-dir. Off by default: the data "
-            "directory is a containment boundary, not only a browsing root."
-        ),
-    )
-    parser.add_argument(
-        "--cors-origin",
-        action="append",
-        default=None,
-        metavar="ORIGIN",
-        help=(
-            "Allow cross-origin browser requests from ORIGIN (repeatable). The "
-            "bundled interface is same-origin and needs none; only add an origin "
-            "when serving the interface from somewhere else."
-        ),
-    )
-    args = parser.parse_args()
-    if args.data_dir is not None:
-        os.environ["FLITS_DATA_DIR"] = str(Path(args.data_dir).expanduser().resolve())
-    if args.allow_outside_data_dir:
-        os.environ["FLITS_ALLOW_OUTSIDE_DATA_DIR"] = "1"
-    if args.cors_origin:
-        os.environ["FLITS_CORS_ORIGINS"] = ",".join(args.cors_origin)
-    uvicorn.run("flits.web.app:app", host=args.host, port=args.port, reload=False)
+    """Start the FLITS server.
+
+    Retained so the historical ``flits.web.app:main`` entry point keeps working;
+    the console script now dispatches through :mod:`flits.cli`.
+    """
+    from flits.cli import serve
+
+    serve(sys.argv[1:])
 
 
 if __name__ == "__main__":

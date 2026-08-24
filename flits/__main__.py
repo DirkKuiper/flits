@@ -1,5 +1,5 @@
-from flits.web.app import main
+from flits.cli import main
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
