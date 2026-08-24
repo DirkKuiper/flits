@@ -1,16 +1,23 @@
+"""HTTP API and static hosting for the FLITS interface.
+
+The server is intended to be reached from a browser on the same machine, or
+through an SSH tunnel. It has no authentication layer; the data directory acts
+as a containment boundary and cross-origin access is opt-in. See SECURITY.md."""
+
 from __future__ import annotations
 
-import argparse
-from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 import os
+import sys
+from collections import OrderedDict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import numpy as np
-import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
@@ -22,15 +29,45 @@ from flits.io import inspect_filterbank, list_readers
 from flits.session import BurstSession
 from flits.settings import available_auto_mask_profiles, available_presets, get_preset
 
+logger = logging.getLogger("flits.web")
 
 PACKAGE_DIR = Path(__file__).resolve().parents[1]
 STATIC_DIR = PACKAGE_DIR / "web_static"
-SESSIONS: dict[str, BurstSession] = {}
+
+# Each session holds a full dedispersed waterfall, so an unbounded store grows
+# until the process is restarted. Keep the most recently used ones and drop the
+# rest; a dropped session can be reopened from its snapshot.
+DEFAULT_MAX_SESSIONS = 8
+
+
+def max_sessions() -> int:
+    """Return how many sessions are kept in memory at once."""
+    configured = os.environ.get("FLITS_MAX_SESSIONS", "").strip()
+    if not configured:
+        return DEFAULT_MAX_SESSIONS
+    try:
+        value = int(configured)
+    except ValueError:
+        logger.warning("Ignoring invalid FLITS_MAX_SESSIONS=%r", configured)
+        return DEFAULT_MAX_SESSIONS
+    return max(1, value)
+
+
+SESSIONS: OrderedDict[str, BurstSession] = OrderedDict()
 SESSION_SNAPSHOT_PATHS: dict[str, Path] = {}
 
-_SKIP_DIRS: frozenset[str] = frozenset(
-    {"site-packages", "node_modules", "__pycache__", "dist", "build"}
-)
+
+def register_session(session_id: str, session: BurstSession) -> None:
+    """Store a session, evicting the least recently used one past the cap."""
+    SESSIONS[session_id] = session
+    SESSIONS.move_to_end(session_id)
+    while len(SESSIONS) > max_sessions():
+        evicted_id, _ = SESSIONS.popitem(last=False)
+        SESSION_SNAPSHOT_PATHS.pop(evicted_id, None)
+        logger.info("Evicted least recently used session %s", evicted_id)
+
+
+_SKIP_DIRS: frozenset[str] = frozenset({"site-packages", "node_modules", "__pycache__", "dist", "build"})
 _SESSION_SNAPSHOT_SUFFIX = "_flits_session.json"
 _SESSION_SNAPSHOT_INDEX_VERSION = 1
 _SESSION_SNAPSHOT_INDEX_PATH = Path(".flits") / "session_snapshot_index.json"
@@ -91,12 +128,29 @@ class RMSynthesisRequest(BaseModel):
 
 
 app = FastAPI(title="FLITS")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+
+def cors_origins() -> list[str]:
+    """Return the cross-origin list configured via ``FLITS_CORS_ORIGINS``.
+
+    The bundled interface is served from the same origin as the API, so it needs
+    no CORS headers at all. Cross-origin access is therefore opt-in: only origins
+    named explicitly in the environment variable (comma separated) are allowed.
+    """
+    configured = os.environ.get("FLITS_CORS_ORIGINS", "").strip()
+    if not configured:
+        return []
+    return [origin.strip() for origin in configured.split(",") if origin.strip()]
+
+
+_CORS_ORIGINS = cors_origins()
+if _CORS_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_CORS_ORIGINS,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -106,21 +160,69 @@ def data_dir() -> Path:
     return base.resolve()
 
 
+def allow_outside_data_dir() -> bool:
+    """Return True when FLITS may open paths outside the configured data dir.
+
+    Defaults to False so that ``--data-dir`` acts as a containment boundary
+    rather than only a browsing convenience. Set ``FLITS_ALLOW_OUTSIDE_DATA_DIR``
+    (or pass ``--allow-outside-data-dir``) to opt out.
+    """
+    value = os.environ.get("FLITS_ALLOW_OUTSIDE_DATA_DIR", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _is_within_data_dir(path: Path) -> bool:
+    try:
+        path.relative_to(data_dir())
+    except ValueError:
+        return False
+    return True
+
+
+def ensure_within_data_dir(path: Path, *, original: str) -> Path:
+    """Reject a resolved path that escapes the configured data directory."""
+    if allow_outside_data_dir() or _is_within_data_dir(path):
+        return path
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            f"Path is outside the FLITS data directory ({data_dir()}): {original}. "
+            "Restart FLITS with --data-dir covering this location, or with "
+            "--allow-outside-data-dir to disable containment."
+        ),
+    )
+
+
 def resolve_burst_path(path_str: str) -> Path:
     candidate = Path(path_str).expanduser()
     if not candidate.is_absolute():
         candidate = (data_dir() / candidate).resolve()
     else:
         candidate = candidate.resolve()
+    candidate = ensure_within_data_dir(candidate, original=path_str)
     if not candidate.exists():
         raise HTTPException(status_code=404, detail=f"Filterbank file not found: {path_str}")
     return candidate
 
 
+def _contained_session_loader(path_str: str, **kwargs: Any) -> BurstSession:
+    """Load a session while enforcing the data-directory containment boundary.
+
+    Session snapshots carry the path of the burst they were built from. That
+    path arrives from user-supplied JSON on the import endpoint, so it goes
+    through the same containment check as any other request.
+    """
+    return BurstSession.from_file(str(resolve_burst_path(path_str)), **kwargs)
+
+
 def get_session(session_id: str) -> BurstSession:
     session = SESSIONS.get(session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="Unknown session id")
+        raise HTTPException(
+            status_code=404,
+            detail=("Unknown session id. It may have been evicted to free memory; reopen it from its saved snapshot."),
+        )
+    SESSIONS.move_to_end(session_id)
     return session
 
 
@@ -148,10 +250,7 @@ def _inspection_dm_guidance(inspection: object) -> str | None:
     if schema_version == "chime_frb_catalog_v1":
         return "already dedispersed; use DM 0"
     if schema_version == "chime_bbdata_beamformed_v1" and coherent_dm is not None:
-        return (
-            f"coherently dedispersed at {float(coherent_dm):.6f}; "
-            "FLITS applies residual DM relative to that value"
-        )
+        return f"coherently dedispersed at {float(coherent_dm):.6f}; FLITS applies residual DM relative to that value"
     return None
 
 
@@ -241,7 +340,7 @@ def _snapshot_id(path: Path) -> str:
 
 
 def _utc_mtime_iso(mtime_unix: float) -> str:
-    return datetime.fromtimestamp(float(mtime_unix), tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.fromtimestamp(float(mtime_unix), tz=UTC).isoformat().replace("+00:00", "Z")
 
 
 def _compact_excerpt(value: object, *, limit: int = 160) -> str | None:
@@ -297,7 +396,7 @@ def _timestamped_snapshot_path(default_path: Path) -> Path:
         source_stem = default_name[: -len(_SESSION_SNAPSHOT_SUFFIX)]
     else:
         source_stem = default_path.stem
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     candidate = default_path.with_name(f"{source_stem}_{stamp}{_SESSION_SNAPSHOT_SUFFIX}")
     counter = 2
     while candidate.exists():
@@ -530,14 +629,17 @@ def open_session_snapshot(snapshot_id: str) -> dict[str, Any]:
     snapshot_path = _session_snapshot_path_by_id(snapshot_id)
     try:
         snapshot = _load_snapshot_payload(snapshot_path)
-        session = BurstSession.from_snapshot(snapshot)
+        session = BurstSession.from_snapshot(snapshot, loader=_contained_session_loader)
+    except HTTPException:
+        raise
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception("Could not restore session from snapshot")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     session_id = uuid4().hex
-    SESSIONS[session_id] = session
+    register_session(session_id, session)
     SESSION_SNAPSHOT_PATHS[session_id] = _resolve_existing_or_candidate(snapshot_path)
     return {
         "session_id": session_id,
@@ -616,7 +718,7 @@ def create_session(request: CreateSessionRequest) -> dict[str, Any]:
         observatory_height_m=request.observatory_height_m,
     )
     session_id = uuid4().hex
-    SESSIONS[session_id] = session
+    register_session(session_id, session)
     return {"session_id": session_id, "view": session.get_view()}
 
 
@@ -670,14 +772,17 @@ def save_session_snapshot(session_id: str, request: SaveSessionSnapshotRequest) 
 @app.post("/api/sessions/import")
 def import_session(request: ImportSessionRequest) -> dict[str, Any]:
     try:
-        session = BurstSession.from_snapshot(request.snapshot)
+        session = BurstSession.from_snapshot(request.snapshot, loader=_contained_session_loader)
+    except HTTPException:
+        raise
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception("Could not restore session from snapshot")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     session_id = uuid4().hex
-    SESSIONS[session_id] = session
+    register_session(session_id, session)
     return {"session_id": session_id, "view": session.get_view()}
 
 
@@ -821,8 +926,18 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
             raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
     except HTTPException:
         raise
-    except Exception as exc:
+    except (ValueError, KeyError, TypeError) as exc:
+        # Bad input for the requested action: the caller can fix this.
+        logger.info("Action %s rejected for session %s: %s", action, session_id, exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        # Anything else is a fault in FLITS. Keep the traceback -- previously it
+        # was discarded and the failure was indistinguishable from bad input.
+        logger.exception("Action %s failed for session %s", action, session_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"FLITS failed while running '{action}': {exc}",
+        ) from exc
 
     return {
         "session_id": session_id,
@@ -834,18 +949,14 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run FLITS.")
-    parser.add_argument(
-        "--data-dir",
-        default=None,
-        help="Directory used for relative filterbank paths and known-file discovery.",
-    )
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
-    args = parser.parse_args()
-    if args.data_dir is not None:
-        os.environ["FLITS_DATA_DIR"] = str(Path(args.data_dir).expanduser().resolve())
-    uvicorn.run("flits.web.app:app", host=args.host, port=args.port, reload=False)
+    """Start the FLITS server.
+
+    Retained so the historical ``flits.web.app:main`` entry point keeps working;
+    the console script now dispatches through :mod:`flits.cli`.
+    """
+    from flits.cli import serve
+
+    serve(sys.argv[1:])
 
 
 if __name__ == "__main__":

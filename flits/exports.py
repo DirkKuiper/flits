@@ -1,13 +1,20 @@
+"""Export bundles: measurements, plots and data products from a session.
+
+An export is built as an immutable snapshot of the session state at the moment
+it was requested, so a bundle stays consistent even if the session changes
+afterwards. A bounded number of recent bundles is retained for download."""
+
 from __future__ import annotations
 
 import csv
 import io
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import matplotlib
@@ -29,7 +36,6 @@ from flits.models import (
     ExportPreview,
     ExportPreviewArtifact,
 )
-
 
 if TYPE_CHECKING:
     from flits.session import BurstSession
@@ -173,7 +179,7 @@ class WindowExportData:
 
 
 def preview_export(
-    session: "BurstSession",
+    session: BurstSession,
     *,
     include: Sequence[str] | None = None,
     plot_formats: Sequence[str] | None = None,
@@ -208,7 +214,7 @@ def preview_export(
 
 
 def create_export_snapshot(
-    session: "BurstSession",
+    session: BurstSession,
     *,
     session_id: str,
     include: Sequence[str] | None = None,
@@ -225,8 +231,7 @@ def create_export_snapshot(
     snapshot = _build_snapshot_data(session)
     window_exports = _build_window_exports(session, selection)
     window_metadata = {
-        mode: _build_window_metadata_payload(snapshot, window)
-        for mode, window in window_exports.items()
+        mode: _build_window_metadata_payload(snapshot, window) for mode, window in window_exports.items()
     }
     plan = _plan_export(snapshot, selection)
     plot_figure_cache = _build_plot_figure_cache(snapshot, plan)
@@ -325,9 +330,9 @@ def create_export_snapshot(
     return StoredExportSnapshot(manifest=manifest, contents=contents)
 
 
-def _build_snapshot_data(session: "BurstSession") -> ExportSnapshotData:
+def _build_snapshot_data(session: BurstSession) -> ExportSnapshotData:
     export_id = uuid4().hex
-    created = datetime.now(timezone.utc)
+    created = datetime.now(UTC)
     created_at_utc = created.isoformat(timespec="seconds").replace("+00:00", "Z")
     bundle_name = f"{_slugify(Path(session.burst_file).stem)}_{created.strftime('%Y%m%dT%H%M%SZ')}_{export_id[:8]}"
 
@@ -348,11 +353,7 @@ def _build_snapshot_data(session: "BurstSession") -> ExportSnapshotData:
         else (0.0, 0.0)
     )
     peak_positions = np.asarray(
-        [
-            float(grid.time_axis_ms[peak])
-            for peak in grid.peak_bins
-            if 0 <= int(peak) < grid.time_axis_ms.size
-        ],
+        [float(grid.time_axis_ms[peak]) for peak in grid.peak_bins if 0 <= int(peak) < grid.time_axis_ms.size],
         dtype=float,
     )
     temporal_acf_lags_ms, temporal_acf = _acf_width(context.event_profile_sn, grid.effective_tsamp_ms)[1:]
@@ -367,9 +368,7 @@ def _build_snapshot_data(session: "BurstSession") -> ExportSnapshotData:
         results=session.results.to_dict() if session.results is not None else None,
         width_analysis=session.width_analysis.to_dict() if session.width_analysis is not None else None,
         dm_optimization=session.dm_optimization.to_dict() if session.dm_optimization is not None else None,
-        temporal_structure=(
-            session.temporal_structure.to_dict() if session.temporal_structure is not None else None
-        ),
+        temporal_structure=(session.temporal_structure.to_dict() if session.temporal_structure is not None else None),
         dynamic_spectrum=np.asarray(grid.masked, dtype=float),
         time_axis_ms=np.asarray(context.time_axis_ms, dtype=float),
         freq_axis_mhz=np.asarray(grid.freqs_mhz, dtype=float),
@@ -395,7 +394,7 @@ def _build_snapshot_data(session: "BurstSession") -> ExportSnapshotData:
     )
 
 
-def _window_time_bounds(session: "BurstSession") -> tuple[int, int]:
+def _window_time_bounds(session: BurstSession) -> tuple[int, int]:
     event_width = max(1, int(session.event_end) - int(session.event_start))
     start = max(int(session.crop_start), int(session.event_start) - event_width)
     end = min(int(session.crop_end), int(session.event_end) + event_width)
@@ -405,14 +404,16 @@ def _window_time_bounds(session: "BurstSession") -> tuple[int, int]:
 
 
 def _build_window_exports(
-    session: "BurstSession",
+    session: BurstSession,
     selection: ExportSelection,
 ) -> dict[str, WindowExportData]:
     if "window" not in selection.include or not selection.window_resolutions or not selection.window_formats:
         return {}
 
     spec_lo_abs, spec_hi_abs = session._selected_channel_bounds()
-    selected_masked_channels = np.flatnonzero(session.channel_mask[spec_lo_abs : spec_hi_abs + 1]).astype(int) + spec_lo_abs
+    selected_masked_channels = (
+        np.flatnonzero(session.channel_mask[spec_lo_abs : spec_hi_abs + 1]).astype(int) + spec_lo_abs
+    )
     time_start_abs, time_end_abs = _window_time_bounds(session)
     exports: dict[str, WindowExportData] = {}
     native_freq_sign = -1.0 if session.freqs.size > 1 and float(session.freqs[1] - session.freqs[0]) < 0 else 1.0
@@ -429,7 +430,9 @@ def _build_window_exports(
             time_axis_ms = session._bins_to_ms_array(np.arange(time_start_abs, time_end_abs, dtype=float))
             freq_axis_mhz = np.asarray(session.freqs[spec_lo_abs : spec_hi_abs + 1], dtype=float)
             event_rel_start = max(0, min(dynamic.shape[1], int(session.event_start) - int(time_start_abs)))
-            event_rel_end = max(event_rel_start + 1, min(dynamic.shape[1], int(session.event_end) - int(time_start_abs)))
+            event_rel_end = max(
+                event_rel_start + 1, min(dynamic.shape[1], int(session.event_end) - int(time_start_abs))
+            )
             exports[mode] = WindowExportData(
                 mode=mode,
                 dynamic_spectrum=dynamic,
@@ -472,7 +475,7 @@ def _build_window_exports(
             factor=int(session.freq_factor),
             max_bins=int(grid.masked.shape[0]),
             require_nonempty=True,
-            )
+        )
         event_bounds = session._reduce_interval(
             int(session.event_start),
             int(session.event_end),
@@ -559,7 +562,10 @@ def _build_window_metadata_payload(snapshot: ExportSnapshotData, window: WindowE
             "event_window_bins": [int(window.event_start_rel_bin), int(window.event_end_rel_bin)],
             "event_window_ms": [float(event_start_ms), float(event_end_ms)],
             "crop_bins": [int(window.crop_start_bin), int(window.crop_end_bin)],
-            "spectral_extent_channels": [int(window.spectral_extent_channels[0]), int(window.spectral_extent_channels[1])],
+            "spectral_extent_channels": [
+                int(window.spectral_extent_channels[0]),
+                int(window.spectral_extent_channels[1]),
+            ],
             "spectral_extent_mhz": [float(window.spectral_extent_mhz[0]), float(window.spectral_extent_mhz[1])],
             "masked_channels": [int(value) for value in np.asarray(window.masked_channels, dtype=int)],
             "shape": [int(window.dynamic_spectrum.shape[0]), int(window.dynamic_spectrum.shape[1])],
@@ -848,10 +854,7 @@ def _build_plot_figure_cache(
         for artifact in plan
         if artifact.kind == "plot" and artifact.status == "ready" and artifact.plot_key is not None
     }
-    return {
-        str(plot_key): _plot_figure(snapshot, str(plot_key))
-        for plot_key in plot_keys
-    }
+    return {str(plot_key): _plot_figure(snapshot, str(plot_key)) for plot_key in plot_keys}
 
 
 def _materialize_artifact(
@@ -1129,7 +1132,9 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
     row.update(uncertainty_columns("iso_e_erg", result_uncertainty_details.get("iso_e")))
     row.update(uncertainty_columns("dm", dm_uncertainty_details.get("best_dm")))
     row.update(uncertainty_columns("psd_alpha", temporal_uncertainty_details.get("power_law_alpha")))
-    row.update(uncertainty_columns("psd_crossover_frequency_hz", temporal_uncertainty_details.get("crossover_frequency_hz")))
+    row.update(
+        uncertainty_columns("psd_crossover_frequency_hz", temporal_uncertainty_details.get("crossover_frequency_hz"))
+    )
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=list(row))
     writer.writeheader()
@@ -1146,7 +1151,9 @@ def _build_diagnostics_npz(snapshot: ExportSnapshotData) -> bytes:
         "crop_bins": np.asarray([snapshot.crop_start_bin, snapshot.crop_end_bin], dtype=int),
         "event_window_bins": np.asarray([snapshot.event_start_rel_bin, snapshot.event_end_rel_bin], dtype=int),
         "event_window_ms": np.asarray(snapshot.event_window_ms, dtype=float),
-        "spectral_extent_channels": np.asarray([snapshot.selected_channel_start, snapshot.selected_channel_end], dtype=int),
+        "spectral_extent_channels": np.asarray(
+            [snapshot.selected_channel_start, snapshot.selected_channel_end], dtype=int
+        ),
         "spectral_extent_mhz": np.asarray(snapshot.spectral_extent_mhz, dtype=float),
         "masked_channels": np.asarray(snapshot.masked_channels, dtype=int),
         "peak_positions_ms": np.asarray(snapshot.peak_positions_ms, dtype=float),
@@ -1257,7 +1264,13 @@ def _build_window_fil(snapshot: ExportSnapshotData, window: WindowExportData) ->
     file_label = f"{snapshot.bundle_name}_window_{window.mode}.fil"
     tstart = float(
         float(snapshot.meta.get("start_mjd", 0.0))
-        + ((float(snapshot.meta.get("read_start_sec", 0.0)) + (float(window.time_start_bin) * float(snapshot.meta.get("tsamp_us", 0.0)) / 1e6)) / 86400.0)
+        + (
+            (
+                float(snapshot.meta.get("read_start_sec", 0.0))
+                + (float(window.time_start_bin) * float(snapshot.meta.get("tsamp_us", 0.0)) / 1e6)
+            )
+            / 86400.0
+        )
     )
     header = SigprocFilterbankHeader(
         rawdatafile=file_label,
@@ -1329,9 +1342,23 @@ def _dynamic_spectrum_figure(snapshot: ExportSnapshotData) -> plt.Figure:
 
 def _profile_diagnostics_figure(snapshot: ExportSnapshotData) -> plt.Figure:
     fig, (ax_time, ax_spec) = plt.subplots(2, 1, figsize=(9.0, 6.4), constrained_layout=True)
-    ax_time.plot(snapshot.time_axis_ms, snapshot.time_profile_sn, color=ASTROFLASH_COLORS["neutral"], linewidth=1.5, label="Full-band profile")
-    ax_time.plot(snapshot.time_axis_ms, snapshot.burst_only_profile_sn, color=ASTROFLASH_COLORS["accent"], linewidth=1.5, label="Selected-band profile")
-    ax_time.axvspan(snapshot.event_window_ms[0], snapshot.event_window_ms[1], color=ASTROFLASH_COLORS["accent_alt"], alpha=0.14)
+    ax_time.plot(
+        snapshot.time_axis_ms,
+        snapshot.time_profile_sn,
+        color=ASTROFLASH_COLORS["neutral"],
+        linewidth=1.5,
+        label="Full-band profile",
+    )
+    ax_time.plot(
+        snapshot.time_axis_ms,
+        snapshot.burst_only_profile_sn,
+        color=ASTROFLASH_COLORS["accent"],
+        linewidth=1.5,
+        label="Selected-band profile",
+    )
+    ax_time.axvspan(
+        snapshot.event_window_ms[0], snapshot.event_window_ms[1], color=ASTROFLASH_COLORS["accent_alt"], alpha=0.14
+    )
     for peak in snapshot.peak_positions_ms:
         ax_time.axvline(float(peak), color=ASTROFLASH_COLORS["alert"], linewidth=1.2, linestyle=":")
     ax_time.set_title("Profile Diagnostics")
@@ -1360,7 +1387,9 @@ def _acf_panel_figure(snapshot: ExportSnapshotData) -> plt.Figure:
     ax_time.set_ylabel("Normalized ACF")
     ax_time.set_ylim(-0.05, 1.05)
 
-    ax_spec.plot(snapshot.spectral_acf_lags_mhz, snapshot.spectral_acf, color=ASTROFLASH_COLORS["accent_alt"], linewidth=1.5)
+    ax_spec.plot(
+        snapshot.spectral_acf_lags_mhz, snapshot.spectral_acf, color=ASTROFLASH_COLORS["accent_alt"], linewidth=1.5
+    )
     ax_spec.axhline(0.5, color=ASTROFLASH_COLORS["warning"], linewidth=1.0, linestyle="--")
     ax_spec.set_title("Spectral ACF")
     ax_spec.set_xlabel("Lag (MHz)")
@@ -1462,7 +1491,9 @@ def _power_spectrum_figure(snapshot: ExportSnapshotData) -> plt.Figure:
                 ax_power.axvspan(span_low, span_high, color=ASTROFLASH_COLORS["crossover"], alpha=0.22, linewidth=0)
                 ax_residual.axvspan(span_low, span_high, color=ASTROFLASH_COLORS["crossover"], alpha=0.22, linewidth=0)
         if visible_min <= crossover_hz <= visible_max:
-            ax_power.axvline(crossover_hz, color=ASTROFLASH_COLORS["crossover"], linewidth=1.4, label="Crossover frequency")
+            ax_power.axvline(
+                crossover_hz, color=ASTROFLASH_COLORS["crossover"], linewidth=1.4, label="Crossover frequency"
+            )
             ax_residual.axvline(crossover_hz, color=ASTROFLASH_COLORS["crossover"], linewidth=1.4)
 
     ax_residual.axhline(1.0, color=ASTROFLASH_COLORS["accent"], linewidth=1.2)
@@ -1486,10 +1517,19 @@ def _dm_curve_figure(snapshot: ExportSnapshotData) -> plt.Figure:
     metric_definition = dm_metric_definition(metric_key)
     metric_label = metric_definition.label if metric_definition is not None else "DM Metric"
     ax.plot(trial_dms, scores, color=ASTROFLASH_COLORS["accent"], linewidth=1.5, marker="o", markersize=3.5)
-    ax.axvline(float(optimization.get("center_dm", np.nan)), color=ASTROFLASH_COLORS["neutral"], linewidth=1.0, linestyle=":")
-    ax.axvline(float(optimization.get("sampled_best_dm", np.nan)), color=ASTROFLASH_COLORS["accent_alt"], linewidth=1.2, linestyle="--")
+    ax.axvline(
+        float(optimization.get("center_dm", np.nan)), color=ASTROFLASH_COLORS["neutral"], linewidth=1.0, linestyle=":"
+    )
+    ax.axvline(
+        float(optimization.get("sampled_best_dm", np.nan)),
+        color=ASTROFLASH_COLORS["accent_alt"],
+        linewidth=1.2,
+        linestyle="--",
+    )
     ax.axvline(float(optimization.get("best_dm", np.nan)), color=ASTROFLASH_COLORS["accent_strong"], linewidth=1.4)
-    ax.axvline(float(optimization.get("applied_dm", np.nan)), color=ASTROFLASH_COLORS["alert"], linewidth=1.0, linestyle=":")
+    ax.axvline(
+        float(optimization.get("applied_dm", np.nan)), color=ASTROFLASH_COLORS["alert"], linewidth=1.0, linestyle=":"
+    )
     ax.set_title("DM Curve")
     ax.set_xlabel("Dispersion Measure")
     ax.set_ylabel(metric_label)
@@ -1503,8 +1543,18 @@ def _dm_residuals_figure(snapshot: ExportSnapshotData) -> plt.Figure:
     applied = np.asarray(optimization.get("residuals_applied_ms", []), dtype=float)
     best = np.asarray(optimization.get("residuals_best_ms", []), dtype=float)
     fig, ax = plt.subplots(figsize=(8.6, 4.8), constrained_layout=True)
-    ax.plot(freqs, applied, color=ASTROFLASH_COLORS["accent_alt"], linewidth=1.4, marker="o", markersize=4, label="Applied DM")
-    ax.plot(freqs, best, color=ASTROFLASH_COLORS["accent"], linewidth=1.4, marker="o", markersize=4, label="Best-fit DM")
+    ax.plot(
+        freqs,
+        applied,
+        color=ASTROFLASH_COLORS["accent_alt"],
+        linewidth=1.4,
+        marker="o",
+        markersize=4,
+        label="Applied DM",
+    )
+    ax.plot(
+        freqs, best, color=ASTROFLASH_COLORS["accent"], linewidth=1.4, marker="o", markersize=4, label="Best-fit DM"
+    )
     ax.axhline(0.0, color=ASTROFLASH_COLORS["neutral"], linewidth=1.0, linestyle="--")
     ax.set_title("DM Residuals")
     ax.set_xlabel("Sub-band Center Frequency (MHz)")

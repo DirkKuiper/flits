@@ -10,6 +10,19 @@ The implementation follows [Brentjens & de Bruyn
 one-dimensional deconvolution described by [Heald, Braun & Edmonds
 (2009)](https://doi.org/10.1051/0004-6361/200811532).
 
+!!! info "This step works on an imported Q/U spectrum"
+    FLITS readers deliver Stokes I: a burst loaded from a filterbank, PSRFITS
+    or CHIME/FRB file gives an intensity dynamic spectrum, and the session's
+    measurement and timing analyses operate on that. RM synthesis is a separate
+    step that takes an **externally prepared, calibrated Q/U spectrum** imported
+    as JSON or CSV.
+
+    There is no path from a full-Stokes file to an RM inside FLITS today. Full
+    Stokes input is planned; until then, prepare Q and U with your instrument's
+    own polarization calibration pipeline and import the result as described
+    below. RM results also live outside the session, so they are not carried in
+    session snapshots or export bundles.
+
 ## Prepare the input
 
 RM synthesis needs a calibrated Q/U spectrum, not a Stokes-I dynamic spectrum.

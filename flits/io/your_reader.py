@@ -1,3 +1,5 @@
+"""Reader for SIGPROC filterbank and PSRFITS data, backed by ``your``."""
+
 from __future__ import annotations
 
 import errno
@@ -5,10 +7,11 @@ import os
 import shutil
 import struct
 import tempfile
-from contextlib import contextmanager
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from types import SimpleNamespace
-from typing import ClassVar, Iterator
+from typing import ClassVar
 
 import numpy as np
 
@@ -44,6 +47,7 @@ from flits.signal import dedisperse, normalize
 
 try:
     import your as _your
+
     _YOUR_IMPORT_ERROR: Exception | None = None
 except Exception as exc:  # pragma: no cover - depends on optional runtime stack
     _your = SimpleNamespace(Your=None)
@@ -66,10 +70,8 @@ def _close_reader(reader: object | None) -> None:
         return
     fp = getattr(reader, "fp", None)
     if fp is not None and not getattr(fp, "closed", True):
-        try:
+        with suppress(OSError):
             fp.close()
-        except OSError:
-            pass
 
 
 @contextmanager
@@ -80,9 +82,7 @@ def _open_your(source_path: Path) -> Iterator[object]:
     copying to a local tempdir sidesteps this without changing the read path.
     """
     if your.Your is None:
-        raise RuntimeError(
-            "The 'your' package is unavailable in the active environment."
-        ) from _YOUR_IMPORT_ERROR
+        raise RuntimeError("The 'your' package is unavailable in the active environment.") from _YOUR_IMPORT_ERROR
 
     temp_path: Path | None = None
     reader: object | None = None
@@ -100,10 +100,8 @@ def _open_your(source_path: Path) -> Iterator[object]:
     finally:
         _close_reader(reader)
         if temp_path is not None:
-            try:
+            with suppress(OSError):
                 temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
 
 
 def _coerce_header_field(
@@ -259,8 +257,7 @@ class YourFilterbankReader:
                 machine_id = _safe_int(getattr(reader, "machine_id", None))
                 source_name = _decode_source_name(getattr(reader, "source_name", None))
                 telescope_name = _decode_telescope_name(
-                    getattr(reader, "telescope_name", None)
-                    or getattr(header, "telescope", None)
+                    getattr(reader, "telescope_name", None) or getattr(header, "telescope", None)
                 )
                 if is_fits and source_name is None:
                     source_name = fits_fallback.get("source_name")  # type: ignore[assignment]
@@ -296,24 +293,26 @@ class YourFilterbankReader:
                     pulsarcentric_header_flag=_safe_bool_flag(timing_metadata.get("pulsarcentric_header_flag")),
                 )
 
-            tsamp = float(_coerce_header_field(
-                header, "tsamp",
-                fallback=fits_fallback.get("tsamp") if is_fits else None,
-                path=source_path,
-            ))
+            tsamp = float(
+                _coerce_header_field(
+                    header,
+                    "tsamp",
+                    fallback=fits_fallback.get("tsamp") if is_fits else None,
+                    path=source_path,
+                )
+            )
             foff_raw = _coerce_header_field(header, "foff", path=source_path)
             freqres = float(abs(float(foff_raw)))
             start_mjd_raw = _coerce_header_field(
-                header, "tstart",
+                header,
+                "tstart",
                 fallback=fits_fallback.get("tstart") if is_fits else None,
                 path=source_path,
             )
             start_mjd = float(start_mjd_raw)
             bw = float(abs(float(_coerce_header_field(header, "bw", path=source_path))))
             header_npol = max(1, int(_coerce_header_field(header, "npol", fallback=1, path=source_path)))
-            polarization_order = _normalise_polarization_order(
-                _decode_source_name(getattr(header, "poln_order", None))
-            )
+            polarization_order = _normalise_polarization_order(_decode_source_name(getattr(header, "poln_order", None)))
             fch1 = float(_coerce_header_field(header, "fch1", path=source_path))
             nchans = int(_coerce_header_field(header, "nchans", path=source_path))
             nspectra = int(_coerce_header_field(header, "nspectra", path=source_path))
@@ -340,9 +339,7 @@ class YourFilterbankReader:
                 polarization_order=polarization_order,
                 preset_key=_effective_preset_key(config, filterbank_inspection),
             )
-            effective_npol = (
-                max(1, int(config.npol_override)) if config.npol_override is not None else effective_npol
-            )
+            effective_npol = max(1, int(config.npol_override)) if config.npol_override is not None else effective_npol
 
             if stokes_i.shape[0] != nchans:
                 raise CorruptedDataError(
@@ -350,7 +347,7 @@ class YourFilterbankReader:
                     path=source_path,
                 )
 
-            stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp)
+            stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp, fill_value=0.0)
 
             tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
             offpulse_start = min(stokes_i.shape[1] - 1, int((1 - tail_fraction) * stokes_i.shape[1]))
@@ -385,8 +382,7 @@ class YourFilterbankReader:
                 else _safe_float(timing_metadata.get("source_dec_deg"))
             ),
             source_position_basis=(
-                filterbank_inspection.source_position_basis
-                or timing_metadata.get("source_position_basis")  # type: ignore[arg-type]
+                filterbank_inspection.source_position_basis or timing_metadata.get("source_position_basis")  # type: ignore[arg-type]
             ),
             time_scale=filterbank_inspection.time_scale or "utc",
             time_reference_frame=filterbank_inspection.time_reference_frame or "topocentric",
@@ -400,9 +396,7 @@ class YourFilterbankReader:
                 if filterbank_inspection.pulsarcentric_header_flag is not None
                 else _safe_bool_flag(timing_metadata.get("pulsarcentric_header_flag"))
             ),
-            dedispersion_reference_frequency_mhz=(
-                float(np.max(freqs_mhz)) if abs(float(config.dm)) > 0.0 else None
-            ),
+            dedispersion_reference_frequency_mhz=(float(np.max(freqs_mhz)) if abs(float(config.dm)) > 0.0 else None),
             dedispersion_reference_basis=(
                 "flits_integer_bin_dedispersion_max_frequency" if abs(float(config.dm)) > 0.0 else None
             ),

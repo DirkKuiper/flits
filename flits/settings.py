@@ -1,3 +1,9 @@
+"""Observation configuration and telescope presets.
+
+Presets carry the instrument-specific values -- SEFD, polarization count,
+observatory location -- that calibrated measurements depend on, and are matched
+against file headers automatically where possible."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -361,7 +367,7 @@ class ObservationConfig:
         observatory_longitude_deg: float | None = None,
         observatory_latitude_deg: float | None = None,
         observatory_height_m: float | None = None,
-    ) -> "ObservationConfig":
+    ) -> ObservationConfig:
         preset = get_preset(preset_key)
         mask_profile = get_auto_mask_profile(auto_mask_profile)
 
@@ -381,19 +387,13 @@ class ObservationConfig:
                 None if sefd_fractional_uncertainty is None else max(0.0, float(sefd_fractional_uncertainty))
             ),
             distance_fractional_uncertainty=(
-                None
-                if distance_fractional_uncertainty is None
-                else max(0.0, float(distance_fractional_uncertainty))
+                None if distance_fractional_uncertainty is None else max(0.0, float(distance_fractional_uncertainty))
             ),
             source_ra_deg=None if source_ra_deg is None else float(source_ra_deg),
             source_dec_deg=None if source_dec_deg is None else float(source_dec_deg),
             time_scale=None if time_scale is None else str(time_scale).lower(),
-            observatory_longitude_deg=(
-                None if observatory_longitude_deg is None else float(observatory_longitude_deg)
-            ),
-            observatory_latitude_deg=(
-                None if observatory_latitude_deg is None else float(observatory_latitude_deg)
-            ),
+            observatory_longitude_deg=(None if observatory_longitude_deg is None else float(observatory_longitude_deg)),
+            observatory_latitude_deg=(None if observatory_latitude_deg is None else float(observatory_latitude_deg)),
             observatory_height_m=None if observatory_height_m is None else float(observatory_height_m),
         )
 

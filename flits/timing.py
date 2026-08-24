@@ -1,3 +1,8 @@
+"""Arrival-time referencing: infinite-frequency and barycentric corrections.
+
+Corrections are applied only when the inputs they require are present, and the
+result records which reference frame it is in rather than assuming one."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,7 +12,6 @@ from astropy import units as u
 from astropy.coordinates import EarthLocation, SkyCoord
 from astropy.time import Time
 from astropy.utils import iers
-
 
 # Seconds for pc cm^-3 MHz^2. This matches the convention already used by
 # FLITS' integer-bin dedispersion path.
@@ -123,9 +127,7 @@ def compute_toa_timing_chain(
         toa_inf_topo_mjd = float(toa_peak_topo_mjd) - (dispersion_ms / 1e3 / 86400.0)
 
     assumption_note = (
-        "Assuming DM 0 input is already referenced to infinite frequency."
-        if assumed_already_infinite
-        else None
+        "Assuming DM 0 input is already referenced to infinite frequency." if assumed_already_infinite else None
     )
 
     if not _has_source_position(context):

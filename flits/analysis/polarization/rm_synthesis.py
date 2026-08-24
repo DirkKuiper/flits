@@ -12,7 +12,6 @@ from typing import Any
 
 import numpy as np
 
-
 _C_M_S = 299_792_458.0
 _MIN_CHANNELS = 8
 _MAX_PHI_SAMPLES = 100_001
@@ -281,9 +280,7 @@ def _measure_rmsf_fwhm(
     search_limit = min(float(max_abs_rm), central_lobe_limit)
     sample_count = min(20_001, max(251, int(np.ceil(search_limit / resolution)) + 1))
     offsets = np.linspace(0.0, search_limit, sample_count, dtype=float)
-    amplitude = np.abs(
-        _transform(offsets, lambda2, lambda0, weights.astype(complex), float(np.sum(weights)))
-    )
+    amplitude = np.abs(_transform(offsets, lambda2, lambda0, weights.astype(complex), float(np.sum(weights))))
     crossings = np.flatnonzero(amplitude <= 0.5)
     if crossings.size == 0:
         return 2.0 * search_limit, True
@@ -314,7 +311,7 @@ def _rm_clean(
     """Deconvolve the dirty FDF using the one-dimensional RM-CLEAN loop."""
     residual = np.array(dirty, dtype=complex, copy=True)
     components = np.zeros_like(residual)
-    offsets = (np.arange(-(phi.size - 1), phi.size, dtype=float) * (phi[1] - phi[0]))
+    offsets = np.arange(-(phi.size - 1), phi.size, dtype=float) * (phi[1] - phi[0])
     rmsf_offsets = _transform(offsets, lambda2, lambda0, weights.astype(complex), float(np.sum(weights)))
     center = phi.size - 1
     iterations = 0
@@ -379,7 +376,9 @@ def run_rm_synthesis(
         sq = _broadcast_optional(sigma_q, q.shape)
         su = _broadcast_optional(sigma_u, u.shape)
         if sq is None or su is None:
-            return _failure("invalid_uncertainty", "sigma_q and sigma_u must be scalars or match the Q/U channel count.")
+            return _failure(
+                "invalid_uncertainty", "sigma_q and sigma_u must be scalars or match the Q/U channel count."
+            )
     else:
         sq = su = np.ones_like(q)
 
@@ -446,11 +445,7 @@ def run_rm_synthesis(
 
     phi_min = -max_abs_rm if phi_min_rad_m2 is None else float(phi_min_rad_m2)
     phi_max = max_abs_rm if phi_max_rad_m2 is None else float(phi_max_rad_m2)
-    phi_step = (
-        rmsf_fwhm_theoretical / _DEFAULT_OVERSAMPLING
-        if phi_step_rad_m2 is None
-        else float(phi_step_rad_m2)
-    )
+    phi_step = rmsf_fwhm_theoretical / _DEFAULT_OVERSAMPLING if phi_step_rad_m2 is None else float(phi_step_rad_m2)
     if not all(np.isfinite(value) for value in (phi_min, phi_max, phi_step)) or phi_max <= phi_min or phi_step <= 0.0:
         return _failure(
             "invalid_phi_grid",
@@ -483,9 +478,7 @@ def run_rm_synthesis(
     amplitude = np.abs(faraday)
     coarse_peak_index = int(np.argmax(amplitude))
     peak_rm = _refined_peak(phi, amplitude, coarse_peak_index)
-    peak_faraday = _transform(
-        np.asarray([peak_rm]), lambda2, lambda0, weights * polarization, weight_sum
-    )[0]
+    peak_faraday = _transform(np.asarray([peak_rm]), lambda2, lambda0, weights * polarization, weight_sum)[0]
     peak_amplitude = float(np.abs(peak_faraday))
 
     model = peak_faraday * np.exp(2j * peak_rm * (lambda2 - lambda0))
@@ -501,11 +494,7 @@ def run_rm_synthesis(
         reduced_chi_square = None
     peak_snr = peak_amplitude / faraday_noise if faraday_noise is not None and faraday_noise > 0.0 else None
     uncertainty = rmsf_fwhm / (2.0 * peak_snr) if peak_snr is not None and peak_snr > 0.0 else None
-    debiased = (
-        float(np.sqrt(max(0.0, peak_amplitude**2 - faraday_noise**2)))
-        if faraday_noise is not None
-        else None
-    )
+    debiased = float(np.sqrt(max(0.0, peak_amplitude**2 - faraday_noise**2))) if faraday_noise is not None else None
     independent_samples = max(1, int(np.ceil((phi[-1] - phi[0]) / rmsf_fwhm)))
     if peak_snr is not None:
         single_trial = float(np.exp(-0.5 * peak_snr**2))
@@ -528,20 +517,19 @@ def run_rm_synthesis(
     cleaned = components = np.array([], dtype=complex)
     clean_iterations = 0
     clean_cutoff = None
-    if clean:
-        if faraday_noise is not None and not rmsf_fwhm_is_lower_bound:
-            clean_cutoff = float(clean_threshold_sigma * faraday_noise)
-            cleaned, components, _, clean_iterations = _rm_clean(
-                faraday,
-                phi,
-                lambda2,
-                lambda0,
-                weights,
-                rmsf_fwhm,
-                clean_cutoff,
-                float(clean_gain),
-                int(clean_max_iterations),
-            )
+    if clean and faraday_noise is not None and not rmsf_fwhm_is_lower_bound:
+        clean_cutoff = float(clean_threshold_sigma * faraday_noise)
+        cleaned, components, _, clean_iterations = _rm_clean(
+            faraday,
+            phi,
+            lambda2,
+            lambda0,
+            weights,
+            rmsf_fwhm,
+            clean_cutoff,
+            float(clean_gain),
+            int(clean_max_iterations),
+        )
 
     warnings = ["ionospheric_rm_not_corrected", "instrumental_leakage_not_corrected"]
     if not clean:

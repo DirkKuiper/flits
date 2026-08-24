@@ -12,9 +12,9 @@ import argparse
 import hashlib
 import io
 import json
-from pathlib import Path
 import sys
 import tempfile
+from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
@@ -24,13 +24,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from flits.analysis import run_rm_synthesis
-
 
 RMTOOLS_COMMIT = "34cf6fac43f5dac943439fa653327fc7b9fe6c46"
 RMTOOLS_ROOT = f"https://raw.githubusercontent.com/CIRADA-Tools/RM-Tools/{RMTOOLS_COMMIT}"
@@ -141,12 +139,26 @@ def _plot(path: Path, values: np.ndarray, result: dict[str, Any], expected_rm: f
 
     order = np.argsort(lambda2)
     axes[1].errorbar(
-        lambda2[order], values[order, 2], yerr=values[order, 5], fmt=".", ms=3.2,
-        color="#64338c", alpha=0.55, elinewidth=0.5, label="Q",
+        lambda2[order],
+        values[order, 2],
+        yerr=values[order, 5],
+        fmt=".",
+        ms=3.2,
+        color="#64338c",
+        alpha=0.55,
+        elinewidth=0.5,
+        label="Q",
     )
     axes[1].errorbar(
-        lambda2[order], values[order, 3], yerr=values[order, 6], fmt=".", ms=3.2,
-        color="#2f7895", alpha=0.55, elinewidth=0.5, label="U",
+        lambda2[order],
+        values[order, 3],
+        yerr=values[order, 6],
+        fmt=".",
+        ms=3.2,
+        color="#2f7895",
+        alpha=0.55,
+        elinewidth=0.5,
+        label="U",
     )
     axes[1].plot(lambda2[order], amplitude * np.cos(phase[order]), color="#64338c", lw=1.5)
     axes[1].plot(lambda2[order], amplitude * np.sin(phase[order]), color="#2f7895", lw=1.5)

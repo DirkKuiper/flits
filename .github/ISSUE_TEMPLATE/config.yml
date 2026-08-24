@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://dirkkuiper.github.io/flits/
+    about: User guide, analysis reference, and developer docs.
+  - name: Security report
+    url: https://github.com/DirkKuiper/flits/security/advisories/new
+    about: Report a vulnerability privately instead of opening an issue.

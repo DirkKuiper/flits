@@ -1,3 +1,5 @@
+"""Shared helpers for reading CHIME/FRB HDF5 products."""
+
 from __future__ import annotations
 
 import datetime
@@ -13,7 +15,6 @@ try:
     import h5py as _h5py
 except Exception:  # pragma: no cover - depends on optional runtime stack
     _h5py = None  # type: ignore[assignment]
-
 
 
 _HDF5_MAGIC = b"\x89HDF\r\n\x1a\n"
@@ -39,20 +40,20 @@ _SUPPORTED_SCHEMAS: frozenset[str] = frozenset(
     }
 )
 
-_UTC = datetime.timezone.utc
+_UTC = datetime.UTC
 _MJD_EPOCH_DATE = datetime.date(1858, 11, 17)
 _MJD_EPOCH = datetime.datetime(1858, 11, 17, tzinfo=_UTC)
 _DM_CONSTANT = 1 / (2.41 * 10**-4)
 
 
-def _safe_lookup(root: "_h5py.Group", candidate: str) -> object | None:
+def _safe_lookup(root: _h5py.Group, candidate: str) -> object | None:
     try:
         return root[candidate]
     except (KeyError, ValueError):
         return None
 
 
-def _is_chime_catalog(root: "_h5py.Group") -> bool:
+def _is_chime_catalog(root: _h5py.Group) -> bool:
     """Detect CHIME/FRB public catalog layout (https://www.chime-frb.ca/catalog)."""
     if "frb" not in root:
         return False
@@ -65,7 +66,7 @@ def _is_chime_catalog(root: "_h5py.Group") -> bool:
     return has_extent and has_plot_freq and has_wfall
 
 
-def _is_bbdata_beamformed(root: "_h5py.Group") -> bool:
+def _is_bbdata_beamformed(root: _h5py.Group) -> bool:
     subclass = _decode_attr(root.attrs.get("__memh5_subclass"))
     if subclass != _BBDATA_MEMH5_SUBCLASS:
         return False
@@ -83,7 +84,7 @@ def _is_bbdata_beamformed(root: "_h5py.Group") -> bool:
     )
 
 
-def _looks_like_chime_intensity(root: "_h5py.Group") -> bool:
+def _looks_like_chime_intensity(root: _h5py.Group) -> bool:
     schema = _read_attr(root, "schema_version", "format_version")
     if schema is not None:
         return True
@@ -156,7 +157,7 @@ def _decode_attr(value: object) -> object:
     return value
 
 
-def _read_attr(group: "_h5py.Group", *names: str) -> object | None:
+def _read_attr(group: _h5py.Group, *names: str) -> object | None:
     """Return the first matching attr found across the given candidate names."""
     search_groups: list[object] = [group]
     frb = group.get("frb") if "frb" in group else None
@@ -170,7 +171,7 @@ def _read_attr(group: "_h5py.Group", *names: str) -> object | None:
     return None
 
 
-def _read_source_position_attrs(root: "_h5py.Group", path: Path) -> tuple[float | None, float | None, str | None]:
+def _read_source_position_attrs(root: _h5py.Group, path: Path) -> tuple[float | None, float | None, str | None]:
     ra = _coerce_optional_float(
         _read_attr(root, "source_ra_deg", "ra_deg", "ra", "RA"),
         field="source_ra_deg",
@@ -185,7 +186,7 @@ def _read_source_position_attrs(root: "_h5py.Group", path: Path) -> tuple[float 
     return ra, dec, basis
 
 
-def _read_bbdata_source_position(root: "_h5py.Group", path: Path) -> tuple[float | None, float | None, str | None]:
+def _read_bbdata_source_position(root: _h5py.Group, path: Path) -> tuple[float | None, float | None, str | None]:
     locations = _safe_lookup(root, "tiedbeam_locations")
     if not isinstance(locations, _h5py.Dataset):  # type: ignore[arg-type]
         return None, None, None
@@ -205,7 +206,7 @@ def _read_bbdata_source_position(root: "_h5py.Group", path: Path) -> tuple[float
     return float(ra_values[0]), float(dec_values[0]), "bbdata_tiedbeam_locations"
 
 
-def _resolve_waterfall_dataset(root: "_h5py.Group") -> "_h5py.Dataset":
+def _resolve_waterfall_dataset(root: _h5py.Group) -> _h5py.Dataset:
     for candidate in _WATERFALL_PATHS:
         obj = _safe_lookup(root, candidate)
         if isinstance(obj, _h5py.Dataset):  # type: ignore[arg-type]
@@ -220,9 +221,7 @@ def _coerce_float(value: object, *, field: str, path: Path) -> float:
     try:
         out = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError) as exc:
-        raise CorruptedDataError(
-            f"Attribute {field!r} is not a float: {value!r}", path=path
-        ) from exc
+        raise CorruptedDataError(f"Attribute {field!r} is not a float: {value!r}", path=path) from exc
     return out
 
 
@@ -230,9 +229,7 @@ def _coerce_int(value: object, *, field: str, path: Path) -> int:
     try:
         out = int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError) as exc:
-        raise CorruptedDataError(
-            f"Attribute {field!r} is not an int: {value!r}", path=path
-        ) from exc
+        raise CorruptedDataError(f"Attribute {field!r} is not an int: {value!r}", path=path) from exc
     return out
 
 
@@ -255,7 +252,7 @@ def _guess_source_name(path: Path) -> str | None:
     return path.stem or None
 
 
-def _read_bbdata_freqs(root: "_h5py.Group", path: Path) -> np.ndarray:
+def _read_bbdata_freqs(root: _h5py.Group, path: Path) -> np.ndarray:
     freq_obj = _safe_lookup(root, "index_map/freq")
     if not isinstance(freq_obj, _h5py.Dataset):  # type: ignore[arg-type]
         raise MetadataMissingError(
@@ -282,7 +279,7 @@ def _read_bbdata_freqs(root: "_h5py.Group", path: Path) -> np.ndarray:
     return freqs
 
 
-def _read_bbdata_channel_starts(root: "_h5py.Group", path: Path) -> np.ndarray:
+def _read_bbdata_channel_starts(root: _h5py.Group, path: Path) -> np.ndarray:
     time0_obj = _safe_lookup(root, "time0")
     if not isinstance(time0_obj, _h5py.Dataset):  # type: ignore[arg-type]
         raise MetadataMissingError(
@@ -307,7 +304,7 @@ def _read_bbdata_channel_starts(root: "_h5py.Group", path: Path) -> np.ndarray:
 
 
 def _read_bbdata_coherent_dm(
-    root: "_h5py.Group",
+    root: _h5py.Group,
     path: Path,
     *,
     required: bool,
@@ -395,5 +392,3 @@ def _normalize_waterfall(stokes_i: np.ndarray, tail_fraction: float) -> np.ndarr
     offpulse_start = min(stokes_i.shape[1] - 1, int((1 - tail_fraction) * stokes_i.shape[1]))
     offpulse = stokes_i[:, offpulse_start:]
     return normalize(stokes_i, offpulse).astype(np.float32, copy=False)
-
-

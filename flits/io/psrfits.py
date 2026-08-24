@@ -1,3 +1,5 @@
+"""Reader for PSRFITS search-mode and fold-mode data."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,7 +12,6 @@ from flits.io.validation import validate_metadata
 from flits.models import FilterbankMetadata
 from flits.settings import ObservationConfig, detect_preset, resolve_default_sefd_jy
 from flits.signal import dedisperse, normalize
-
 
 _PSRFITS_FOLD_MODES = frozenset({"PSR", "FOLD"})
 
@@ -39,9 +40,7 @@ def _effective_preset_key(config: object, inspection: object) -> str | None:
     return _normalise_preset_key(getattr(inspection, "detected_preset_key", None))
 
 
-def _polarization_order_for_preset(
-    polarization_order: str | None, preset_key: str | None
-) -> str | None:
+def _polarization_order_for_preset(polarization_order: str | None, preset_key: str | None) -> str | None:
     """NRT headers declare POL_TYPE/poln_order as IQUV, but the data are AA/BB
     coherency products. Drop the bogus label so Stokes I is built as AA+BB."""
     normalized_order = _normalise_polarization_order(polarization_order)
@@ -248,11 +247,7 @@ def _is_psrfits_fold_mode(path: Path) -> tuple[bool, str | None]:
 
 def _find_psrfits_subint(hdul: object) -> object | None:
     return next(
-        (
-            hdu
-            for hdu in hdul[1:]
-            if str(hdu.header.get("EXTNAME", "")).strip().upper() == "SUBINT"
-        ),
+        (hdu for hdu in hdul[1:] if str(hdu.header.get("EXTNAME", "")).strip().upper() == "SUBINT"),
         None,
     )
 
@@ -274,17 +269,9 @@ def _looks_like_psrfits(path: Path) -> bool:
                 return False
 
             subint_header = subint.header
-            subint_keywords_present = all(
-                key in subint_header for key in ("TBIN", "NCHAN", "NPOL")
-            )
-            primary_looks_psrfits = (
-                "PSRFITS" in fitstype or "STT_IMJD" in primary or "STT_SMJD" in primary
-            )
-            mode_supported = (
-                (not obs_mode)
-                or obs_mode.startswith("SEARCH")
-                or obs_mode in _PSRFITS_FOLD_MODES
-            )
+            subint_keywords_present = all(key in subint_header for key in ("TBIN", "NCHAN", "NPOL"))
+            primary_looks_psrfits = "PSRFITS" in fitstype or "STT_IMJD" in primary or "STT_SMJD" in primary
+            mode_supported = (not obs_mode) or obs_mode.startswith("SEARCH") or obs_mode in _PSRFITS_FOLD_MODES
             return mode_supported and (primary_looks_psrfits or subint_keywords_present)
     except Exception:
         return False
@@ -529,9 +516,7 @@ def _build_folded_stokes_i(
     return raw[0, :, :] + raw[1, :, :], 2
 
 
-def _folded_psrfits_waterfall(
-    subint: object, path: Path, preset_key: str | None = None
-) -> tuple[np.ndarray, int]:
+def _folded_psrfits_waterfall(subint: object, path: Path, preset_key: str | None = None) -> tuple[np.ndarray, int]:
     nbin, nchan, npol = _folded_psrfits_dimensions(subint, path)
     polarization_order = _normalise_polarization_order(str(subint.header.get("POL_TYPE", "")).strip())
     column_names = set(getattr(subint, "columns", ()).names or ())
@@ -556,9 +541,7 @@ def _folded_psrfits_waterfall(
             field_name="DAT_OFFS",
         )
         scaled = raw * scl[:, :, np.newaxis] + offs[:, :, np.newaxis]
-        stokes_i, effective_npol = _build_folded_stokes_i(
-            scaled, polarization_order, preset_key=preset_key
-        )
+        stokes_i, effective_npol = _build_folded_stokes_i(scaled, polarization_order, preset_key=preset_key)
         rows.append(stokes_i)
 
     if not rows:
@@ -655,11 +638,9 @@ def _load_folded_psrfits(
         nread = min(nread, nend - nstart)
     stokes_i = stokes_i[:, nstart : nstart + nread]
 
-    effective_npol = (
-        max(1, int(config.npol_override)) if config.npol_override is not None else effective_npol
-    )
+    effective_npol = max(1, int(config.npol_override)) if config.npol_override is not None else effective_npol
     if abs(float(config.dm)) > 0.0:
-        stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp)
+        stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp, fill_value=0.0)
 
     tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
     offpulse_start = min(stokes_i.shape[1] - 1, int((1 - tail_fraction) * stokes_i.shape[1]))
@@ -705,14 +686,9 @@ def _load_folded_psrfits(
         time_reference_frame=filterbank_inspection.time_reference_frame or "topocentric",
         barycentric_header_flag=filterbank_inspection.barycentric_header_flag,
         pulsarcentric_header_flag=filterbank_inspection.pulsarcentric_header_flag,
-        dedispersion_reference_frequency_mhz=(
-            float(np.max(freqs_mhz)) if abs(float(config.dm)) > 0.0 else None
-        ),
+        dedispersion_reference_frequency_mhz=(float(np.max(freqs_mhz)) if abs(float(config.dm)) > 0.0 else None),
         dedispersion_reference_basis=(
             "flits_integer_bin_dedispersion_max_frequency" if abs(float(config.dm)) > 0.0 else None
         ),
     )
     return stokes_i, validate_metadata(metadata)
-
-
-

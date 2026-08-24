@@ -14,7 +14,6 @@ from typing import Any
 
 import numpy as np
 
-from flits.models import SpectralAnalysisResult, compatible_scalar_uncertainty
 from flits.analysis.temporal.core import (
     _compute_noise_psd,
     _fit_crossover_frequency,
@@ -22,7 +21,7 @@ from flits.analysis.temporal.core import (
     _psd_uncertainty_details,
     quantize_segment_bins,
 )
-
+from flits.models import SpectralAnalysisResult, compatible_scalar_uncertainty
 
 MIN_EVENT_BINS = 4
 MIN_SEGMENT_BINS = 2
@@ -243,8 +242,8 @@ def run_averaged_spectral_analysis(
     df = None
     if freq_hz.size > 1:
         df = float(freq_hz[1] - freq_hz[0])
-    elif hasattr(spectrum, "df") and np.isfinite(getattr(spectrum, "df")):
-        df = float(getattr(spectrum, "df"))
+    elif hasattr(spectrum, "df") and np.isfinite(spectrum.df):
+        df = float(spectrum.df)
 
     nyquist_hz = float(0.5 / dt_sec)
 

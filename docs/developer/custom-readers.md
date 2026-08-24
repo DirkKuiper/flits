@@ -112,6 +112,7 @@ If your reader is not being picked up, call:
 
 ```python
 from flits.io import reader_diagnostics
+
 for entry in reader_diagnostics():
     print(entry)
 ```

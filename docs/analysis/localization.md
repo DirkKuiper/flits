@@ -29,6 +29,21 @@ makes can still be refined by hand afterwards.
 6. Off-pulse windows are placed on both sides of the event with a guard
    margin.
 
+## Constraining a triggered search
+
+For snippets with a known approximate arrival time, pass a half-open
+``search_window_bins=(start, end)`` interval to ``localize_burst`` or
+``BurstSession.auto_localize``. The matched-filter peak must fall inside
+that interval, which prevents a stronger unrelated event or RFI feature
+elsewhere in the crop from being selected. The measured event window is
+allowed to extend outside the search interval so broad wings and nearby
+components are not clipped.
+
+The search interval is recorded in ``BurstLocalization`` and its serialized
+dictionary. It is a prior on *where to search*, not a replacement for the
+detection threshold: a sub-threshold candidate still returns
+``no_detection``.
+
 ## Reading the result
 
 The toast (and the `localization` field in the action response) reports:

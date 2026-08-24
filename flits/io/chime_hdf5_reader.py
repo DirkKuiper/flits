@@ -1,24 +1,25 @@
+"""Reader for CHIME/FRB HDF5 products.
+
+Handles both public catalogue waterfalls, which arrive already dedispersed, and
+beamformed ``BBData`` ``tiedbeam_power`` files, which are coherently dedispersed
+at a known DM and to which FLITS applies only a residual."""
+
 from __future__ import annotations
 
-import datetime
-import re
 from pathlib import Path
 from typing import ClassVar
 
 import numpy as np
 
 from flits.io.chime import (
-    _BBDATA_MEMH5_SUBCLASS,
     _CHIME_BBDATA_BEAMFORMED_SCHEMA,
     _CHIME_CATALOG_SCHEMA,
     _HDF5_MAGIC,
     _SUPPORTED_SCHEMAS,
-    _WATERFALL_PATHS,
+    _catalog_tsamp_seconds,
     _coerce_float,
     _coerce_int,
-    _coerce_optional_float,
     _coerce_optional_int,
-    _catalog_tsamp_seconds,
     _decode_attr,
     _dm_delay_seconds,
     _estimate_freqres,
@@ -49,7 +50,7 @@ from flits.io.reader import FilterbankInspection
 from flits.io.validation import require_fields, validate_metadata
 from flits.models import FilterbankMetadata
 from flits.settings import ObservationConfig, detect_preset, resolve_default_sefd_jy
-from flits.signal import dedisperse, normalize
+from flits.signal import dedisperse
 
 try:
     import h5py as _h5py
@@ -58,6 +59,7 @@ try:
 except Exception as exc:  # pragma: no cover - depends on optional runtime stack
     _h5py = None  # type: ignore[assignment]
     _H5PY_IMPORT_ERROR = exc
+
 
 class ChimeHdf5Reader:
     """Reader for CHIME/FRB intensity HDF5 and beamformed BBData files.
@@ -76,9 +78,7 @@ class ChimeHdf5Reader:
 
     def __init__(self) -> None:
         if _h5py is None:
-            raise RuntimeError(
-                "h5py is required for ChimeHdf5Reader but is not installed."
-            ) from _H5PY_IMPORT_ERROR
+            raise RuntimeError("h5py is required for ChimeHdf5Reader but is not installed.") from _H5PY_IMPORT_ERROR
 
     def sniff(self, path: Path) -> bool:
         try:
@@ -101,15 +101,13 @@ class ChimeHdf5Reader:
         except Exception:
             return False
 
-    def _open(self, path: Path) -> "_h5py.File":
+    def _open(self, path: Path) -> _h5py.File:
         try:
             return _h5py.File(path, mode="r")
         except (OSError, ValueError) as exc:
-            raise CorruptedDataError(
-                f"Failed to open HDF5 file: {exc}", path=path
-            ) from exc
+            raise CorruptedDataError(f"Failed to open HDF5 file: {exc}", path=path) from exc
 
-    def _check_schema(self, root: "_h5py.Group", path: Path) -> str:
+    def _check_schema(self, root: _h5py.Group, path: Path) -> str:
         if _is_bbdata_beamformed(root):
             return _CHIME_BBDATA_BEAMFORMED_SCHEMA
 
@@ -217,7 +215,7 @@ class ChimeHdf5Reader:
 
     @staticmethod
     def _peek_freq_range(
-        root: "_h5py.Group",
+        root: _h5py.Group,
         schema: str,
         path: Path,
     ) -> tuple[float | None, float | None]:
@@ -274,7 +272,7 @@ class ChimeHdf5Reader:
 
     def _load_flits_v1(
         self,
-        root: "_h5py.Group",
+        root: _h5py.Group,
         resolved: Path,
         config: ObservationConfig,
         inspection: FilterbankInspection | None,
@@ -302,9 +300,7 @@ class ChimeHdf5Reader:
 
         header_npol_attr = _read_attr(root, "npol", "nifs")
         header_npol = (
-            max(1, _coerce_int(header_npol_attr, field="npol", path=resolved))
-            if header_npol_attr is not None
-            else 1
+            max(1, _coerce_int(header_npol_attr, field="npol", path=resolved)) if header_npol_attr is not None else 1
         )
 
         dataset = _resolve_waterfall_dataset(root)
@@ -332,11 +328,7 @@ class ChimeHdf5Reader:
         sefd_attr = _read_attr(root, "sefd_jy")
         sefd_jy = config.sefd_jy
         if sefd_jy is None:
-            sefd_jy = (
-                _coerce_float(sefd_attr, field="sefd_jy", path=resolved)
-                if sefd_attr is not None
-                else None
-            )
+            sefd_jy = _coerce_float(sefd_attr, field="sefd_jy", path=resolved) if sefd_attr is not None else None
         if sefd_jy is None:
             sefd_jy = resolve_default_sefd_jy(config.preset_key, freq_lo, freq_hi)
 
@@ -360,11 +352,9 @@ class ChimeHdf5Reader:
                 path=resolved,
             )
 
-        effective_npol = (
-            max(1, int(config.npol_override)) if config.npol_override is not None else header_npol
-        )
+        effective_npol = max(1, int(config.npol_override)) if config.npol_override is not None else header_npol
 
-        stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp)
+        stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp, fill_value=0.0)
         stokes_i = _normalize_waterfall(stokes_i, config.normalization_tail_fraction)
 
         metadata = FilterbankMetadata(
@@ -390,9 +380,7 @@ class ChimeHdf5Reader:
             time_reference_frame=filterbank_inspection.time_reference_frame or "topocentric",
             barycentric_header_flag=filterbank_inspection.barycentric_header_flag,
             pulsarcentric_header_flag=filterbank_inspection.pulsarcentric_header_flag,
-            dedispersion_reference_frequency_mhz=(
-                float(np.max(freqs_mhz)) if abs(float(config.dm)) > 0.0 else None
-            ),
+            dedispersion_reference_frequency_mhz=(float(np.max(freqs_mhz)) if abs(float(config.dm)) > 0.0 else None),
             dedispersion_reference_basis=(
                 "flits_integer_bin_dedispersion_max_frequency" if abs(float(config.dm)) > 0.0 else None
             ),
@@ -401,7 +389,7 @@ class ChimeHdf5Reader:
 
     def _load_catalog(
         self,
-        root: "_h5py.Group",
+        root: _h5py.Group,
         resolved: Path,
         config: ObservationConfig,
         inspection: FilterbankInspection | None,
@@ -481,9 +469,7 @@ class ChimeHdf5Reader:
             filterbank_inspection = inspection
 
         header_npol = 1
-        effective_npol = (
-            max(1, int(config.npol_override)) if config.npol_override is not None else header_npol
-        )
+        effective_npol = max(1, int(config.npol_override)) if config.npol_override is not None else header_npol
 
         stokes_i = _normalize_waterfall(stokes_i, config.normalization_tail_fraction)
 
@@ -517,7 +503,7 @@ class ChimeHdf5Reader:
 
     def _load_bbdata_beamformed(
         self,
-        root: "_h5py.Group",
+        root: _h5py.Group,
         resolved: Path,
         config: ObservationConfig,
         inspection: FilterbankInspection | None,
@@ -656,7 +642,7 @@ class ChimeHdf5Reader:
             filterbank_inspection = inspection
 
         residual_dm = float(config.dm) - float(coherent_dm)
-        stokes_i = dedisperse(stokes_i, residual_dm, freqs_mhz, tsamp)
+        stokes_i = dedisperse(stokes_i, residual_dm, freqs_mhz, tsamp, fill_value=0.0)
         stokes_i = _normalize_waterfall(stokes_i, config.normalization_tail_fraction)
 
         freq_lo = float(np.min(freqs_mhz))
@@ -666,9 +652,7 @@ class ChimeHdf5Reader:
         if sefd_jy is None:
             sefd_jy = resolve_default_sefd_jy(config.preset_key, freq_lo, freq_hi)
 
-        effective_npol = (
-            max(1, int(config.npol_override)) if config.npol_override is not None else header_npol
-        )
+        effective_npol = max(1, int(config.npol_override)) if config.npol_override is not None else header_npol
 
         metadata = FilterbankMetadata(
             source_path=resolved,

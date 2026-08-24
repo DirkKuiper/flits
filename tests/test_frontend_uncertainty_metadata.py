@@ -4,7 +4,6 @@ import re
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 APP_JS = ROOT / "flits" / "web_static" / "app.js"
 INDEX_HTML = ROOT / "flits" / "web_static" / "index.html"
@@ -43,7 +42,9 @@ class FrontendUncertaintyMetadataTest(unittest.TestCase):
     def test_dm_input_starts_blank_and_explains_manual_entry(self) -> None:
         html = INDEX_HTML.read_text(encoding="utf-8")
 
-        self.assertIn('id="dmInput" type="number" step="0.001" placeholder="enter DM or 0 if already dedispersed"', html)
+        self.assertIn(
+            'id="dmInput" type="number" step="0.001" placeholder="enter DM or 0 if already dedispersed"', html
+        )
         self.assertNotIn('value="527.851"', html)
         self.assertIn("Some formats provide an automatic suggestion.", html)
 

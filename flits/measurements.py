@@ -1,8 +1,15 @@
+"""Burst measurement: width, flux, fluence, signal-to-noise and energy.
+
+Measurements are computed against an explicit off-pulse noise reference and
+carry their own uncertainty classification. A quantity is only reported as a
+formal 1-sigma uncertainty when the systematic inputs it requires were supplied;
+otherwise it is marked statistical-only and flagged as not publishable."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Sequence
 import warnings
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 import numpy as np
 from astropy import units as u
@@ -24,7 +31,6 @@ from flits.models import (
 )
 from flits.signal import acf_1d, gaussian_1d, radiometer
 from flits.timing import TimingContext, compute_toa_timing_chain
-
 
 LOW_SN_THRESHOLD = 6.0
 HEAVILY_MASKED_FRACTION = 0.25
@@ -65,7 +71,7 @@ def _uncertainty_detail(
         publishable=bool(publishable),
         basis=str(basis),
         tooltip=str(tooltip),
-        warning_flags=sorted(set(str(flag) for flag in warning_flags)),
+        warning_flags=sorted({str(flag) for flag in warning_flags}),
     )
 
 
@@ -312,9 +318,11 @@ def _primary_peak_bin(
     if candidates:
         return max(
             candidates,
-            key=lambda bin_abs: float(profile_sn[int(bin_abs) - int(crop_start_bin)])
-            if 0 <= int(bin_abs) - int(crop_start_bin) < profile_sn.size
-            else float("-inf"),
+            key=lambda bin_abs: (
+                float(profile_sn[int(bin_abs) - int(crop_start_bin)])
+                if 0 <= int(bin_abs) - int(crop_start_bin) < profile_sn.size
+                else float("-inf")
+            ),
         )
 
     event_slice = np.asarray(profile_sn[event_rel_start:event_rel_end], dtype=float)
@@ -403,8 +411,16 @@ def build_measurement_context(
         offpulse_bins=offpulse_bins,
     )
 
-    event_spectrum_raw = _nanmean_profile(selected[:, event_rel_start:event_rel_end], axis=1) if selected.size else np.array([], dtype=float)
-    offpulse_spectrum_raw = _nanmean_profile(selected[:, offpulse_bins], axis=1) if selected.size and offpulse_bins.size else np.array([], dtype=float)
+    event_spectrum_raw = (
+        _nanmean_profile(selected[:, event_rel_start:event_rel_end], axis=1)
+        if selected.size
+        else np.array([], dtype=float)
+    )
+    offpulse_spectrum_raw = (
+        _nanmean_profile(selected[:, offpulse_bins], axis=1)
+        if selected.size and offpulse_bins.size
+        else np.array([], dtype=float)
+    )
     spectrum_baseline, spectrum_sigma = _reference_stats(offpulse_spectrum_raw, estimator=noise_settings.estimator)
     full_baseline, full_sigma = _reference_stats(full_offpulse, estimator=noise_settings.estimator)
 
@@ -682,8 +698,8 @@ def saturation_diagnostic(
     wing_cap = max(SATURATION_MIN_WING_BINS, profile.size // 4)
     wing_bins = min(max(event_width, SATURATION_MIN_WING_BINS), wing_cap)
 
-    left = profile[max(0, event_start - wing_bins):event_start]
-    right = profile[event_end:min(profile.size, event_end + wing_bins)]
+    left = profile[max(0, event_start - wing_bins) : event_start]
+    right = profile[event_end : min(profile.size, event_end + wing_bins)]
     left_finite = left[np.isfinite(left)]
     right_finite = right[np.isfinite(right)]
 
@@ -710,13 +726,7 @@ def saturation_diagnostic(
             and side_min is not None
             and excess >= SATURATION_WING_EXCESS_SIGNIFICANCE
             and side_min <= SATURATION_WING_MIN_SN
-        ):
-            warning_flags.append("negative_recovery_wing")
-        elif (
-            side_min is not None
-            and run >= run_threshold
-            and side_min <= SATURATION_RUN_MIN_SN
-        ):
+        ) or (side_min is not None and run >= run_threshold and side_min <= SATURATION_RUN_MIN_SN):
             warning_flags.append("negative_recovery_wing")
 
     event = profile[event_start:event_end]
@@ -753,9 +763,7 @@ def saturation_diagnostic(
         left_wing_min_sn=finite_or_none(left_min),
         right_wing_min_sn=finite_or_none(right_min),
         negative_wing_min_sn=finite_or_none(wing_min),
-        negative_wing_excess_significance=(
-            finite_or_none(max(excess_values)) if excess_values else None
-        ),
+        negative_wing_excess_significance=(finite_or_none(max(excess_values)) if excess_values else None),
         negative_wing_max_run_bins=(max(run_values) if run_values else 0),
         negative_wing_run_threshold_bins=(min(run_thresholds) if run_thresholds else 0),
         event_negative_fraction=finite_or_none(event_negative_fraction),
@@ -796,11 +804,28 @@ def compute_burst_measurements(
     time_axis_ms: np.ndarray | None = None,
     timing_context: TimingContext | None = None,
 ) -> BurstMeasurements:
+    """Measure a burst from a prepared selection.
+
+    Integrates the event window against the off-pulse noise reference and
+    returns width, peak flux, fluence, signal-to-noise and, when a distance is
+    supplied, isotropic energy.
+
+    Every quantity carries its own uncertainty classification. A value is
+    reported as ``formal_1sigma`` only when the systematic inputs it needs were
+    supplied -- notably an SEFD fractional uncertainty for flux-like
+    quantities. Without them the value is ``statistical_only`` and is flagged as
+    not publishable, rather than being presented as a complete uncertainty.
+
+    Returns
+    -------
+    BurstMeasurements
+        Measured quantities together with their provenance, uncertainty detail
+        and any diagnostic flags raised during measurement.
+    """
     if time_axis_ms is None:
-        time_axis_ms = (
-            (int(crop_start_bin) + np.arange(masked.shape[1], dtype=float)) * float(tsamp_ms)
-            + float(read_start_sec) * 1000.0
-        )
+        time_axis_ms = (int(crop_start_bin) + np.arange(masked.shape[1], dtype=float)) * float(tsamp_ms) + float(
+            read_start_sec
+        ) * 1000.0
     else:
         time_axis_ms = np.asarray(time_axis_ms, dtype=float)
     context = build_measurement_context(
@@ -825,11 +850,7 @@ def compute_burst_measurements(
     )
     event_abs_start = int(crop_start_bin) + int(event_rel_start)
     event_abs_end = int(crop_start_bin) + int(event_rel_end)
-    manual_event_peak_bins = {
-        int(peak)
-        for peak in peak_bins_abs
-        if event_abs_start <= int(peak) < event_abs_end
-    }
+    manual_event_peak_bins = {int(peak) for peak in peak_bins_abs if event_abs_start <= int(peak) < event_abs_end}
     toa_peak_selection = (
         "manual_event_peak"
         if manual_peak_selection and peak_bin_abs is not None and int(peak_bin_abs) in manual_event_peak_bins
@@ -840,7 +861,11 @@ def compute_burst_measurements(
         for peak_bin in peak_bins_abs
         if 0 <= int(peak_bin) - int(crop_start_bin) < time_axis_ms.size
     ]
-    if not peak_positions_ms and peak_bin_abs is not None and 0 <= int(peak_bin_abs) - int(crop_start_bin) < time_axis_ms.size:
+    if (
+        not peak_positions_ms
+        and peak_bin_abs is not None
+        and 0 <= int(peak_bin_abs) - int(crop_start_bin) < time_axis_ms.size
+    ):
         peak_positions_ms = [float(time_axis_ms[int(peak_bin_abs) - int(crop_start_bin)])]
 
     toa_peak_topo_mjd = None
@@ -971,13 +996,9 @@ def compute_burst_measurements(
         peak_flux_basis = "Radiometer-noise statistical term from one off-pulse sigma in the selected band."
         peak_flux_publishable = False
         if sefd_fractional_uncertainty is not None:
-            peak_flux_value = float(
-                np.sqrt(peak_flux_stat**2 + (abs(peak_flux_jy) * sefd_fractional_uncertainty) ** 2)
-            )
+            peak_flux_value = float(np.sqrt(peak_flux_stat**2 + (abs(peak_flux_jy) * sefd_fractional_uncertainty) ** 2))
             peak_flux_classification = "formal_1sigma"
-            peak_flux_basis = (
-                "Quadrature combination of the radiometer-noise statistical term and the supplied SEFD fractional uncertainty."
-            )
+            peak_flux_basis = "Quadrature combination of the radiometer-noise statistical term and the supplied SEFD fractional uncertainty."
             peak_flux_publishable = noise_publishable
         else:
             peak_flux_value = peak_flux_stat
@@ -1004,9 +1025,7 @@ def compute_burst_measurements(
                 np.sqrt(fluence_uncertainty**2 + (abs(fluence_jyms) * sefd_fractional_uncertainty) ** 2)
             )
             fluence_classification = "formal_1sigma"
-            fluence_basis = (
-                "Quadrature combination of the radiometer-noise statistical term and the supplied SEFD fractional uncertainty."
-            )
+            fluence_basis = "Quadrature combination of the radiometer-noise statistical term and the supplied SEFD fractional uncertainty."
             fluence_publishable = noise_publishable
         else:
             fluence_value = float(fluence_uncertainty)
@@ -1031,14 +1050,10 @@ def compute_burst_measurements(
         iso_basis = "Propagated from the fluence statistical term only."
         iso_publishable = False
         if sefd_fractional_uncertainty is not None and distance_fractional_uncertainty is not None:
-            iso_fractional = float(
-                np.sqrt(iso_stat**2 + (2.0 * distance_fractional_uncertainty) ** 2)
-            )
+            iso_fractional = float(np.sqrt(iso_stat**2 + (2.0 * distance_fractional_uncertainty) ** 2))
             iso_value = float(abs(iso_e) * iso_fractional)
             iso_classification = "formal_1sigma"
-            iso_basis = (
-                "Quadrature combination of the propagated fluence term and the supplied luminosity-distance fractional uncertainty."
-            )
+            iso_basis = "Quadrature combination of the propagated fluence term and the supplied luminosity-distance fractional uncertainty."
             iso_publishable = noise_publishable
         else:
             iso_value = float(abs(iso_e) * iso_stat) if iso_stat > 0 else None
@@ -1063,9 +1078,7 @@ def compute_burst_measurements(
         toa_peak_topo_mjd=compatible_scalar_uncertainty(uncertainty_details.get("toa_peak_topo_mjd")),
         toa_topo_mjd=compatible_scalar_uncertainty(uncertainty_details.get("toa_topo_mjd")),
         toa_inf_topo_mjd=compatible_scalar_uncertainty(uncertainty_details.get("toa_inf_topo_mjd")),
-        toa_inf_bary_mjd_tdb=compatible_scalar_uncertainty(
-            uncertainty_details.get("toa_inf_bary_mjd_tdb")
-        ),
+        toa_inf_bary_mjd_tdb=compatible_scalar_uncertainty(uncertainty_details.get("toa_inf_bary_mjd_tdb")),
         snr_peak=None,
         snr_integrated=None,
         width_ms_acf=compatible_scalar_uncertainty(uncertainty_details.get("width_ms_acf")),
@@ -1101,7 +1114,9 @@ def compute_burst_measurements(
         ),
         event_window_ms=[
             float(time_axis_ms[max(0, min(event_rel_start, time_axis_ms.size - 1))]) if time_axis_ms.size else 0.0,
-            float(time_axis_ms[max(0, min(event_rel_end - 1, time_axis_ms.size - 1))] + tsamp_ms) if time_axis_ms.size else 0.0,
+            float(time_axis_ms[max(0, min(event_rel_end - 1, time_axis_ms.size - 1))] + tsamp_ms)
+            if time_axis_ms.size
+            else 0.0,
         ],
         spectral_extent_mhz=[
             float(np.min(context.spectral_axis_mhz)) if context.spectral_axis_mhz.size else 0.0,
@@ -1218,6 +1233,6 @@ def compute_burst_measurements(
         diagnostics=diagnostics,
         mask_count=len(list(masked_channels)),
         masked_channels=[int(channel) for channel in masked_channels],
-        width_results=[result for result in (width_results or [])],
+        width_results=list(width_results or []),
         accepted_width=accepted_width,
     )

@@ -1,16 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import os
 import shutil
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import numpy as np
 
-from flits.models import AutoMaskRunSummary, FilterbankMetadata, SpectralAnalysisResult, TemporalStructureResult, UncertaintyDetail
+from flits.models import (
+    AutoMaskRunSummary,
+    FilterbankMetadata,
+    SpectralAnalysisResult,
+    TemporalStructureResult,
+    UncertaintyDetail,
+)
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
 
@@ -251,7 +257,9 @@ class SessionSnapshotTest(unittest.TestCase):
             self.assertAlmostEqual(restored.config.observatory_longitude_deg or 0.0, 1.25)
             self.assertAlmostEqual(restored.config.observatory_latitude_deg or 0.0, 52.0)
             self.assertAlmostEqual(restored.config.observatory_height_m or 0.0, 30.0)
-            self.assertEqual(np.flatnonzero(restored.channel_mask).tolist(), np.flatnonzero(session.channel_mask).tolist())
+            self.assertEqual(
+                np.flatnonzero(restored.channel_mask).tolist(), np.flatnonzero(session.channel_mask).tolist()
+            )
             self.assertIsNotNone(restored.last_auto_mask)
             self.assertIsNotNone(restored.width_analysis)
             self.assertEqual(restored.width_analysis.accepted_width.method, "gaussian_fwhm")
@@ -265,11 +273,16 @@ class SessionSnapshotTest(unittest.TestCase):
             self.assertTrue(np.allclose(restored.spectral_analysis.freq_hz, np.array([125.0, 250.0, 375.0])))
             self.assertEqual(restored.spectral_analysis.crossover_frequency_status, "ok")
             self.assertTrue(np.allclose(restored.spectral_analysis.noise_psd_power, np.array([0.2, 0.1])))
-            self.assertEqual(restored.spectral_analysis.uncertainty_details["power_law_alpha"].classification, "diagnostic_only")
+            self.assertEqual(
+                restored.spectral_analysis.uncertainty_details["power_law_alpha"].classification, "diagnostic_only"
+            )
             self.assertIsNotNone(restored.temporal_structure)
             self.assertEqual(restored.temporal_structure.min_structure_ms_primary, 2.0)
             self.assertEqual(restored.temporal_structure.crossover_frequency_hz, 250.0)
-            self.assertEqual(restored.temporal_structure.uncertainty_details["crossover_frequency_hz"].classification, "diagnostic_only")
+            self.assertEqual(
+                restored.temporal_structure.uncertainty_details["crossover_frequency_hz"].classification,
+                "diagnostic_only",
+            )
 
     def test_snapshot_after_apply_best_dm_preserves_dm_sweep(self) -> None:
         with TemporaryDirectory() as tmpdir:

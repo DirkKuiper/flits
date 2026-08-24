@@ -1,0 +1,20 @@
+name: Question
+description: Ask about using FLITS
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check the [documentation](https://dirkkuiper.github.io/flits/) first —
+        especially the [guided workflow](https://dirkkuiper.github.io/flits/guided-workflow/).
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: FLITS version
+      placeholder: "1.0.0"

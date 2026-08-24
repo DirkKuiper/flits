@@ -107,8 +107,14 @@ class ModelFitRequestConfig:
         object.__setattr__(self, "scintillation", _coerce_bool(self.scintillation, default=False))
         free_parameters = _validate_free_parameters(self.free_parameters, scintillation=self.scintillation)
         object.__setattr__(self, "free_parameters", free_parameters)
-        object.__setattr__(self, "fixed_parameters", _fixed_parameters_from_free(free_parameters, scintillation=self.scintillation))
-        object.__setattr__(self, "initial_parameter_source", _coerce_initial_parameter_source(self.initial_parameter_source, self.initial_parameters))
+        object.__setattr__(
+            self, "fixed_parameters", _fixed_parameters_from_free(free_parameters, scintillation=self.scintillation)
+        )
+        object.__setattr__(
+            self,
+            "initial_parameter_source",
+            _coerce_initial_parameter_source(self.initial_parameter_source, self.initial_parameters),
+        )
         object.__setattr__(self, "weighting_mode", _coerce_weighting_mode(self.weighting_mode))
         object.__setattr__(self, "weight_range", _coerce_weight_range(self.weight_range))
         if self.weighting_mode == "manual_range" and self.weight_range is None:
@@ -119,7 +125,9 @@ class ModelFitRequestConfig:
         object.__setattr__(self, "ref_freq_mhz", _coerce_ref_freq_mhz(self.ref_freq_mhz))
         object.__setattr__(self, "is_folded", _coerce_bool(self.is_folded, default=False))
         object.__setattr__(self, "exact_jacobian", _coerce_bool(self.exact_jacobian, default=True))
-        object.__setattr__(self, "max_function_evaluations", _coerce_max_function_evaluations(self.max_function_evaluations))
+        object.__setattr__(
+            self, "max_function_evaluations", _coerce_max_function_evaluations(self.max_function_evaluations)
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible request payload."""
@@ -127,7 +135,9 @@ class ModelFitRequestConfig:
             "num_components": int(self.num_components),
             "free_parameters": list(self.free_parameters),
             "initial_parameters": self.initial_parameters,
-            "initial_parameter_source": _coerce_initial_parameter_source(self.initial_parameter_source, self.initial_parameters),
+            "initial_parameter_source": _coerce_initial_parameter_source(
+                self.initial_parameter_source, self.initial_parameters
+            ),
             "solver": {
                 "weighting_mode": _coerce_weighting_mode(self.weighting_mode),
                 "weight_range": None if self.weight_range is None else [int(value) for value in self.weight_range],
@@ -143,7 +153,7 @@ class ModelFitRequestConfig:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any] | None) -> "ModelFitRequestConfig":
+    def from_dict(cls, payload: dict[str, Any] | None) -> ModelFitRequestConfig:
         """Build a request config from a web/API payload."""
         if payload is None:
             return cls()
@@ -170,8 +180,12 @@ class ModelFitRequestConfig:
             weighting_mode=solver.get("weighting_mode", payload.get("weighting_mode", "none")),
             weight_range=_coerce_weight_range(solver.get("weight_range", payload.get("weight_range"))),
             iterations=_coerce_iterations(solver.get("iterations", payload.get("iterations", 1))),
-            factor_time_upsample=_coerce_positive_int(solver.get("factor_time_upsample", payload.get("factor_time_upsample"))),
-            factor_freq_upsample=_coerce_positive_int(solver.get("factor_freq_upsample", payload.get("factor_freq_upsample"))),
+            factor_time_upsample=_coerce_positive_int(
+                solver.get("factor_time_upsample", payload.get("factor_time_upsample"))
+            ),
+            factor_freq_upsample=_coerce_positive_int(
+                solver.get("factor_freq_upsample", payload.get("factor_freq_upsample"))
+            ),
             ref_freq_mhz=_coerce_ref_freq_mhz(solver.get("ref_freq_mhz", payload.get("ref_freq_mhz"))),
             is_folded=_coerce_bool(solver.get("is_folded", payload.get("is_folded")), default=False),
             exact_jacobian=_coerce_bool(solver.get("exact_jacobian", payload.get("exact_jacobian")), default=True),
@@ -227,7 +241,7 @@ def fit_model_selected_band(
     tsamp_ms: float,
     peak_rel_bin: int | None,
     width_guess_ms: float | None,
-    config: "ModelFitRequestConfig" | None = None,
+    config: ModelFitRequestConfig | None = None,
 ) -> ModelFitResult:
     """Fit intrinsic width and scattering time for a selected dynamic spectrum.
 
@@ -294,12 +308,12 @@ def fit_model_selected_band(
             fixed_parameters=config.fixed_parameters,
             scintillation=config.scintillation,
             weighting_mode=config.weighting_mode,
-                fit_iterations_requested=fit_iterations,
-                fit_iterations_completed=0,
-                is_folded=config.is_folded,
-                exact_jacobian=config.exact_jacobian,
-                max_function_evaluations=config.max_function_evaluations,
-            )
+            fit_iterations_requested=fit_iterations,
+            fit_iterations_completed=0,
+            is_folded=config.is_folded,
+            exact_jacobian=config.exact_jacobian,
+            max_function_evaluations=config.max_function_evaluations,
+        )
 
     data = np.asarray(selected_band, dtype=float)
     freqs = np.asarray(freqs_mhz, dtype=float)
@@ -380,7 +394,6 @@ def fit_model_selected_band(
             max_function_evaluations=config.max_function_evaluations,
         )
 
-
     event_slice = np.asarray(
         np.nanmean(normalized_data[good_freq, event_rel_start:event_rel_end], axis=0),
         dtype=float,
@@ -417,7 +430,7 @@ def fit_model_selected_band(
         width_guess_ms=width_guess_ms,
         num_components=config.num_components,
     )
-    
+
     if config.initial_parameters:
         initial_parameters = _apply_initial_parameter_overrides(
             defaults=initial_parameters,
@@ -486,7 +499,7 @@ def fit_model_selected_band(
         fitter_weighted = True
         fitter_weight_range = weight_range
         weight_range_basis = "manual_range"
-    
+
     model = SpectrumModeler(
         freqs,
         times_sec,
@@ -543,7 +556,9 @@ def fit_model_selected_band(
                 initial_parameters=initial_parameters,
                 bestfit_parameters=current_parameters if completed_iterations > 0 else {},
                 fit_statistics=getattr(fitter, "fit_statistics", {}) if fitter is not None else {},
-                fit_parameters=list(getattr(fitter, "fit_parameters", fit_parameters)) if fitter is not None else fit_parameters,
+                fit_parameters=list(getattr(fitter, "fit_parameters", fit_parameters))
+                if fitter is not None
+                else fit_parameters,
                 free_parameters=config.free_parameters,
                 initial_parameter_source=config.initial_parameter_source,
                 fixed_parameters=config.fixed_parameters,
@@ -647,14 +662,14 @@ def fit_model_selected_band(
         )
 
     full_best_parameters = current_parameters
-    
+
     _update_model_parameters(model, full_best_parameters)
     model_dynamic_spectrum = np.asarray(model.compute_model(data=fit_data), dtype=float)
 
     data_profile = np.nanmean(fit_data[good_freq, :], axis=0)
     model_profile = np.mean(model_dynamic_spectrum[good_freq, :], axis=0)
     residual_profile = data_profile - model_profile
-    
+
     data_freq_profile = np.nanmean(fit_data, axis=1)
     model_freq_profile = np.mean(model_dynamic_spectrum, axis=1)
     residual_freq_profile = data_freq_profile - model_freq_profile
@@ -836,7 +851,11 @@ def _initial_parameters(
     peak_value = float(np.nanmax(event_window)) if event_window.size and np.isfinite(event_window).any() else 1.0
     amplitude_guess = float(np.log10(max(peak_value, 1e-2)))
     arrival_time_sec = float((time_axis_ms[peak_rel_bin] - float(time_axis_ms[0])) / 1e3)
-    width_ms = float(width_guess_ms) if width_guess_ms is not None and np.isfinite(width_guess_ms) else max(tsamp_ms * 2.0, (event_rel_end - event_rel_start) * tsamp_ms / 6.0)
+    width_ms = (
+        float(width_guess_ms)
+        if width_guess_ms is not None and np.isfinite(width_guess_ms)
+        else max(tsamp_ms * 2.0, (event_rel_end - event_rel_start) * tsamp_ms / 6.0)
+    )
     width_ms = max(width_ms, tsamp_ms)
     tau_ms = max(tsamp_ms, width_ms / 4.0)
     ref_freq = float(np.min(freqs_mhz))
@@ -1010,7 +1029,9 @@ def _validate_free_parameters(values: Any, *, scintillation: bool = False) -> li
         names = [name for name in names if name not in SCINTILLATION_INACTIVE_PARAMETERS]
 
     active_fit_parameters = [
-        parameter for parameter in FIT_PARAMETERS if not (scintillation and parameter in SCINTILLATION_INACTIVE_PARAMETERS)
+        parameter
+        for parameter in FIT_PARAMETERS
+        if not (scintillation and parameter in SCINTILLATION_INACTIVE_PARAMETERS)
     ]
     if active_fit_parameters and not any(parameter in names for parameter in active_fit_parameters):
         raise ValueError("At least one model parameter must remain free.")
@@ -1150,7 +1171,7 @@ def _solver_status(results: Any | None) -> int | None:
     if results is None:
         return None
     try:
-        return int(getattr(results, "status"))
+        return int(results.status)
     except (TypeError, ValueError):
         return None
 
@@ -1159,7 +1180,7 @@ def _solver_nfev(results: Any | None) -> int | None:
     if results is None:
         return None
     try:
-        return int(getattr(results, "nfev"))
+        return int(results.nfev)
     except (TypeError, ValueError):
         return None
 
@@ -1221,12 +1242,7 @@ def _sanitize_fitburst_log(value: object) -> str | None:
     if not text:
         return None
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    sanitized = "".join(
-        char
-        if char == "\n" or char == "\t" or ord(char) >= 32
-        else " "
-        for char in text
-    )
+    sanitized = "".join(char if char == "\n" or char == "\t" or ord(char) >= 32 else " " for char in text)
     sanitized = "\n".join(line.rstrip() for line in sanitized.splitlines()).strip()
     if not sanitized:
         return None

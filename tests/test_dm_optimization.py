@@ -11,8 +11,7 @@ from flits.models import FilterbankMetadata
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
 
-
-DM_CONST = 1 / (2.41 * 10 ** -4)
+DM_CONST = 1 / (2.41 * 10**-4)
 UPSTREAM_DMPHASE_AVAILABLE = importlib.util.find_spec("DM_phase") is not None
 
 
@@ -25,7 +24,7 @@ def _synthetic_dm_session(true_dm: float = 50.0, *, num_channels: int = 8, noise
     time = np.arange(num_time_bins, dtype=float)
     pulse = np.exp(-0.5 * ((time - aligned_bin) / 2.5) ** 2)
     reffreq = float(np.max(freqs))
-    time_shift = DM_CONST * true_dm * (reffreq ** -2.0 - freqs ** -2.0)
+    time_shift = DM_CONST * true_dm * (reffreq**-2.0 - freqs**-2.0)
     bin_shift = np.round(time_shift / tsamp).astype(int)
     rng = np.random.default_rng(12345)
 
@@ -67,7 +66,9 @@ def _synthetic_dm_session(true_dm: float = 50.0, *, num_channels: int = 8, noise
     )
 
 
-def _synthetic_complex_dm_session(true_dm: float = 50.0, *, num_channels: int = 24, noise_std: float = 0.0) -> BurstSession:
+def _synthetic_complex_dm_session(
+    true_dm: float = 50.0, *, num_channels: int = 24, noise_std: float = 0.0
+) -> BurstSession:
     freqs = np.linspace(1100.0, 1000.0, num_channels)
     tsamp = 1e-3
     num_time_bins = 320
@@ -75,7 +76,7 @@ def _synthetic_complex_dm_session(true_dm: float = 50.0, *, num_channels: int = 
     time = np.arange(num_time_bins, dtype=float)
     pulse = np.exp(-0.5 * ((time - 110) / 2.5) ** 2) + 0.8 * np.exp(-0.5 * ((time - 150) / 3.0) ** 2)
     reffreq = float(np.max(freqs))
-    time_shift = DM_CONST * true_dm * (reffreq ** -2.0 - freqs ** -2.0)
+    time_shift = DM_CONST * true_dm * (reffreq**-2.0 - freqs**-2.0)
     bin_shift = np.round(time_shift / tsamp).astype(int)
     rng = np.random.default_rng(24680)
 

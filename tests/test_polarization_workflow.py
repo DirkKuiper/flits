@@ -8,7 +8,6 @@ import pytest
 
 from flits.analysis.polarization import extract_normalized_linear_spectrum, run_rm_synthesis
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 

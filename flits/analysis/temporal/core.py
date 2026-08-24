@@ -25,8 +25,12 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.stats import norm
 
-from flits.models import SpectralAnalysisResult, TemporalStructureResult, UncertaintyDetail, compatible_scalar_uncertainty
-
+from flits.models import (
+    SpectralAnalysisResult,
+    TemporalStructureResult,
+    UncertaintyDetail,
+    compatible_scalar_uncertainty,
+)
 
 MIN_EVENT_BINS = 4
 MIN_SEGMENT_BINS = 2
@@ -145,7 +149,9 @@ def _load_stingray_backend() -> tuple[type[Any] | None, type[Any] | None, str | 
     return Lightcurve, AveragedPowerspectrum, None
 
 
-def _raw_periodogram(event_series: np.ndarray, tsamp_ms: float) -> tuple[np.ndarray, np.ndarray, float | None, float | None]:
+def _raw_periodogram(
+    event_series: np.ndarray, tsamp_ms: float
+) -> tuple[np.ndarray, np.ndarray, float | None, float | None]:
     """Compute the single-window periodogram for the event series."""
     series = np.asarray(event_series, dtype=float)
     if series.size < 2 or not np.isfinite(series).any():
@@ -505,16 +511,15 @@ def _fit_power_law_model(
             and getattr(result, "x", None) is not None
             and np.all(np.isfinite(result.x))
             and np.isfinite(float(getattr(result, "fun", np.inf)))
-        ):
-            if best_result is None or float(result.fun) < float(best_result.fun):
-                best_result = result
+        ) and (best_result is None or float(result.fun) < float(best_result.fun)):
+            best_result = result
 
     if best_result is None:
         return _power_law_failure("fit_failed", "Power-law fit did not converge to a stable bounded solution.")
 
     log_a_ref_opt, alpha_opt, log_c_opt = [float(value) for value in best_result.x]
     a_ref_opt = float(np.exp(log_a_ref_opt))
-    a_opt = float(a_ref_opt * (f_ref ** alpha_opt))
+    a_opt = float(a_ref_opt * (f_ref**alpha_opt))
     c_opt = float(np.exp(log_c_opt))
 
     cov = None
@@ -613,8 +618,12 @@ def _fit_crossover_frequency(power_law: dict[str, Any], freq_hz: np.ndarray) -> 
             variance = float(np.dot(gradient, np.dot(covariance, gradient)))
             if np.isfinite(variance) and variance >= 0:
                 sigma_log_frequency = float(np.sqrt(variance))
-                low = float(np.exp(np.clip(log_crossover - CROSSOVER_UNCERTAINTY_SIGMA * sigma_log_frequency, -745, 709)))
-                high = float(np.exp(np.clip(log_crossover + CROSSOVER_UNCERTAINTY_SIGMA * sigma_log_frequency, -745, 709)))
+                low = float(
+                    np.exp(np.clip(log_crossover - CROSSOVER_UNCERTAINTY_SIGMA * sigma_log_frequency, -745, 709))
+                )
+                high = float(
+                    np.exp(np.clip(log_crossover + CROSSOVER_UNCERTAINTY_SIGMA * sigma_log_frequency, -745, 709))
+                )
                 if not np.isfinite(low) or low <= 0:
                     low = None
                 if not np.isfinite(high) or high <= 0:
@@ -1008,8 +1017,8 @@ def run_temporal_structure_analysis(
     df = None
     if freq_hz.size > 1:
         df = float(freq_hz[1] - freq_hz[0])
-    elif hasattr(spectrum, "df") and np.isfinite(getattr(spectrum, "df")):
-        df = float(getattr(spectrum, "df"))
+    elif hasattr(spectrum, "df") and np.isfinite(spectrum.df):
+        df = float(spectrum.df)
 
     noise_psd = _compute_noise_psd(
         offpulse_series_runs,

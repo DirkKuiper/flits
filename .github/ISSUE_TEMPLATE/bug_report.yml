@@ -1,0 +1,69 @@
+name: Bug report
+description: FLITS did something wrong, crashed, or misread a file
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. If this has security impact, please use
+        [private vulnerability reporting](https://github.com/DirkKuiper/flits/security/advisories/new)
+        instead of a public issue.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what did FLITS do instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start FLITS with `flits --data-dir ...`
+        2. Load ...
+        3. Click ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: FLITS version
+      description: Output of `flits --version`
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version and OS
+      placeholder: "3.12.4 on Ubuntu 24.04"
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: Input format
+      options:
+        - SIGPROC filterbank (.fil)
+        - PSRFITS search mode (.fits/.sf)
+        - PSRFITS fold mode
+        - CHIME/FRB catalog HDF5
+        - CHIME/FRB beamformed BBData
+        - Other or not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error output
+      description: Any traceback or error message. Run with `--log-level debug` for more detail.
+      render: text
+  - type: textarea
+    id: data
+    attributes:
+      label: Data
+      description: >
+        If the problem is with a specific burst and the data can be shared, a
+        small cut-out helps enormously. If it cannot be shared, paste the header
+        summary that FLITS shows on format detection.

@@ -1,6 +1,7 @@
 """Shared pytest fixtures — most notably `synthetic_waterfall` which produces a
 known burst in any of the three supported input formats.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -11,14 +12,14 @@ import numpy as np
 import pytest
 
 _DM_CONSTANT = 1 / (2.41 * 10**-4)
-_MJD_EPOCH = datetime.datetime(1858, 11, 17, tzinfo=datetime.timezone.utc)
+_MJD_EPOCH = datetime.datetime(1858, 11, 17, tzinfo=datetime.UTC)
 
 
 @dataclass(frozen=True)
 class SyntheticWaterfall:
     path: Path
     format_id: str
-    data: np.ndarray            # (nchan, ntime) pre-dedispersion Stokes-I
+    data: np.ndarray  # (nchan, ntime) pre-dedispersion Stokes-I
     tsamp_s: float
     fch1_mhz: float
     foff_mhz: float
@@ -42,7 +43,7 @@ def _make_synthetic_array(
     rng = np.random.default_rng(rng_seed)
     data = rng.normal(loc=0.0, scale=noise_std, size=(nchan, ntime)).astype(np.float32)
     t = np.arange(ntime)
-    burst_profile = burst_amp * np.exp(-((t - burst_time_idx) ** 2) / (2 * burst_width_bins ** 2))
+    burst_profile = burst_amp * np.exp(-((t - burst_time_idx) ** 2) / (2 * burst_width_bins**2))
     data += burst_profile[np.newaxis, :].astype(np.float32)
     return data
 
@@ -148,9 +149,7 @@ def _write_chime_bbdata_beamformed(
 
     freq_dtype = np.dtype([("centre", "<f8"), ("id", "<u4")])
     time0_dtype = np.dtype([("fpga_count", "<u8"), ("ctime", "<f8"), ("ctime_offset", "<f8")])
-    loc_dtype = np.dtype(
-        [("ra", "<f8"), ("dec", "<f8"), ("x_400MHz", "<f8"), ("y_400MHz", "<f8"), ("pol", "S1")]
-    )
+    loc_dtype = np.dtype([("ra", "<f8"), ("dec", "<f8"), ("x_400MHz", "<f8"), ("y_400MHz", "<f8"), ("pol", "S1")])
 
     freq_table = np.zeros(nchan, dtype=freq_dtype)
     freq_table["centre"] = freqs
@@ -170,7 +169,7 @@ def _write_chime_bbdata_beamformed(
 
     event_dt = datetime.datetime.fromtimestamp(
         float(np.max(channel_start_sec)),
-        tz=datetime.timezone.utc,
+        tz=datetime.UTC,
     ).strftime("%Y-%m-%dT %H:%M:%S.%f")
 
     with h5py.File(path, "w") as fh:

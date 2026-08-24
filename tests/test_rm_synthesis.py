@@ -1,6 +1,7 @@
+import json
+
 import numpy as np
 import pytest
-import json
 
 from flits.analysis.polarization import run_rm_synthesis
 from flits.web.app import RMSynthesisRequest, rm_synthesis
@@ -185,10 +186,9 @@ def test_channel_width_controls_bandwidth_depolarization_limit_across_gaps() -> 
         sigma_u=0.02,
         channel_width_mhz=width_mhz,
     )
-    lambda2_width = (
-        (299_792_458.0 / ((freqs - width_mhz / 2.0) * 1e6)) ** 2
-        - (299_792_458.0 / ((freqs + width_mhz / 2.0) * 1e6)) ** 2
-    )
+    lambda2_width = (299_792_458.0 / ((freqs - width_mhz / 2.0) * 1e6)) ** 2 - (
+        299_792_458.0 / ((freqs + width_mhz / 2.0) * 1e6)
+    ) ** 2
 
     assert result.status == "ok"
     assert result.max_abs_rm_rad_m2 == pytest.approx(np.sqrt(3.0) / np.max(lambda2_width))

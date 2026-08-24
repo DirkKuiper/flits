@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
-
 
 _MIN_OFFPULSE_BLOCKS = 4
 _VALID_CALIBRATION_STATES = frozenset({"calibrated", "unknown", "uncalibrated"})
@@ -149,9 +149,9 @@ def extract_normalized_linear_spectrum(
     stokes_i, stokes_q_sum, stokes_u_sum, stokes_v = integrated
     sigma_q_sum, sigma_u_sum = sigma[1], sigma[2]
     linear = np.hypot(stokes_q_sum, stokes_u_sum)
-    linear_sigma = np.sqrt(
-        np.square(stokes_q_sum * sigma_q_sum) + np.square(stokes_u_sum * sigma_u_sum)
-    ) / np.maximum(linear, np.finfo(float).tiny)
+    linear_sigma = np.sqrt(np.square(stokes_q_sum * sigma_q_sum) + np.square(stokes_u_sum * sigma_u_sum)) / np.maximum(
+        linear, np.finfo(float).tiny
+    )
     linear_snr_all = linear / np.maximum(linear_sigma, np.finfo(float).tiny)
 
     # Q/L and U/L lie on the unit circle. The common tangent-plane error is

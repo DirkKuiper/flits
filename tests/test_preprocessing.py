@@ -75,7 +75,9 @@ class ViewerAndMaskingTest(unittest.TestCase):
         mock_your.return_value = _mock_reader(raw)
         config = ObservationConfig.from_preset(dm=0.0, preset_key="generic", sefd_jy=1.0)
 
-        data, _ = load_filterbank_data("synthetic-legacy.fil", config, inspection=_synthetic_inspection("synthetic-legacy.fil"))
+        data, _ = load_filterbank_data(
+            "synthetic-legacy.fil", config, inspection=_synthetic_inspection("synthetic-legacy.fil")
+        )
 
         stokes_i = raw.T
         tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
@@ -138,7 +140,9 @@ class ViewerAndMaskingTest(unittest.TestCase):
 
         stokes_i_channels_time = stokes_i.T
         tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
-        offpulse_start = min(stokes_i_channels_time.shape[1] - 1, int((1 - tail_fraction) * stokes_i_channels_time.shape[1]))
+        offpulse_start = min(
+            stokes_i_channels_time.shape[1] - 1, int((1 - tail_fraction) * stokes_i_channels_time.shape[1])
+        )
         expected = normalize(stokes_i_channels_time, stokes_i_channels_time[:, offpulse_start:])
         old_i_plus_q = (raw[:, 0, :] + raw[:, 1, :]).T
         old_expected = normalize(old_i_plus_q, old_i_plus_q[:, offpulse_start:])

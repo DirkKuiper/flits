@@ -12,14 +12,15 @@ from flits.models import FilterbankMetadata
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
 
+DM_CONST = 1 / (2.41 * 10**-4)
 
-DM_CONST = 1 / (2.41 * 10 ** -4)
 
-
-def _synthetic_dispersed_raw(freqs_mhz: np.ndarray, dm: float, tsamp: float, num_time_bins: int, aligned_bin: int) -> np.ndarray:
+def _synthetic_dispersed_raw(
+    freqs_mhz: np.ndarray, dm: float, tsamp: float, num_time_bins: int, aligned_bin: int
+) -> np.ndarray:
     freqs = np.asarray(freqs_mhz, dtype=float)
     reffreq = float(np.max(freqs))
-    time_shift = DM_CONST * float(dm) * (reffreq ** -2.0 - freqs ** -2.0)
+    time_shift = DM_CONST * float(dm) * (reffreq**-2.0 - freqs**-2.0)
     bin_shift = np.round(time_shift / float(tsamp)).astype(int)
 
     raw = np.zeros((num_time_bins, freqs.size), dtype=float)

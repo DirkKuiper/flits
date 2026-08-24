@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flits"
-dynamic = ["version", "dependencies"]
+dynamic = ["version"]
 description = "Browser-based FRB burst analysis software (SIGPROC, PSRFITS, CHIME/FRB HDF5)"
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
@@ -15,18 +15,36 @@ authors = [
 ]
 keywords = ["astronomy", "fast radio bursts", "FRB", "radio astronomy", "filterbank", "SIGPROC", "PSRFITS", "HDF5", "CHIME"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Science/Research",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Operating System :: OS Independent",
   "Topic :: Scientific/Engineering :: Astronomy",
 ]
 
+# Runtime requirements are declared as compatible ranges so FLITS can be
+# installed alongside an existing scientific Python stack. Exact, tested
+# versions live in requirements.txt, which is used as a pip constraints file
+# for reproducible container and CI installs -- see docs/developer/testing.md.
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+  "numpy>=1.26,<3",
+  "scipy>=1.11.4,<2",
+  "astropy>=6.0,<9",
+  "pydantic>=2.7,<3",
+  "your>=0.6.7,<0.7",
+  "jess>=0.3.1,<0.4",
+  "matplotlib>=3.8,<4",
+  "h5py>=3.10,<4",
+]
+
 [project.scripts]
-flits = "flits.web.app:main"
+flits = "flits.cli:main"
 
 [project.entry-points."flits.readers"]
 sigproc = "flits.io.your_reader:YourFilterbankReader"
@@ -36,11 +54,16 @@ chime_hdf5 = "flits.io.chime_hdf5_reader:ChimeHdf5Reader"
 [project.optional-dependencies]
 dev = [
   "build>=1.4.3",
+  "httpx>=0.27",
+  "mypy>=1.11",
   "pytest>=9.0.3",
+  "pytest-playwright>=0.5",
+  "ruff>=0.6",
   "twine>=6.2.0",
 ]
 docs = [
   "mkdocs-material>=9.7.6",
+  "mkdocstrings[python]>=0.26",
 ]
 
 [project.urls]
@@ -58,7 +81,6 @@ include = ["flits*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "flits.__version__" }
-dependencies = { file = ["requirements.txt"] }
 
 [tool.setuptools.package-data]
 flits = [
@@ -66,8 +88,89 @@ flits = [
   "web_static/*.css",
   "web_static/*.js",
   "web_static/vendor/*.js",
+  "web_static/vendor/*.txt",
 ]
 
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [".vendor", ".venv", ".venv_test", "site", "dist", "examples"]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "F",    # pyflakes
+  "W",    # pycodestyle warnings
+  "I",    # import sorting
+  "UP",   # pyupgrade
+  "B",    # bugbear
+  "C4",   # comprehensions
+  "SIM",  # simplify
+  "RUF",  # ruff-specific
+]
+ignore = [
+  "B008",    # FastAPI dependency defaults are declared in the signature
+  "SIM108",  # ternaries are not always clearer than an if/else
+  "E501",    # line length is owned by `ruff format`; what is left is prose in
+             # docstrings and comments, where reflowing hurts readability
+  "RUF046",  # explicit int() around numpy integers is deliberate
+  "RUF001",  # scientific prose legitimately contains micro, minus and en-dash
+  "RUF002",
+  "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Package __init__ modules exist to re-export; unused and star imports are the point.
+"flits/**/__init__.py" = ["F401", "F403"]
+# Tests: importorskip runs before imports, and fixture tables are plain data.
+"tests/*" = ["E402", "RUF012", "SIM117"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["flits"]
+
+[tool.mypy]
+# No python_version pin: mypy analyses with the running interpreter. Pinning it
+# to the 3.11 floor makes numpy's bundled stubs unparseable, since they use
+# `type` statements. Source-level 3.11 compatibility is enforced by ruff's
+# target-version instead.
+files = ["flits"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = false
+
+# Type checking is enforced for the package as a whole. The modules listed below
+# carry pre-existing annotation debt -- mostly optional numpy arrays that are
+# narrowed by construction rather than by a check mypy can see -- and are
+# exempted until they are cleaned up one at a time. Do not add to this list:
+# every module not named here, including all new ones, must type check.
+[[tool.mypy.overrides]]
+module = [
+  "flits.models",
+  "flits.session",
+  "flits.exports",
+  "flits.measurements",
+  "flits.timing",
+  "flits.io.psrfits",
+  "flits.io.chime",
+  "flits.io.chime_hdf5_reader",
+  "flits.io.your_reader",
+  "flits.io.sigproc",
+  "flits.io.reader",
+  "flits.io.validation",
+  "flits.web.app",
+  "flits.analysis.temporal.core",
+  "flits.analysis.spectral.core",
+  "flits.analysis.polarization.rm_synthesis",
+  "flits.analysis.dm_optimization.core",
+  "flits.analysis.fitting.fitburst_adapter",
+]
+ignore_errors = true
+
 [tool.pytest.ini_options]
-addopts = "-ra"
+addopts = "-ra -m 'not e2e'"
 testpaths = ["tests"]
+markers = [
+  "e2e: browser tests that need Playwright and a real server (deselect with -m 'not e2e')",
+]

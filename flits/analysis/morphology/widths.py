@@ -25,7 +25,6 @@ from flits.models import (
 )
 from flits.signal import gaussian_1d
 
-
 FWHM_PER_SIGMA = float(2.0 * np.sqrt(2.0 * np.log(2.0)))
 
 
@@ -216,7 +215,7 @@ def _result_flags(
         peak = float(np.nanmax(np.clip(event_profile, a_min=0.0, a_max=None)))
         if noise_summary.sigma > 0 and np.isfinite(peak) and (peak / noise_summary.sigma) < 6.0:
             flags.append("low_sn")
-    return sorted(set(str(flag) for flag in flags))
+    return sorted({str(flag) for flag in flags})
 
 
 def compute_width_analysis(
@@ -285,6 +284,8 @@ def compute_width_analysis(
     All width values and uncertainties are reported in milliseconds.
     """
     settings = WidthAnalysisSettings() if settings is None else settings
+    if int(settings.uncertainty_trials) < 0:
+        raise ValueError("uncertainty_trials must be non-negative")
     event_profile, event_times_ms = _prepare_event_profile(
         np.asarray(selected_profile, dtype=float),
         np.asarray(time_axis_ms, dtype=float),
@@ -302,6 +303,9 @@ def compute_width_analysis(
         if value is None or not np.isfinite(value):
             method_flags.append("measurement_unavailable")
             uncertainty = None
+        elif int(settings.uncertainty_trials) <= 0:
+            uncertainty = None
+            method_flags.append("uncertainty_disabled")
         else:
             uncertainty, uncertainty_flags = _trial_uncertainty(
                 calculator,
@@ -362,9 +366,7 @@ def compute_width_analysis(
                 spectral_extent_mhz=[float(value) for value in spectral_extent_mhz],
                 offpulse_windows_ms=[[float(value) for value in window] for window in offpulse_windows_ms],
                 masked_channels=[int(value) for value in masked_channels],
-                effective_bandwidth_mhz=(
-                    None if effective_bandwidth_mhz is None else float(effective_bandwidth_mhz)
-                ),
+                effective_bandwidth_mhz=(None if effective_bandwidth_mhz is None else float(effective_bandwidth_mhz)),
                 algorithm_name=algorithm_name,
                 uncertainty_details={} if uncertainty_detail is None else {"uncertainty": uncertainty_detail},
                 quality_flags=sorted(set(method_flags)),

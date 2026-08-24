@@ -8,7 +8,7 @@ from unittest.mock import patch
 import numpy as np
 
 from flits.analysis.morphology import compute_width_analysis as compute_width_analysis_impl
-from flits.models import FilterbankMetadata
+from flits.models import FilterbankMetadata, WidthAnalysisSettings
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
 
@@ -137,6 +137,30 @@ class WidthAnalysisTest(unittest.TestCase):
                 )
             )
 
+    def test_width_uncertainty_trials_can_be_disabled_for_batch_measurement(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            session = _synthetic_width_session(path=Path(tmpdir) / "no_width_bootstrap.fil")
+            session.width_settings = WidthAnalysisSettings(
+                uncertainty_trials=0,
+                min_successful_trials=0,
+            )
+
+            width_analysis = session.compute_widths()
+
+            self.assertTrue(any(result.value is not None for result in width_analysis.results))
+            self.assertTrue(all(result.uncertainty is None for result in width_analysis.results))
+            self.assertTrue(
+                all(
+                    "uncertainty_disabled" in result.quality_flags
+                    for result in width_analysis.results
+                    if result.value is not None
+                )
+            )
+
+            session.width_settings = WidthAnalysisSettings(uncertainty_trials=-1)
+            with self.assertRaises(ValueError):
+                session.compute_widths()
+
     @patch("flits.session.compute_width_analysis")
     def test_compute_widths_uses_reduced_profile_and_sampling(self, mock_compute_width_analysis: object) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -154,7 +178,9 @@ class WidthAnalysisTest(unittest.TestCase):
             kwargs = mock_compute_width_analysis.call_args.kwargs
             self.assertEqual(len(kwargs["selected_profile"]), (session.crop_end - session.crop_start) // 4)
             self.assertEqual(kwargs["tsamp_ms"], session.tsamp_ms * 4)
-            self.assertTrue(np.isfinite([result.value for result in width_analysis.results if result.value is not None]).any())
+            self.assertTrue(
+                np.isfinite([result.value for result in width_analysis.results if result.value is not None]).any()
+            )
 
 
 if __name__ == "__main__":

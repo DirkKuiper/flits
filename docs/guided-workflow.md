@@ -14,6 +14,11 @@ diagnostic around zero.
 
 ## 1. Download the tutorial burst
 
+!!! note "Archived copy"
+    The tutorial burst is served from a GitHub release asset for convenience.
+    A citable, archived copy is deposited alongside the software release; use
+    that one when you need a permanent reference.
+
 ```bash
 mkdir -p tutorial-data
 curl -L -o tutorial-data/flits-tutorial-gbt-frb20240114a-v1.fil \

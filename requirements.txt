@@ -1,3 +1,13 @@
+# Pinned, tested versions of the FLITS runtime dependency tree.
+#
+# This file is NOT the source of the package's install requirements -- those are
+# declared as compatible ranges in pyproject.toml so that FLITS can be installed
+# alongside an existing scientific Python stack. This file is used as a pip
+# constraints file for reproducible container and CI installs:
+#
+#     pip install -c requirements.txt .
+#
+# Dependabot keeps these pins current.
 fastapi==0.139.2
 uvicorn==0.51.0
 numpy==2.4.6
@@ -7,5 +17,4 @@ pydantic==2.13.4
 your==0.6.7
 jess==0.3.1
 matplotlib==3.11.1
-stingray==2.3.2
-h5py>=3.16.0
+h5py==3.16.0

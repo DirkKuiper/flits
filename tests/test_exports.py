@@ -12,10 +12,9 @@ from fastapi import HTTPException
 from flits.models import FilterbankMetadata
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
-from flits.web.app import ActionRequest, SESSIONS, session_action, session_export_artifact, session_export_manifest
+from flits.web.app import SESSIONS, ActionRequest, session_action, session_export_artifact, session_export_manifest
 
-
-DM_CONST = 1 / (2.41 * 10 ** -4)
+DM_CONST = 1 / (2.41 * 10**-4)
 _SIGPROC_FIELD_TYPES = {
     "rawdatafile": "string",
     "source_name": "string",
@@ -49,7 +48,7 @@ def _synthetic_export_session(*, num_channels: int = 24, true_dm: float = 50.0) 
     time = np.arange(num_time_bins, dtype=float)
     pulse = np.exp(-0.5 * ((time - aligned_bin) / 2.5) ** 2)
     reffreq = float(np.max(freqs))
-    time_shift = DM_CONST * true_dm * (reffreq ** -2.0 - freqs ** -2.0)
+    time_shift = DM_CONST * true_dm * (reffreq**-2.0 - freqs**-2.0)
     bin_shift = np.round(time_shift / tsamp).astype(int)
     rng = np.random.default_rng(67890)
 
@@ -153,7 +152,9 @@ class ExportResultsTest(unittest.TestCase):
 
         payload = session_action(
             session_id,
-            ActionRequest(type="preview_export_results", payload={"include": ["json", "plots"], "plot_formats": ["png"]}),
+            ActionRequest(
+                type="preview_export_results", payload={"include": ["json", "plots"], "plot_formats": ["png"]}
+            ),
         )
 
         preview = payload["export_preview"]
@@ -174,7 +175,10 @@ class ExportResultsTest(unittest.TestCase):
         self.assertEqual(sum(1 for artifact in preview["artifacts"] if artifact["kind"] == "plot"), 6)
 
         plot_previews = {item["plot_key"]: item for item in preview["plot_previews"]}
-        self.assertEqual(set(plot_previews), {"dynamic_spectrum", "profile_diagnostics", "acf_panel", "power_spectrum", "dm_curve", "dm_residuals"})
+        self.assertEqual(
+            set(plot_previews),
+            {"dynamic_spectrum", "profile_diagnostics", "acf_panel", "power_spectrum", "dm_curve", "dm_residuals"},
+        )
         self.assertTrue(plot_previews["dynamic_spectrum"]["svg"].lstrip().startswith("<svg"))
         self.assertEqual(plot_previews["dm_curve"]["status"], "ready")
         self.assertEqual(plot_previews["power_spectrum"]["status"], "omitted")
@@ -201,8 +205,12 @@ class ExportResultsTest(unittest.TestCase):
         )["export_manifest"]
         artifact_by_name = {artifact["name"]: artifact for artifact in manifest["artifacts"]}
         dm_curve = next(artifact for name, artifact in artifact_by_name.items() if name.endswith("_dm_curve.png"))
-        dm_residuals = next(artifact for name, artifact in artifact_by_name.items() if name.endswith("_dm_residuals.png"))
-        power_spectrum = next(artifact for name, artifact in artifact_by_name.items() if name.endswith("_power_spectrum.png"))
+        dm_residuals = next(
+            artifact for name, artifact in artifact_by_name.items() if name.endswith("_dm_residuals.png")
+        )
+        power_spectrum = next(
+            artifact for name, artifact in artifact_by_name.items() if name.endswith("_power_spectrum.png")
+        )
         self.assertEqual(dm_curve["status"], "omitted")
         self.assertEqual(dm_curve["reason"], "dm_optimization_unavailable")
         self.assertEqual(dm_residuals["reason"], "dm_optimization_unavailable")
@@ -217,7 +225,9 @@ class ExportResultsTest(unittest.TestCase):
 
         preview = session_action(
             session_id,
-            ActionRequest(type="preview_export_results", payload={"include": ["json", "plots"], "plot_formats": ["png"]}),
+            ActionRequest(
+                type="preview_export_results", payload={"include": ["json", "plots"], "plot_formats": ["png"]}
+            ),
         )["export_preview"]
         manifest = session_action(
             session_id,
@@ -281,7 +291,9 @@ class ExportResultsTest(unittest.TestCase):
         self.assertTrue(any(name.endswith("_window_view.fil") for name in artifact_names))
 
         native_meta_name = next(name for name in artifact_names if name.endswith("_window_native.meta.json"))
-        native_meta = json.loads(session_export_artifact(session_id, manifest["export_id"], native_meta_name).body.decode("utf-8"))
+        native_meta = json.loads(
+            session_export_artifact(session_id, manifest["export_id"], native_meta_name).body.decode("utf-8")
+        )
         self.assertEqual(native_meta["window"]["time_bins"], [105, 140])
         self.assertEqual(native_meta["window"]["event_window_bins"], [7, 23])
         self.assertEqual(native_meta["window"]["spectral_extent_channels"], [4, 19])
@@ -474,8 +486,12 @@ class ExportResultsTest(unittest.TestCase):
 
         manifest = payload["export_manifest"]
         artifacts = {artifact["name"]: artifact for artifact in manifest["artifacts"]}
-        omitted_dm_curve = next(artifact for artifact in artifacts.values() if artifact["name"].endswith("_dm_curve.png"))
-        omitted_dm_residuals = next(artifact for artifact in artifacts.values() if artifact["name"].endswith("_dm_residuals.svg"))
+        omitted_dm_curve = next(
+            artifact for artifact in artifacts.values() if artifact["name"].endswith("_dm_curve.png")
+        )
+        omitted_dm_residuals = next(
+            artifact for artifact in artifacts.values() if artifact["name"].endswith("_dm_residuals.svg")
+        )
         self.assertEqual(omitted_dm_curve["status"], "omitted")
         self.assertEqual(omitted_dm_curve["reason"], "dm_optimization_unavailable")
         self.assertEqual(omitted_dm_residuals["status"], "omitted")
@@ -498,7 +514,9 @@ class ExportResultsTest(unittest.TestCase):
         SESSIONS[session_id] = session
 
         manifest = session_action(session_id, ActionRequest(type="export_results", payload={}))["export_manifest"]
-        json_name = next(artifact["name"] for artifact in manifest["artifacts"] if artifact["name"].endswith("_science.json"))
+        json_name = next(
+            artifact["name"] for artifact in manifest["artifacts"] if artifact["name"].endswith("_science.json")
+        )
         first_json = session_export_artifact(session_id, manifest["export_id"], json_name).body
 
         session.set_crop_ms(10.0, 180.0)

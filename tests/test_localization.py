@@ -25,7 +25,7 @@ def _add_burst(
     t = np.arange(ntime, dtype=float)
     pulse = np.exp(-0.5 * ((t - time_bin) / width_bins) ** 2)
     envelope = np.zeros(nchan, dtype=float)
-    envelope[chan_lo:chan_hi + 1] = 1.0
+    envelope[chan_lo : chan_hi + 1] = 1.0
     data += amplitude * envelope[:, None] * pulse[None, :]
 
 
@@ -120,6 +120,36 @@ class LocalizeBurstTest(unittest.TestCase):
         self.assertEqual(result.status, "no_detection")
         self.assertIn("unusable_data", result.warning_flags)
 
+    def test_search_window_ignores_stronger_event_elsewhere(self) -> None:
+        data = _noise(64, 4096, seed=55)
+        _add_burst(data, time_bin=1000, width_bins=12, chan_lo=0, chan_hi=63, amplitude=0.9)
+        _add_burst(data, time_bin=3000, width_bins=12, chan_lo=0, chan_hi=63, amplitude=3.0)
+
+        unconstrained = localize_burst(data)
+        constrained = localize_burst(data, search_window_bins=(800, 1200))
+
+        self.assertAlmostEqual(unconstrained.peak_bin, 3000, delta=15)
+        self.assertEqual(constrained.status, "ok")
+        self.assertAlmostEqual(constrained.peak_bin, 1000, delta=15)
+        self.assertEqual(constrained.search_window_bins, (800, 1200))
+        self.assertEqual(constrained.to_dict()["search_window_bins"], [800, 1200])
+
+    def test_search_window_does_not_clip_event_wings(self) -> None:
+        data = _noise(64, 2048, seed=56)
+        _add_burst(data, time_bin=1000, width_bins=30, chan_lo=0, chan_hi=63, amplitude=1.5)
+
+        result = localize_burst(data, search_window_bins=(990, 1010))
+
+        self.assertLess(result.event_start_bin, 990)
+        self.assertGreater(result.event_end_bin, 1010)
+
+    def test_search_window_is_validated(self) -> None:
+        data = _noise(16, 512, seed=57)
+
+        for invalid in ((-1, 20), (20, 20), (40, 20), (0, 513)):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                localize_burst(data, search_window_bins=invalid)
+
     def test_result_round_trips_to_dict(self) -> None:
         data = _noise(64, 2048, seed=3)
         _add_burst(data, time_bin=1000, width_bins=10, chan_lo=10, chan_hi=50, amplitude=1.5)
@@ -130,6 +160,7 @@ class LocalizeBurstTest(unittest.TestCase):
         self.assertEqual(payload["status"], result.status)
         self.assertEqual(payload["event_start_bin"], result.event_start_bin)
         self.assertEqual(payload["spec_hi"], result.spec_hi)
+        self.assertIsNone(payload["search_window_bins"])
         self.assertIsInstance(payload["offpulse_regions"], list)
 
 

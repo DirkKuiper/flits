@@ -1,0 +1,19 @@
+# Vulnerabilities accepted with justification. Each entry names where the
+# finding comes from, why it is not reachable from FLITS, and what would make it
+# actionable again. Review these whenever the base image or pip is bumped.
+
+# GHSA-6v7p-g79w-8964 - msgpack out-of-bounds read on Unpacker reuse.
+# CVE-2025-47273      - setuptools path traversal in PackageIndex.
+#
+# Both are reported against copies vendored inside pip itself
+# (site-packages/pip/_vendor/vendor.txt pins msgpack==1.1.2 and
+# setuptools==70.3.0). The installed top-level packages are current -- the
+# Dockerfile floors them and asserts the result -- but pip's private copies
+# cannot be upgraded independently of pip, and pip is already at the latest
+# release.
+#
+# Neither is reachable from FLITS: the vendored code runs only when pip itself
+# installs packages, which does not happen at runtime. Drop these entries once
+# a pip release ships updated vendored versions.
+GHSA-6v7p-g79w-8964
+CVE-2025-47273
