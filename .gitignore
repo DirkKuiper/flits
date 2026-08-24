@@ -4,6 +4,8 @@
 build/
 dist/
 site/
+paper/paper.pdf
+paper/jats/
 *.egg-info/
 __pycache__/
 *.pyc

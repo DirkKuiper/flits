@@ -1,10 +1,11 @@
 cff-version: 1.2.0
-title: FLITS
+title: "FLITS: an interactive, reproducible workbench for fast radio burst analysis"
 message: If you use FLITS, please cite this software.
 type: software
 authors:
   - family-names: Kuiper
     given-names: Dirk
+    orcid: https://orcid.org/0009-0003-5650-796X
 abstract: Browser-based scientific software for interactive FRB filterbank inspection, masking, and measurement.
 repository-code: https://github.com/DirkKuiper/flits
 url: https://github.com/DirkKuiper/flits

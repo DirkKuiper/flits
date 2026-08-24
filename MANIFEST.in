@@ -3,3 +3,4 @@ include README.md
 include requirements*.txt
 graft flits/web_static
 graft docs
+global-exclude .DS_Store
