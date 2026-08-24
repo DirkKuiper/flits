@@ -87,6 +87,80 @@ flits = [
   "web_static/vendor/*.js",
 ]
 
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [".vendor", ".venv", ".venv_test", "site", "dist", "examples"]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "F",    # pyflakes
+  "W",    # pycodestyle warnings
+  "I",    # import sorting
+  "UP",   # pyupgrade
+  "B",    # bugbear
+  "C4",   # comprehensions
+  "SIM",  # simplify
+  "RUF",  # ruff-specific
+]
+ignore = [
+  "B008",    # FastAPI dependency defaults are declared in the signature
+  "SIM108",  # ternaries are not always clearer than an if/else
+  "E501",    # line length is owned by `ruff format`; what is left is prose in
+             # docstrings and comments, where reflowing hurts readability
+  "RUF046",  # explicit int() around numpy integers is deliberate
+  "RUF001",  # scientific prose legitimately contains micro, minus and en-dash
+  "RUF002",
+  "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Package __init__ modules exist to re-export; unused and star imports are the point.
+"flits/**/__init__.py" = ["F401", "F403"]
+# Tests: importorskip runs before imports, and fixture tables are plain data.
+"tests/*" = ["E402", "RUF012", "SIM117"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["flits"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["flits"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = false
+
+# Type checking is enforced for the package as a whole. The modules listed below
+# carry pre-existing annotation debt -- mostly optional numpy arrays that are
+# narrowed by construction rather than by a check mypy can see -- and are
+# exempted until they are cleaned up one at a time. Do not add to this list:
+# every module not named here, including all new ones, must type check.
+[[tool.mypy.overrides]]
+module = [
+  "flits.models",
+  "flits.session",
+  "flits.exports",
+  "flits.measurements",
+  "flits.timing",
+  "flits.io.psrfits",
+  "flits.io.chime",
+  "flits.io.chime_hdf5_reader",
+  "flits.io.your_reader",
+  "flits.io.sigproc",
+  "flits.io.reader",
+  "flits.io.validation",
+  "flits.web.app",
+  "flits.analysis.temporal.core",
+  "flits.analysis.spectral.core",
+  "flits.analysis.polarization.rm_synthesis",
+  "flits.analysis.dm_optimization.core",
+  "flits.analysis.fitting.fitburst_adapter",
+]
+ignore_errors = true
+
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["tests"]
