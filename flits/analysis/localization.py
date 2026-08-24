@@ -10,6 +10,7 @@ full bandwidth.
 The result is expressed in bins/channels relative to the array that was
 passed in; callers map to absolute session coordinates.
 """
+
 from __future__ import annotations
 
 import warnings
@@ -93,7 +94,7 @@ def _normalize_channels(masked: np.ndarray, exclude: tuple[int, int] | None) -> 
     if exclude is not None:
         lo, hi = exclude
         keep = np.ones(masked.shape[1], dtype=bool)
-        keep[max(0, lo):max(0, hi)] = False
+        keep[max(0, lo) : max(0, hi)] = False
         if keep.sum() >= 16:
             reference = masked[:, keep]
     with np.errstate(invalid="ignore"), warnings.catch_warnings():
@@ -114,7 +115,7 @@ def _normalize_channels(masked: np.ndarray, exclude: tuple[int, int] | None) -> 
 
 def _band_profile_sn(z: np.ndarray, spec_lo: int, spec_hi: int, exclude: tuple[int, int] | None) -> np.ndarray:
     """S/N time profile of the selected band, robustly re-normalized off-event."""
-    band = z[spec_lo:spec_hi + 1, :]
+    band = z[spec_lo : spec_hi + 1, :]
     active = np.isfinite(band).any(axis=1)
     if not active.any():
         return np.zeros(z.shape[1], dtype=float)
@@ -126,7 +127,7 @@ def _band_profile_sn(z: np.ndarray, spec_lo: int, spec_hi: int, exclude: tuple[i
     if exclude is not None:
         lo, hi = exclude
         keep = np.ones(profile.size, dtype=bool)
-        keep[max(0, lo):max(0, hi)] = False
+        keep[max(0, lo) : max(0, hi)] = False
         if keep.sum() >= 16:
             reference = profile[keep]
     center, scale = _robust_stats(reference)
@@ -196,9 +197,7 @@ def _validate_search_window(
         raise ValueError("search_window_bins must contain exactly (start, end)")
     lo, hi = (int(search_window_bins[0]), int(search_window_bins[1]))
     if lo < 0 or hi > ntime or hi <= lo:
-        raise ValueError(
-            f"search_window_bins must be a non-empty half-open interval within [0, {ntime})"
-        )
+        raise ValueError(f"search_window_bins must be a non-empty half-open interval within [0, {ntime})")
     return lo, hi
 
 
@@ -236,9 +235,7 @@ def _event_extent(
     if main is None:
         main = (peak_bin, peak_bin + 1)
 
-    component_runs = [
-        run for run in runs if float(np.nanmax(smoothed[run[0]:run[1]])) >= component_sn
-    ]
+    component_runs = [run for run in runs if float(np.nanmax(smoothed[run[0] : run[1]])) >= component_sn]
     merge_gap = max(2, 2 * int(width))
     start, end = main
     changed = True
@@ -320,8 +317,8 @@ def _spectral_extent(
 
     peak_channel = int(np.nanargmax(np.where(np.isfinite(smoothed), smoothed, -np.inf)))
     above = np.isfinite(smoothed) & (smoothed >= float(exit_sn))
-    above[:usable[0]] = False
-    above[usable[-1] + 1:] = False
+    above[: usable[0]] = False
+    above[usable[-1] + 1 :] = False
     above[peak_channel] = True
     runs = _contiguous_runs(above)
 
@@ -330,7 +327,7 @@ def _spectral_extent(
         main = (peak_channel, peak_channel + 1)
 
     def run_max(run: tuple[int, int]) -> float:
-        section = smoothed[run[0]:run[1]]
+        section = smoothed[run[0] : run[1]]
         finite = section[np.isfinite(section)]
         return float(np.max(finite)) if finite.size else float("-inf")
 
@@ -354,7 +351,7 @@ def _spectral_extent(
     lo = max(int(usable[0]), lo - pad)
     hi = min(int(usable[-1]), hi + pad)
 
-    covered = np.flatnonzero(~dead[lo:hi + 1]).size
+    covered = np.flatnonzero(~dead[lo : hi + 1]).size
     band_limited = covered < full_band_fraction * usable.size
     if not band_limited:
         lo, hi = int(usable[0]), int(usable[-1])
@@ -392,7 +389,7 @@ def _offpulse_windows(
 
 def _integrated_snr(profile_sn: np.ndarray, event: tuple[int, int]) -> float:
     lo, hi = event
-    section = profile_sn[max(0, lo):max(0, hi)]
+    section = profile_sn[max(0, lo) : max(0, hi)]
     finite = section[np.isfinite(section)]
     if finite.size == 0:
         return 0.0
@@ -460,12 +457,8 @@ def localize_burst(
         iterations = iteration + 1
         z = _normalize_channels(masked, exclude=event)
         profile_sn = _band_profile_sn(z, spec_lo, spec_hi, exclude=event)
-        best_width, peak_bin, detection_snr = _matched_filter_peak(
-            profile_sn, widths, search_window
-        )
-        event = _event_extent(
-            profile_sn, peak_bin, best_width, extent_exit_sn, detection_snr_threshold
-        )
+        best_width, peak_bin, detection_snr = _matched_filter_peak(profile_sn, widths, search_window)
+        event = _event_extent(profile_sn, peak_bin, best_width, extent_exit_sn, detection_snr_threshold)
         spec_lo, spec_hi, band_limited = _spectral_extent(
             z,
             event,
@@ -473,7 +466,7 @@ def localize_burst(
             full_band_fraction,
         )
         state = (event[0], event[1], spec_lo, spec_hi)
-        if previous is not None and all(abs(a - b) <= 2 for a, b in zip(state, previous)):
+        if previous is not None and all(abs(a - b) <= 2 for a, b in zip(state, previous, strict=False)):
             break
         previous = state
 
@@ -481,13 +474,9 @@ def localize_burst(
     # Final profile on the converged band for peak/integrated S/N.
     z = _normalize_channels(masked, exclude=event)
     profile_sn = _band_profile_sn(z, spec_lo, spec_hi, exclude=event)
-    best_width, peak_bin, detection_snr = _matched_filter_peak(
-        profile_sn, widths, search_window
-    )
-    event = _event_extent(
-        profile_sn, peak_bin, best_width, extent_exit_sn, detection_snr_threshold
-    )
-    event_section = profile_sn[event[0]:event[1]]
+    best_width, peak_bin, detection_snr = _matched_filter_peak(profile_sn, widths, search_window)
+    event = _event_extent(profile_sn, peak_bin, best_width, extent_exit_sn, detection_snr_threshold)
+    event_section = profile_sn[event[0] : event[1]]
     if event_section.size and np.isfinite(event_section).any():
         peak_bin = int(event[0] + np.nanargmax(event_section))
     integrated_snr = _integrated_snr(profile_sn, event)

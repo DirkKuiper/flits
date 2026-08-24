@@ -65,10 +65,10 @@ class UnsupportedSchemaError(FlitsReaderError):
 
 
 __all__ = [
-    "FlitsReaderError",
-    "UnsupportedFormatError",
-    "FormatDetectionError",
     "CorruptedDataError",
+    "FlitsReaderError",
+    "FormatDetectionError",
     "MetadataMissingError",
+    "UnsupportedFormatError",
     "UnsupportedSchemaError",
 ]

@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 APP_JS = (ROOT / "flits" / "web_static" / "app.js").read_text(encoding="utf-8")
 INDEX_HTML = (ROOT / "flits" / "web_static" / "index.html").read_text(encoding="utf-8")
@@ -83,7 +82,7 @@ def test_tabs_and_modes_expose_accessible_selected_state() -> None:
     assert 'aria-labelledby="analysisPrepareTab"' in INDEX_HTML
     assert 'button.setAttribute("aria-pressed", String(isActive))' in APP_JS
     assert 'button.addEventListener("keydown"' in APP_JS
-    assert 'button.tabIndex = isActive ? 0 : -1' in APP_JS
+    assert "button.tabIndex = isActive ? 0 : -1" in APP_JS
 
 
 def test_desktop_inspector_remains_persistent_at_laptop_widths() -> None:

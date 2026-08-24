@@ -178,7 +178,9 @@ class WidthAnalysisTest(unittest.TestCase):
             kwargs = mock_compute_width_analysis.call_args.kwargs
             self.assertEqual(len(kwargs["selected_profile"]), (session.crop_end - session.crop_start) // 4)
             self.assertEqual(kwargs["tsamp_ms"], session.tsamp_ms * 4)
-            self.assertTrue(np.isfinite([result.value for result in width_analysis.results if result.value is not None]).any())
+            self.assertTrue(
+                np.isfinite([result.value for result in width_analysis.results if result.value is not None]).any()
+            )
 
 
 if __name__ == "__main__":

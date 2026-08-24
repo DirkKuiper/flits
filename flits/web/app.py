@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-from collections import OrderedDict
-from datetime import datetime, timezone
 import hashlib
 import json
 import logging
 import os
 import sys
+from collections import OrderedDict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import numpy as np
-import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
@@ -23,7 +22,6 @@ from flits.analysis.polarization import run_rm_synthesis
 from flits.io import inspect_filterbank, list_readers
 from flits.session import BurstSession
 from flits.settings import available_auto_mask_profiles, available_presets, get_preset
-
 
 logger = logging.getLogger("flits.web")
 
@@ -62,9 +60,8 @@ def register_session(session_id: str, session: BurstSession) -> None:
         SESSION_SNAPSHOT_PATHS.pop(evicted_id, None)
         logger.info("Evicted least recently used session %s", evicted_id)
 
-_SKIP_DIRS: frozenset[str] = frozenset(
-    {"site-packages", "node_modules", "__pycache__", "dist", "build"}
-)
+
+_SKIP_DIRS: frozenset[str] = frozenset({"site-packages", "node_modules", "__pycache__", "dist", "build"})
 _SESSION_SNAPSHOT_SUFFIX = "_flits_session.json"
 _SESSION_SNAPSHOT_INDEX_VERSION = 1
 _SESSION_SNAPSHOT_INDEX_PATH = Path(".flits") / "session_snapshot_index.json"
@@ -217,10 +214,7 @@ def get_session(session_id: str) -> BurstSession:
     if session is None:
         raise HTTPException(
             status_code=404,
-            detail=(
-                "Unknown session id. It may have been evicted to free memory; "
-                "reopen it from its saved snapshot."
-            ),
+            detail=("Unknown session id. It may have been evicted to free memory; reopen it from its saved snapshot."),
         )
     SESSIONS.move_to_end(session_id)
     return session
@@ -250,10 +244,7 @@ def _inspection_dm_guidance(inspection: object) -> str | None:
     if schema_version == "chime_frb_catalog_v1":
         return "already dedispersed; use DM 0"
     if schema_version == "chime_bbdata_beamformed_v1" and coherent_dm is not None:
-        return (
-            f"coherently dedispersed at {float(coherent_dm):.6f}; "
-            "FLITS applies residual DM relative to that value"
-        )
+        return f"coherently dedispersed at {float(coherent_dm):.6f}; FLITS applies residual DM relative to that value"
     return None
 
 
@@ -343,7 +334,7 @@ def _snapshot_id(path: Path) -> str:
 
 
 def _utc_mtime_iso(mtime_unix: float) -> str:
-    return datetime.fromtimestamp(float(mtime_unix), tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.fromtimestamp(float(mtime_unix), tz=UTC).isoformat().replace("+00:00", "Z")
 
 
 def _compact_excerpt(value: object, *, limit: int = 160) -> str | None:
@@ -399,7 +390,7 @@ def _timestamped_snapshot_path(default_path: Path) -> Path:
         source_stem = default_name[: -len(_SESSION_SNAPSHOT_SUFFIX)]
     else:
         source_stem = default_path.stem
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     candidate = default_path.with_name(f"{source_stem}_{stamp}{_SESSION_SNAPSHOT_SUFFIX}")
     counter = 2
     while candidate.exists():

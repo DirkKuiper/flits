@@ -32,9 +32,7 @@ def normalize(ds: np.ndarray, offpulse: np.ndarray) -> np.ndarray:
 DM_CONSTANT_S_MHZ2 = 1.0 / (2.41 * 10**-4)
 
 
-def dedispersion_shift_bins(
-    dm: float, freqs_mhz: np.ndarray, tsamp_sec: float
-) -> np.ndarray:
+def dedispersion_shift_bins(dm: float, freqs_mhz: np.ndarray, tsamp_sec: float) -> np.ndarray:
     """Return the per-channel sample shift that dedisperses to the top of band.
 
     Shifts are rounded to whole samples, so the achievable DM resolution is
@@ -150,9 +148,7 @@ def shift_channels(
     return shifted
 
 
-def dedispersion_edge_bins(
-    dm: float, freqs_mhz: np.ndarray, tsamp_sec: float
-) -> tuple[int, int]:
+def dedispersion_edge_bins(dm: float, freqs_mhz: np.ndarray, tsamp_sec: float) -> tuple[int, int]:
     """Return how many samples at each end are affected by the dedispersion shift.
 
     These are the samples whose content came from outside the read window. They
@@ -203,4 +199,4 @@ def acf_1d(array: np.ndarray) -> np.ndarray:
 
 
 def gaussian_1d(x: np.ndarray, amp: float, mu: float, sigma: float, offset: float) -> np.ndarray:
-    return amp * np.exp(-((x - mu) ** 2) / (2 * sigma ** 2)) + offset
+    return amp * np.exp(-((x - mu) ** 2) / (2 * sigma**2)) + offset

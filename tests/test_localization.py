@@ -25,7 +25,7 @@ def _add_burst(
     t = np.arange(ntime, dtype=float)
     pulse = np.exp(-0.5 * ((t - time_bin) / width_bins) ** 2)
     envelope = np.zeros(nchan, dtype=float)
-    envelope[chan_lo:chan_hi + 1] = 1.0
+    envelope[chan_lo : chan_hi + 1] = 1.0
     data += amplitude * envelope[:, None] * pulse[None, :]
 
 
@@ -147,9 +147,8 @@ class LocalizeBurstTest(unittest.TestCase):
         data = _noise(16, 512, seed=57)
 
         for invalid in ((-1, 20), (20, 20), (40, 20), (0, 513)):
-            with self.subTest(invalid=invalid):
-                with self.assertRaises(ValueError):
-                    localize_burst(data, search_window_bins=invalid)
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                localize_burst(data, search_window_bins=invalid)
 
     def test_result_round_trips_to_dict(self) -> None:
         data = _noise(64, 2048, seed=3)

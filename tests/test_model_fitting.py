@@ -2,17 +2,15 @@ from __future__ import annotations
 
 import json
 import sys
-from types import SimpleNamespace
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
 
 from flits.analysis.fitting import fitburst_adapter
-from flits.analysis.fitting.fitburst_adapter import SpectrumModeler
-from flits.analysis.fitting.fitburst_adapter import ModelFitRequestConfig
-from flits.analysis.fitting.fitburst_adapter import ModelFitResult
+from flits.analysis.fitting.fitburst_adapter import ModelFitRequestConfig, ModelFitResult, SpectrumModeler
 from flits.models import FilterbankMetadata, ModelFitDiagnostics
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
@@ -124,7 +122,7 @@ def _synthetic_scattering_dispatch_session() -> BurstSession:
 
 
 class _FakeSpectrumModeler:
-    instances: list["_FakeSpectrumModeler"] = []
+    instances: list[_FakeSpectrumModeler] = []
 
     def __init__(
         self,
@@ -163,7 +161,7 @@ class _FakeSpectrumModeler:
 
 
 class _FakeLSFitter:
-    instances: list["_FakeLSFitter"] = []
+    instances: list[_FakeLSFitter] = []
     fit_calls = 0
     fail_on_call: int | None = None
 
@@ -182,8 +180,7 @@ class _FakeLSFitter:
         self.weighted_fit = bool(weighted_fit)
         self.weight_range = weight_range
         self.model_parameters_at_init = {
-            key: None if values is None else list(values)
-            for key, values in model.parameters.items()
+            key: None if values is None else list(values) for key, values in model.parameters.items()
         }
         self.fit_parameters: list[str] = []
         self.fit_statistics: dict[str, object] = {}
@@ -192,18 +189,15 @@ class _FakeLSFitter:
 
     def fix_parameter(self, fixed_parameters: list[str]) -> None:
         fit_parameters = [
-            parameter
-            for parameter in (
-                "amplitude",
-                "arrival_time",
-                "burst_width",
-                "scattering_timescale",
-                "dm",
-                "dm_index",
-                "scattering_index",
-                "spectral_index",
-                "spectral_running",
-            )
+            "amplitude",
+            "arrival_time",
+            "burst_width",
+            "scattering_timescale",
+            "dm",
+            "dm_index",
+            "scattering_index",
+            "spectral_index",
+            "spectral_running",
         ]
         if self.model.scintillation:
             fit_parameters = [
@@ -313,7 +307,9 @@ class ModelFitIntegrationTest(unittest.TestCase):
         self.assertIsNotNone(results.uncertainties.tau_sc_ms)
         self.assertEqual(results.uncertainty_details["width_ms_model"].classification, "model_hessian")
         self.assertEqual(results.uncertainty_details["tau_sc_ms"].classification, "model_hessian")
-        self.assertEqual(results.diagnostics.model_fit.uncertainty_details["width_ms_model"].classification, "model_hessian")
+        self.assertEqual(
+            results.diagnostics.model_fit.uncertainty_details["width_ms_model"].classification, "model_hessian"
+        )
         self.assertEqual(results.diagnostics.model_fit.fitter, "fitburst")
         self.assertGreater(len(results.diagnostics.model_fit.time_axis_ms), 0)
         self.assertGreater(len(results.diagnostics.model_fit.freq_axis_mhz), 0)
@@ -437,7 +433,9 @@ class ModelFitRequestConfigTest(unittest.TestCase):
         config = ModelFitRequestConfig.from_dict({})
 
         self.assertEqual(config.free_parameters, ["amplitude", "arrival_time", "burst_width", "scattering_timescale"])
-        self.assertEqual(config.fixed_parameters, ["dm", "dm_index", "scattering_index", "spectral_index", "spectral_running"])
+        self.assertEqual(
+            config.fixed_parameters, ["dm", "dm_index", "scattering_index", "spectral_index", "spectral_running"]
+        )
         self.assertEqual(config.weighting_mode, "none")
         self.assertEqual(config.initial_parameter_source, "current_selection")
         self.assertIsNone(config.max_function_evaluations)
@@ -458,7 +456,9 @@ class ModelFitRequestConfigTest(unittest.TestCase):
 
         self.assertTrue(config.scintillation)
         self.assertEqual(config.free_parameters, ["dm", "arrival_time"])
-        self.assertEqual(config.fixed_parameters, ["burst_width", "scattering_timescale", "dm_index", "scattering_index"])
+        self.assertEqual(
+            config.fixed_parameters, ["burst_width", "scattering_timescale", "dm_index", "scattering_index"]
+        )
         self.assertTrue(config.to_dict()["scintillation"])
         self.assertNotIn("amplitude", config.to_dict()["free_parameters"])
 
@@ -493,8 +493,12 @@ class ModelFitRequestConfigTest(unittest.TestCase):
         self.assertEqual(config.max_function_evaluations, fitburst_adapter.MAX_MODEL_FIT_FUNCTION_EVALUATIONS)
 
     def test_non_positive_max_function_evaluations_uses_auto_default(self) -> None:
-        self.assertIsNone(ModelFitRequestConfig.from_dict({"solver": {"max_function_evaluations": 0}}).max_function_evaluations)
-        self.assertIsNone(ModelFitRequestConfig.from_dict({"solver": {"max_function_evaluations": -4}}).max_function_evaluations)
+        self.assertIsNone(
+            ModelFitRequestConfig.from_dict({"solver": {"max_function_evaluations": 0}}).max_function_evaluations
+        )
+        self.assertIsNone(
+            ModelFitRequestConfig.from_dict({"solver": {"max_function_evaluations": -4}}).max_function_evaluations
+        )
 
     def test_legacy_bounds_payload_is_ignored_and_not_serialized(self) -> None:
         config = ModelFitRequestConfig.from_dict(
@@ -808,6 +812,7 @@ class ModelFitIterationAdapterTest(unittest.TestCase):
         self.assertLessEqual(len(result.diagnostics.failure_exception or ""), fitburst_adapter.MAX_FITBURST_LOG_CHARS)
         self.assertNotIn("\x00", result.diagnostics.failure_stderr or "")
         json.dumps(result.diagnostics.to_dict())
+
 
 class ModelFitDispatchTest(unittest.TestCase):
     def test_model_fit_guess_uses_component_regions(self) -> None:

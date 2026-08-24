@@ -1,4 +1,5 @@
 """Verify the reader-plugin registry discovers third-party readers."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,7 +12,6 @@ from flits.io import detect_reader, register_reader, unregister_reader
 from flits.io.reader import FilterbankInspection, list_readers, reader_diagnostics
 from flits.models import FilterbankMetadata
 from flits.settings import ObservationConfig
-
 
 _FAKE_MAGIC = b"FLITS_FAKE_FMT\n"
 

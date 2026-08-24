@@ -110,7 +110,7 @@ class SpectralAnalysisTest(unittest.TestCase):
         session = _synthetic_spectral_session(modulation_hz=62.5)
         _, context = session._build_measurement_context_for_data()
         event_series = np.asarray(
-            context.selected_profile_baselined[context.event_rel_start:context.event_rel_end],
+            context.selected_profile_baselined[context.event_rel_start : context.event_rel_end],
             dtype=float,
         )
 
@@ -240,8 +240,12 @@ class SpectralAnalysisTest(unittest.TestCase):
         self.assertEqual(fit["fit_status"], "ok")
         self.assertEqual(crossover["crossover_frequency_status"], "ok")
         self.assertAlmostEqual(crossover["crossover_frequency_hz"] or 0.0, 10_000.0, delta=150.0)
-        self.assertLess(crossover["crossover_frequency_hz_3sigma_low"] or 0.0, crossover["crossover_frequency_hz"] or 0.0)
-        self.assertGreater(crossover["crossover_frequency_hz_3sigma_high"] or 0.0, crossover["crossover_frequency_hz"] or 0.0)
+        self.assertLess(
+            crossover["crossover_frequency_hz_3sigma_low"] or 0.0, crossover["crossover_frequency_hz"] or 0.0
+        )
+        self.assertGreater(
+            crossover["crossover_frequency_hz_3sigma_high"] or 0.0, crossover["crossover_frequency_hz"] or 0.0
+        )
 
         above_band = _fit_crossover_frequency(fit, np.geomspace(20.0, 2_000.0, 40))
         self.assertEqual(above_band["crossover_frequency_status"], "above_band")
@@ -315,7 +319,9 @@ class SpectralAnalysisTest(unittest.TestCase):
     def test_run_temporal_structure_analysis_avoids_false_low_sn_minimum_scale(self) -> None:
         rng = np.random.default_rng(101)
         time_bins = np.arange(128, dtype=float)
-        event_series = 0.08 * np.exp(-0.5 * ((time_bins - 64.0) / 10.0) ** 2) + rng.normal(0.0, 0.05, size=time_bins.size)
+        event_series = 0.08 * np.exp(-0.5 * ((time_bins - 64.0) / 10.0) ** 2) + rng.normal(
+            0.0, 0.05, size=time_bins.size
+        )
 
         result = run_temporal_structure_analysis(
             event_series=event_series,
@@ -328,9 +334,7 @@ class SpectralAnalysisTest(unittest.TestCase):
         )
 
         self.assertEqual(result.status, "ok")
-        self.assertTrue(
-            result.min_structure_ms_primary is None or result.min_structure_ms_primary >= 8.0
-        )
+        self.assertTrue(result.min_structure_ms_primary is None or result.min_structure_ms_primary >= 8.0)
         self.assertIsNone(result.min_structure_ms_wavelet)
 
     @patch("flits.session.run_temporal_structure_analysis")
@@ -340,7 +344,7 @@ class SpectralAnalysisTest(unittest.TestCase):
         session.set_freq_factor(2)
         grid, context = session._build_measurement_context_for_data()
         expected_series = np.asarray(
-            context.selected_profile_baselined[context.event_rel_start:context.event_rel_end],
+            context.selected_profile_baselined[context.event_rel_start : context.event_rel_end],
             dtype=float,
         )
         mock_run.return_value = TemporalStructureResult(

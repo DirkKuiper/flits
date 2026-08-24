@@ -1,23 +1,24 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
 import hashlib
+import itertools
 import os
+import warnings
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable
-import warnings
+from typing import Any
 
 import numpy as np
 
 from flits.analysis.dm_optimization import DMMetricInput, available_dm_metrics, optimize_dm_trials
+from flits.analysis.fitting import fit_model_selected_band
+from flits.analysis.fitting.fitburst_adapter import ModelFitRequestConfig
 from flits.analysis.localization import BurstLocalization, localize_burst
-from flits.analysis.spectral.core import run_averaged_spectral_analysis
 from flits.analysis.morphology import compute_width_analysis
 from flits.analysis.temporal.core import run_temporal_structure_analysis, temporal_to_spectral_result
 from flits.exports import MAX_EXPORT_SNAPSHOTS, StoredExportSnapshot, create_export_snapshot, preview_export
-from flits.analysis.fitting import fit_model_selected_band
-from flits.analysis.fitting.fitburst_adapter import ModelFitRequestConfig
 from flits.measurements import (
     MeasurementContext,
     _offpulse_windows_ms,
@@ -31,8 +32,8 @@ from flits.models import (
     AcceptedWidthSelection,
     AnalysisSessionSnapshot,
     AutoMaskRunSummary,
-    BurstRegion,
     BurstMeasurements,
+    BurstRegion,
     DmComponentOptimizationResult,
     DmOptimizationProvenance,
     DmOptimizationResult,
@@ -52,8 +53,6 @@ from flits.models import (
 from flits.settings import ObservationConfig, get_auto_mask_profile, get_preset
 from flits.signal import (
     block_reduce_mean,
-    dedisperse,
-    dedispersion_edge_bins,
     dedispersion_shift_bins,
     shift_channels,
 )
@@ -81,10 +80,7 @@ def _jsonable_array(values: np.ndarray, digits: int = 4) -> list[Any]:
     rounded = np.round(values, digits)
     if rounded.ndim == 1:
         return [float(value) if np.isfinite(value) else None for value in rounded]
-    return [
-        [float(value) if np.isfinite(value) else None for value in row]
-        for row in rounded
-    ]
+    return [[float(value) if np.isfinite(value) else None for value in row] for row in rounded]
 
 
 def _power_of_two_ceiling(value: float) -> int:
@@ -196,10 +192,7 @@ def _format_candidate_paths(candidates: list[Path], *, limit: int = 12) -> str:
 
 
 def _data_dir_hint() -> str:
-    return (
-        "Start FLITS with --data-dir or FLITS_DATA_DIR pointing at a directory "
-        "that contains the source data."
-    )
+    return "Start FLITS with --data-dir or FLITS_DATA_DIR pointing at a directory that contains the source data."
 
 
 def _snapshot_source_candidates(source: SessionSourceRef) -> list[Path]:
@@ -361,7 +354,7 @@ class BurstSession:
         observatory_longitude_deg: float | None = None,
         observatory_latitude_deg: float | None = None,
         observatory_height_m: float | None = None,
-    ) -> "BurstSession":
+    ) -> BurstSession:
         from flits.io import inspect_filterbank, load_filterbank_data
 
         inspection = inspect_filterbank(bfile)
@@ -407,8 +400,8 @@ class BurstSession:
         cls,
         snapshot: AnalysisSessionSnapshot | dict[str, Any],
         *,
-        loader: Callable[..., "BurstSession"] | None = None,
-    ) -> "BurstSession":
+        loader: Callable[..., BurstSession] | None = None,
+    ) -> BurstSession:
         snapshot = _coerce_snapshot(snapshot)
         session_loader = cls.from_file if loader is None else loader
         source_path = _resolve_snapshot_source_path(snapshot.source)
@@ -687,9 +680,7 @@ class BurstSession:
 
     def _offpulse_regions_ms(self) -> list[list[float]]:
         return [
-            [self.bin_to_ms(start), self.bin_to_ms(end)]
-            for start, end in self.offpulse_regions
-            if end - start >= 2
+            [self.bin_to_ms(start), self.bin_to_ms(end)] for start, end in self.offpulse_regions if end - start >= 2
         ]
 
     def _reduce_interval(
@@ -763,7 +754,9 @@ class BurstSession:
         freqs_mhz = self._reduced_frequency_axis(reduced_freq_bins)
 
         event_start_abs, event_end_abs = (
-            (self.event_start, self.event_end) if event_bounds_abs is None else sorted((int(event_bounds_abs[0]), int(event_bounds_abs[1])))
+            (self.event_start, self.event_end)
+            if event_bounds_abs is None
+            else sorted((int(event_bounds_abs[0]), int(event_bounds_abs[1])))
         )
         event_bounds = self._reduce_interval(
             event_start_abs,
@@ -819,12 +812,14 @@ class BurstSession:
                     reduced_peak
                     for peak in self.peak_positions
                     if self.crop_start <= int(peak) < self.crop_end
-                    for reduced_peak in [self._reduce_peak_bin(
-                        int(peak),
-                        base=self.crop_start,
-                        factor=self.time_factor,
-                        max_bins=reduced_time_bins,
-                    )]
+                    for reduced_peak in [
+                        self._reduce_peak_bin(
+                            int(peak),
+                            base=self.crop_start,
+                            factor=self.time_factor,
+                            max_bins=reduced_time_bins,
+                        )
+                    ]
                     if reduced_peak is not None
                 }
             )
@@ -856,7 +851,7 @@ class BurstSession:
 
     def get_masked_crop(self, data: np.ndarray | None = None) -> np.ndarray:
         source = self.data if data is None else data
-        arr = np.array(source[:, self.crop_start:self.crop_end], copy=True)
+        arr = np.array(source[:, self.crop_start : self.crop_end], copy=True)
         if not np.issubdtype(arr.dtype, np.floating):
             arr = arr.astype(np.float32, copy=False)
         if self.channel_mask is not None and self.channel_mask.any():
@@ -1002,11 +997,7 @@ class BurstSession:
         time_axis_ms = np.asarray(context.time_axis_ms, dtype=float)
         selected_freqs = np.asarray(grid.freqs_mhz[context.spec_lo : context.spec_hi + 1], dtype=float)
         selected_band = np.asarray(grid.masked[context.spec_lo : context.spec_hi + 1, :], dtype=float)
-        if (
-            time_axis_ms.size == 0
-            or selected_freqs.size == 0
-            or context.event_rel_end <= context.event_rel_start
-        ):
+        if time_axis_ms.size == 0 or selected_freqs.size == 0 or context.event_rel_end <= context.event_rel_start:
             return {
                 "status": "unavailable",
                 "message": "No selected event data are available for model initial guesses.",
@@ -1050,9 +1041,11 @@ class BurstSession:
             profile = np.asarray(context.selected_profile_sn, dtype=float)
             return max(
                 candidates,
-                key=lambda peak: float(profile[peak])
-                if 0 <= int(peak) < profile.size and np.isfinite(profile[peak])
-                else float("-inf"),
+                key=lambda peak: (
+                    float(profile[peak])
+                    if 0 <= int(peak) < profile.size and np.isfinite(profile[peak])
+                    else float("-inf")
+                ),
             )
 
         def component_guess(
@@ -1116,14 +1109,10 @@ class BurstSession:
         if guesses:
             source = "component_regions"
         elif self.manual_peaks and grid.peak_bins:
-            peaks = sorted(
-                int(peak)
-                for peak in grid.peak_bins
-                if event_rel_start <= int(peak) < event_rel_end
-            )
+            peaks = sorted(int(peak) for peak in grid.peak_bins if event_rel_start <= int(peak) < event_rel_end)
             if peaks:
                 boundaries = [event_rel_start]
-                boundaries.extend(int(round((left + right) / 2.0)) for left, right in zip(peaks[:-1], peaks[1:]))
+                boundaries.extend(int(round((left + right) / 2.0)) for left, right in itertools.pairwise(peaks))
                 boundaries.append(event_rel_end)
                 for index, peak in enumerate(peaks, start=1):
                     guess = component_guess(
@@ -1215,7 +1204,9 @@ class BurstSession:
 
         if not np.isfinite(peak_value):
             profile_window = np.asarray(fallback_profile[start_bin:end_bin], dtype=float)
-            peak_value = float(np.nanmax(profile_window)) if profile_window.size and np.isfinite(profile_window).any() else 1.0
+            peak_value = (
+                float(np.nanmax(profile_window)) if profile_window.size and np.isfinite(profile_window).any() else 1.0
+            )
         return float(np.log10(max(peak_value, 1e-2)))
 
     def _model_fit_initial_parameters_from_component_guesses(
@@ -1353,9 +1344,7 @@ class BurstSession:
             if key in {"burst_width", "scattering_timescale"}:
                 values = [
                     value
-                    if np.isfinite(value)
-                    and value > 0.0
-                    and (event_duration_sec <= 0.0 or value <= event_duration_sec)
+                    if np.isfinite(value) and value > 0.0 and (event_duration_sec <= 0.0 or value <= event_duration_sec)
                     else fallback[index]
                     for index, value in enumerate(values)
                 ]
@@ -1439,14 +1428,12 @@ class BurstSession:
             return components
 
         if self.manual_peaks and len(self.peak_positions) >= 2:
-            peaks = sorted(
-                peak for peak in self.peak_positions if self.crop_start <= int(peak) < self.crop_end
-            )
+            peaks = sorted(peak for peak in self.peak_positions if self.crop_start <= int(peak) < self.crop_end)
             if len(peaks) < 2:
                 return []
 
             boundaries = [self.event_start]
-            boundaries.extend(int(round((left + right) / 2.0)) for left, right in zip(peaks[:-1], peaks[1:]))
+            boundaries.extend(int(round((left + right) / 2.0)) for left, right in itertools.pairwise(peaks))
             boundaries.append(self.event_end)
             for index, peak in enumerate(peaks, start=1):
                 start = max(self.crop_start, boundaries[index - 1])
@@ -1462,15 +1449,13 @@ class BurstSession:
         spec_lo_mhz, spec_hi_mhz = self._selected_frequency_bounds_mhz()
         time_profile = np.nansum(grid.display, axis=0) if grid.display.size else np.array([], dtype=float)
         event_display = (
-            grid.display[:, grid.event_rel_start:grid.event_rel_end]
+            grid.display[:, grid.event_rel_start : grid.event_rel_end]
             if grid.display.size
             else np.empty((0, 0), dtype=float)
         )
         spectrum = np.nansum(event_display, axis=1) if event_display.size else np.array([], dtype=float)
         peak_positions_ms = [
-            float(grid.time_axis_ms[peak])
-            for peak in grid.peak_bins
-            if 0 <= int(peak) < grid.time_axis_ms.size
+            float(grid.time_axis_ms[peak]) for peak in grid.peak_bins if 0 <= int(peak) < grid.time_axis_ms.size
         ]
         zmin, zmax = robust_color_limits(grid.display)
         source_ra_deg, source_dec_deg, source_position_basis = self._source_position()
@@ -1527,9 +1512,7 @@ class BurstSession:
                 "freq_factor": self.freq_factor,
                 "crop_ms": [self.bin_to_ms(self.crop_start), self.bin_to_ms(self.crop_end)],
                 "event_ms": [self.bin_to_ms(self.event_start), self.bin_to_ms(self.event_end)],
-                "burst_regions_ms": [
-                    [self.bin_to_ms(start), self.bin_to_ms(end)] for start, end in self.burst_regions
-                ],
+                "burst_regions_ms": [[self.bin_to_ms(start), self.bin_to_ms(end)] for start, end in self.burst_regions],
                 "offpulse_ms": self._offpulse_regions_ms(),
                 "peak_ms": peak_positions_ms,
                 "manual_peaks": self.manual_peaks,
@@ -1559,12 +1542,8 @@ class BurstSession:
             "results": self.results.to_dict() if self.results is not None else None,
             "width_analysis": self.width_analysis.to_dict() if self.width_analysis is not None else None,
             "dm_optimization": self.dm_optimization.to_dict() if self.dm_optimization is not None else None,
-            "spectral_analysis": (
-                None if self.spectral_analysis is None else self.spectral_analysis.to_dict()
-            ),
-            "temporal_structure": (
-                None if self.temporal_structure is None else self.temporal_structure.to_dict()
-            ),
+            "spectral_analysis": (None if self.spectral_analysis is None else self.spectral_analysis.to_dict()),
+            "temporal_structure": (None if self.temporal_structure is None else self.temporal_structure.to_dict()),
         }
 
     def _sync_selections_to_crop(self) -> None:
@@ -1591,9 +1570,7 @@ class BurstSession:
 
         self.burst_regions = _clip_regions(self.burst_regions)
         self.offpulse_regions = _clip_regions(self.offpulse_regions)
-        self.peak_positions = [
-            peak for peak in self.peak_positions if self.crop_start <= int(peak) < self.crop_end
-        ]
+        self.peak_positions = [peak for peak in self.peak_positions if self.crop_start <= int(peak) < self.crop_end]
         self.manual_peaks = bool(self.peak_positions) if self.manual_peaks else self.manual_peaks
 
     def reset_view(self) -> None:
@@ -1682,7 +1659,7 @@ class BurstSession:
 
     def _mask_batch(self, channels: list[int]) -> None:
         added: list[int] = []
-        for chan in sorted(set(self.clamp_channel(chan) for chan in channels)):
+        for chan in sorted({self.clamp_channel(chan) for chan in channels}):
             if not self.channel_mask[chan]:
                 self.channel_mask[chan] = True
                 added.append(chan)
@@ -1734,12 +1711,8 @@ class BurstSession:
             source_ra_deg=None if source_ra_deg is None else float(source_ra_deg),
             source_dec_deg=None if source_dec_deg is None else float(source_dec_deg),
             time_scale=None if time_scale is None else str(time_scale).lower(),
-            observatory_longitude_deg=(
-                None if observatory_longitude_deg is None else float(observatory_longitude_deg)
-            ),
-            observatory_latitude_deg=(
-                None if observatory_latitude_deg is None else float(observatory_latitude_deg)
-            ),
+            observatory_longitude_deg=(None if observatory_longitude_deg is None else float(observatory_longitude_deg)),
+            observatory_latitude_deg=(None if observatory_latitude_deg is None else float(observatory_latitude_deg)),
             observatory_height_m=None if observatory_height_m is None else float(observatory_height_m),
         )
         self.invalidate_results()
@@ -1786,13 +1759,9 @@ class BurstSession:
             self.event_end = min(self.crop_end, base + int(result.event_end_bin))
             if self.event_end <= self.event_start:
                 self.event_end = min(self.crop_end, self.event_start + 2)
-            self.spec_ex_lo, self.spec_ex_hi = self._ordered_channel_bounds(
-                int(result.spec_lo), int(result.spec_hi)
-            )
+            self.spec_ex_lo, self.spec_ex_hi = self._ordered_channel_bounds(int(result.spec_lo), int(result.spec_hi))
             self.offpulse_regions = [
-                (base + int(lo), base + int(hi))
-                for lo, hi in result.offpulse_regions
-                if int(hi) - int(lo) >= 2
+                (base + int(lo), base + int(hi)) for lo, hi in result.offpulse_regions if int(hi) - int(lo) >= 2
             ]
             self.peak_positions = []
             self.manual_peaks = False
@@ -1803,7 +1772,9 @@ class BurstSession:
         if jess.channel_masks.channel_masker is None:
             if _jess_import_error is not None:
                 message = f"{type(_jess_import_error).__name__}: {_jess_import_error}"
-                raise RuntimeError(f"Jess is not available in the active environment: {message}") from _jess_import_error
+                raise RuntimeError(
+                    f"Jess is not available in the active environment: {message}"
+                ) from _jess_import_error
             raise RuntimeError("Jess is not installed in the active environment.")
 
         mask_profile = get_auto_mask_profile(self.config.auto_mask_profile if profile is None else profile)
@@ -1900,16 +1871,12 @@ class BurstSession:
                     break
 
         previous_mask = (
-            self.channel_mask.copy()
-            if self.channel_mask is not None
-            else np.zeros(self.total_channels, dtype=bool)
+            self.channel_mask.copy() if self.channel_mask is not None else np.zeros(self.total_channels, dtype=bool)
         )
         channels = sorted(set(detected_channels))
         self._mask_batch(channels)
         added_channel_count = (
-            int(np.count_nonzero(self.channel_mask & ~previous_mask))
-            if self.channel_mask is not None
-            else 0
+            int(np.count_nonzero(self.channel_mask & ~previous_mask)) if self.channel_mask is not None else 0
         )
         self.last_auto_mask = AutoMaskRunSummary(
             profile=mask_profile.key,
@@ -1940,9 +1907,7 @@ class BurstSession:
         if self._load_dm is None or self._applied_shift_bins is None:
             self._load_dm = float(self.dm)
             self._applied_shift_bins = np.zeros(self.freqs.size, dtype=np.int64)
-        target_shift = dedispersion_shift_bins(
-            new_dm - self._load_dm, self.freqs, self.tsamp
-        )
+        target_shift = dedispersion_shift_bins(new_dm - self._load_dm, self.freqs, self.tsamp)
         delta_shift = target_shift - self._applied_shift_bins
         if np.any(delta_shift):
             self.data = shift_channels(self.data, delta_shift)
@@ -2075,7 +2040,11 @@ class BurstSession:
             half_range=float(half_range),
             step=float(step),
             metric_input_builder=(
-                (lambda data: self._dm_metric_input_for_reduced_grid(data, context=context, tsamp_sec=reduced_metric_tsamp_sec))
+                (
+                    lambda data: self._dm_metric_input_for_reduced_grid(
+                        data, context=context, tsamp_sec=reduced_metric_tsamp_sec
+                    )
+                )
                 if metric == "dm_phase"
                 else (lambda data: self._dm_metric_input_for_data(data))
             ),
@@ -2110,10 +2079,12 @@ class BurstSession:
                 step=float(step),
                 metric_input_builder=(
                     (
-                        lambda data, ctx=component_context, ts=component_reduced_metric_tsamp_sec: self._dm_metric_input_for_reduced_grid(
-                            data,
-                            context=ctx,
-                            tsamp_sec=ts,
+                        lambda data, ctx=component_context, ts=component_reduced_metric_tsamp_sec: (
+                            self._dm_metric_input_for_reduced_grid(
+                                data,
+                                context=ctx,
+                                tsamp_sec=ts,
+                            )
                         )
                     )
                     if metric == "dm_phase"
@@ -2261,7 +2232,9 @@ class BurstSession:
         if seed_from_previous_fit:
             target_components = int(config_payload.get("num_components") or 1)
             if isinstance(component_guesses, list) and component_guesses:
-                target_components = int(config_payload.get("num_components", len(component_guesses)) or len(component_guesses))
+                target_components = int(
+                    config_payload.get("num_components", len(component_guesses)) or len(component_guesses)
+                )
             guess_payload = self._model_fit_guess_payload(grid, context)
             fallback_parameters = self._model_fit_initial_parameters_from_component_guesses(
                 guess_payload.get("component_guesses", []),
@@ -2293,7 +2266,9 @@ class BurstSession:
         if component_guesses is not None:
             if not isinstance(component_guesses, list):
                 raise ValueError("component_guesses must be a list of per-component guess objects.")
-            expected_components = int(config_payload.get("num_components", len(component_guesses)) or len(component_guesses))
+            expected_components = int(
+                config_payload.get("num_components", len(component_guesses)) or len(component_guesses)
+            )
             if expected_components != len(component_guesses):
                 raise ValueError("Fit component count does not match the submitted initial guesses.")
             event_window_ms = self._current_event_window_ms(context, tsamp_ms=grid.effective_tsamp_ms)
@@ -2305,7 +2280,9 @@ class BurstSession:
                 event_window_ms=event_window_ms,
             )
             config_payload["num_components"] = len(component_guesses)
-            config_payload["initial_parameter_source"] = config_payload.get("initial_parameter_source", "current_selection")
+            config_payload["initial_parameter_source"] = config_payload.get(
+                "initial_parameter_source", "current_selection"
+            )
         config = ModelFitRequestConfig.from_dict(config_payload) if config_payload else None
 
         peak_rel_bin = _primary_peak_bin(
@@ -2346,11 +2323,7 @@ class BurstSession:
 
         self.results = replace(
             self.results,
-            width_ms_model=(
-                fit_result.width_ms_model
-                if fit_result.status == "ok"
-                else self.results.width_ms_model
-            ),
+            width_ms_model=(fit_result.width_ms_model if fit_result.status == "ok" else self.results.width_ms_model),
             tau_sc_ms=fit_result.tau_sc_ms if fit_result.status == "ok" else self.results.tau_sc_ms,
             measurement_flags=updated_flags,
             uncertainties=replace(
@@ -2377,9 +2350,7 @@ class BurstSession:
             finite_widths = updated_widths_ms[np.isfinite(updated_widths_ms) & (updated_widths_ms > 0)]
             self.temporal_structure = replace(
                 self.temporal_structure,
-                model_fit_min_component_ms=(
-                    None if finite_widths.size == 0 else float(np.min(finite_widths))
-                ),
+                model_fit_min_component_ms=(None if finite_widths.size == 0 else float(np.min(finite_widths))),
             )
         self._apply_width_analysis_to_results()
         return self.results
@@ -2407,7 +2378,7 @@ class BurstSession:
     def run_temporal_structure_analysis(self, segment_length_ms: float) -> TemporalStructureResult:
         grid, context = self._build_measurement_context_for_data()
         event_series = np.asarray(
-            context.selected_profile_baselined[context.event_rel_start:context.event_rel_end],
+            context.selected_profile_baselined[context.event_rel_start : context.event_rel_end],
             dtype=float,
         )
         self.temporal_structure = run_temporal_structure_analysis(
@@ -2517,13 +2488,9 @@ class BurstSession:
             crop_bins=[int(self.crop_start), int(self.crop_end)],
             event_bins=[int(self.event_start), int(self.event_end)],
             spectral_extent_channels=[int(self.spec_ex_lo), int(self.spec_ex_hi)],
-            burst_regions=[
-                BurstRegion(start_bin=int(start), end_bin=int(end))
-                for start, end in self.burst_regions
-            ],
+            burst_regions=[BurstRegion(start_bin=int(start), end_bin=int(end)) for start, end in self.burst_regions],
             offpulse_regions=[
-                OffPulseRegion(start_bin=int(start), end_bin=int(end))
-                for start, end in self.offpulse_regions
+                OffPulseRegion(start_bin=int(start), end_bin=int(end)) for start, end in self.offpulse_regions
             ],
             peak_bins=[int(value) for value in self.peak_positions],
             manual_peaks=bool(self.manual_peaks),

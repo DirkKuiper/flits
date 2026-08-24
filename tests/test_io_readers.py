@@ -1,9 +1,8 @@
 """Tests for the reader framework: detection, round-trip, corruption handling,
 and format-hint override.
 """
-from __future__ import annotations
 
-from pathlib import Path
+from __future__ import annotations
 
 import h5py
 import numpy as np
@@ -20,7 +19,6 @@ from flits.io.errors import (
 from flits.io.validation import validate_metadata
 from flits.models import FilterbankMetadata
 from flits.settings import ObservationConfig
-
 
 _ALL_FORMATS = ["sigproc", "chime_hdf5", "psrfits", "psrfits_fold", "chime_bbdata_beamformed"]
 
@@ -41,11 +39,7 @@ def test_detect_reader_picks_correct_format(synthetic_waterfall):
 @pytest.mark.parametrize("synthetic_waterfall", _ALL_FORMATS, indirect=True)
 def test_round_trip_metadata(synthetic_waterfall):
     inspection = inspect_filterbank(synthetic_waterfall.path)
-    target_dm = (
-        synthetic_waterfall.coherent_dm
-        if synthetic_waterfall.coherent_dm is not None
-        else 0.0
-    )
+    target_dm = synthetic_waterfall.coherent_dm if synthetic_waterfall.coherent_dm is not None else 0.0
     config = ObservationConfig.from_preset(dm=target_dm, preset_key="generic", sefd_jy=1.0)
     data, metadata = load_filterbank_data(synthetic_waterfall.path, config, inspection=inspection)
 
@@ -339,9 +333,7 @@ def test_chime_bbdata_non_polarization_beam_axis_raises(tmp_path):
 
     freq_dtype = np.dtype([("centre", "<f8"), ("id", "<u4")])
     time0_dtype = np.dtype([("fpga_count", "<u8"), ("ctime", "<f8"), ("ctime_offset", "<f8")])
-    loc_dtype = np.dtype(
-        [("ra", "<f8"), ("dec", "<f8"), ("x_400MHz", "<f8"), ("y_400MHz", "<f8"), ("pol", "S1")]
-    )
+    loc_dtype = np.dtype([("ra", "<f8"), ("dec", "<f8"), ("x_400MHz", "<f8"), ("y_400MHz", "<f8"), ("pol", "S1")])
 
     freq_table = np.zeros(nchan, dtype=freq_dtype)
     freq_table["centre"] = np.linspace(445.0, 400.0, nchan)

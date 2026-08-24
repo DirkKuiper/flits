@@ -15,7 +15,7 @@ import pytest
 
 pytest.importorskip("httpx", reason="httpx is required for the TestClient transport")
 
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
 
 # `flits.web` re-exports the FastAPI instance as `app`, which shadows the
 # submodule under `import flits.web.app as ...`. Import it explicitly.
@@ -89,9 +89,7 @@ def test_session_lifecycle_over_http(client: TestClient, synthetic_waterfall) ->
     assert client.get(f"/api/sessions/{session_id}").status_code == 404
 
 
-def test_export_artifact_downloads_with_attachment_headers(
-    client: TestClient, synthetic_waterfall
-) -> None:
+def test_export_artifact_downloads_with_attachment_headers(client: TestClient, synthetic_waterfall) -> None:
     session_id = _create_session(client, synthetic_waterfall)
     client.post(
         f"/api/sessions/{session_id}/actions",
@@ -148,9 +146,7 @@ class TestDataDirectoryContainment:
         response = client.post("/api/detect", json={"bfile": "../../../../etc/hosts"})
         assert response.status_code == 403
 
-    def test_containment_can_be_disabled_explicitly(
-        self, client: TestClient, monkeypatch
-    ) -> None:
+    def test_containment_can_be_disabled_explicitly(self, client: TestClient, monkeypatch) -> None:
         monkeypatch.setenv("FLITS_ALLOW_OUTSIDE_DATA_DIR", "1")
         outside = Path(__file__).resolve()
         response = client.post("/api/detect", json={"bfile": str(outside)})
@@ -196,9 +192,7 @@ class TestCrossOriginPolicy:
         module = self._reload_app(monkeypatch, None)
         try:
             with TestClient(module.app) as client:
-                response = client.get(
-                    "/api/health", headers={"Origin": "https://unrelated.example"}
-                )
+                response = client.get("/api/health", headers={"Origin": "https://unrelated.example"})
             assert response.status_code == 200
             assert "access-control-allow-origin" not in response.headers
         finally:
@@ -209,12 +203,8 @@ class TestCrossOriginPolicy:
         module = self._reload_app(monkeypatch, "https://trusted.example")
         try:
             with TestClient(module.app) as client:
-                allowed = client.get(
-                    "/api/health", headers={"Origin": "https://trusted.example"}
-                )
-                denied = client.get(
-                    "/api/health", headers={"Origin": "https://unrelated.example"}
-                )
+                allowed = client.get("/api/health", headers={"Origin": "https://trusted.example"})
+                denied = client.get("/api/health", headers={"Origin": "https://unrelated.example"})
             assert allowed.headers.get("access-control-allow-origin") == "https://trusted.example"
             assert "access-control-allow-origin" not in denied.headers
         finally:
@@ -224,9 +214,7 @@ class TestCrossOriginPolicy:
 class TestSessionStoreBounds:
     """Sessions are capped so a long-running server cannot grow without limit."""
 
-    def test_least_recently_used_session_is_evicted(
-        self, client: TestClient, synthetic_waterfall, monkeypatch
-    ) -> None:
+    def test_least_recently_used_session_is_evicted(self, client: TestClient, synthetic_waterfall, monkeypatch) -> None:
         monkeypatch.setenv("FLITS_MAX_SESSIONS", "2")
 
         first = _create_session(client, synthetic_waterfall)
@@ -252,9 +240,7 @@ class TestSessionStoreBounds:
         assert response.status_code == 404
         assert "snapshot" in response.json()["detail"]
 
-    def test_invalid_cap_falls_back_to_the_default(
-        self, client: TestClient, synthetic_waterfall, monkeypatch
-    ) -> None:
+    def test_invalid_cap_falls_back_to_the_default(self, client: TestClient, synthetic_waterfall, monkeypatch) -> None:
         monkeypatch.setenv("FLITS_MAX_SESSIONS", "not-a-number")
         session_id = _create_session(client, synthetic_waterfall)
         assert client.get(f"/api/sessions/{session_id}").status_code == 200
@@ -263,9 +249,7 @@ class TestSessionStoreBounds:
 class TestErrorReporting:
     """Bad input and internal faults must be distinguishable."""
 
-    def test_bad_action_input_is_a_client_error(
-        self, client: TestClient, synthetic_waterfall
-    ) -> None:
+    def test_bad_action_input_is_a_client_error(self, client: TestClient, synthetic_waterfall) -> None:
         session_id = _create_session(client, synthetic_waterfall)
         response = client.post(
             f"/api/sessions/{session_id}/actions",

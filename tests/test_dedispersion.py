@@ -14,7 +14,6 @@ from flits.signal import (
     shift_channels,
 )
 
-
 FREQS_MHZ = np.linspace(1500.0, 1200.0, 64)
 TSAMP_SEC = 1e-3
 
@@ -76,7 +75,7 @@ class TestEdgeHandling:
         wrapped = dedisperse(data, 20.0, FREQS_MHZ, TSAMP_SEC)
         filled = dedisperse(data, 20.0, FREQS_MHZ, TSAMP_SEC, fill_value=0.0)
 
-        leading, trailing = dedispersion_edge_bins(20.0, FREQS_MHZ, TSAMP_SEC)
+        _leading, trailing = dedispersion_edge_bins(20.0, FREQS_MHZ, TSAMP_SEC)
         assert trailing > 2, "the burst must be pushed past the front of the window"
 
         assert wrapped[:, -trailing:].max() > 0, "wrapping should fold power to the far edge"

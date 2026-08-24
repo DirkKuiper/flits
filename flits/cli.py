@@ -16,11 +16,11 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, NoReturn, Sequence
+from typing import Any, NoReturn
 
 from flits import __version__
-
 
 logger = logging.getLogger("flits")
 
@@ -197,9 +197,7 @@ def _compare_measurements(
             continue
         scale = max(abs(stored_value), abs(fresh_value), 1e-30)
         if abs(stored_value - fresh_value) / scale > tolerance:
-            differences.append(
-                {"field": key, "stored": stored_value, "recomputed": fresh_value}
-            )
+            differences.append({"field": key, "stored": stored_value, "recomputed": fresh_value})
     return differences
 
 
@@ -260,9 +258,7 @@ def replay(argv: Sequence[str]) -> int:
         logger.info("Recomputed %s", key)
 
     results = session.results.to_dict() if session.results is not None else None
-    differences = (
-        _compare_measurements(results, stored_results, args.tolerance) if args.check else []
-    )
+    differences = _compare_measurements(results, stored_results, args.tolerance) if args.check else []
 
     exported: list[Path] = []
     if args.export is not None:

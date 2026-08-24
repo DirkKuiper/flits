@@ -38,7 +38,6 @@ from flits.models import (
 )
 from flits.signal import dedisperse
 
-
 ResidualRunner = Callable[[], tuple[np.ndarray, np.ndarray, np.ndarray, str]]
 
 
@@ -98,7 +97,7 @@ class DMMetricAlgorithm:
     """Callable pair that defines one registered DM scoring metric."""
 
     prepare_trial: Callable[[DMMetricInput], DMMetricPreparedTrial]
-    finalize_scores: Callable[[list[DMMetricPreparedTrial]], "DMMetricFinalizeResult"]
+    finalize_scores: Callable[[list[DMMetricPreparedTrial]], DMMetricFinalizeResult]
 
 
 @dataclass(frozen=True)
@@ -369,10 +368,10 @@ def _dmphase_curve(
     num_el = (n - y_grid).astype(float)
     with np.errstate(invalid="ignore", divide="ignore"):
         cumulative = np.cumsum(power_spectra, axis=0)
-        cumulative_sq = np.cumsum(power_spectra ** 2, axis=0)
+        cumulative_sq = np.cumsum(power_spectra**2, axis=0)
         s = np.divide(np.sum(power_spectra, axis=0).T - cumulative, num_el)
-        s2 = np.divide(np.sum(power_spectra ** 2, axis=0).T - cumulative_sq, num_el)
-        variance = np.divide(s2 - s ** 2, num_el)
+        s2 = np.divide(np.sum(power_spectra**2, axis=0).T - cumulative_sq, num_el)
+        variance = np.divide(s2 - s**2, num_el)
 
     variance = np.where(np.isfinite(variance), variance, 0.0)
     variance_smoothed = signal.convolve2d(
@@ -387,10 +386,7 @@ def _dmphase_curve(
     idx_c[idx_c == 0] = 1
     idx_c = np.ones(np.shape(idx_c), dtype=float) * idx_c
     i2_sum = np.multiply(np.multiply(idx_c, idx_c + 1.0), 2.0 * idx_c + 1.0) / 6.0
-    i4_sum = (
-        np.multiply(np.multiply(np.multiply(idx_c, idx_c + 1.0), 2.0 * idx_c + 1.0), 6.0 * idx_c - 1.0)
-        / 30.0
-    )
+    i4_sum = np.multiply(np.multiply(np.multiply(idx_c, idx_c + 1.0), 2.0 * idx_c + 1.0), 6.0 * idx_c - 1.0) / 30.0
 
     lo = np.multiply(y_grid <= (np.ones((n, 1), dtype=float) * idx_c), dpower_spectra)
     lo1 = np.multiply(y_grid <= (np.ones((n, 1), dtype=float) * idx_c), np.multiply(power_spectra, dpower_spectra))
@@ -447,9 +443,7 @@ def _dmphase_poly_max(
             y = y[finite]
             x = x[finite]
             poly = np.polyfit(dx, y, order, w=weights)
-            weighted_residual = float(
-                np.sqrt(np.sum(weights * (y - np.polyval(poly, dx)) ** 2.0) / np.sum(weights))
-            )
+            weighted_residual = float(np.sqrt(np.sum(weights * (y - np.polyval(poly, dx)) ** 2.0) / np.sum(weights)))
             err = max(weighted_residual, float(err))
 
     dpoly = np.polyder(poly)
@@ -746,9 +740,7 @@ def fit_dm_peak(
         roots = np.array([], dtype=complex)
 
     real_roots = sorted(
-        float(root.real)
-        for root in np.atleast_1d(roots)
-        if np.isfinite(root.real) and abs(float(root.imag)) < 1e-6
+        float(root.real) for root in np.atleast_1d(roots) if np.isfinite(root.real) and abs(float(root.imag)) < 1e-6
     )
     lower = max((root for root in real_roots if root <= best_dm), default=None)
     upper = min((root for root in real_roots if root >= best_dm), default=None)
@@ -778,7 +770,7 @@ def _residual_summary(
         return None, None
     freqs = freqs[finite]
     residuals = residuals[finite]
-    rms = float(np.sqrt(np.mean(residuals ** 2)))
+    rms = float(np.sqrt(np.mean(residuals**2)))
     slope = None
     if freqs.size >= 2:
         try:
@@ -932,8 +924,12 @@ def optimize_dm_trials(
             residual_status = applied_status if applied_status != "ok" else best_status
 
     subband_freqs = applied_freqs if applied_freqs.size else best_freqs
-    arrival_times_applied = applied_arrivals if residual_status == "ok" and applied_freqs.size else np.array([], dtype=float)
-    residuals_applied = applied_residuals if residual_status == "ok" and applied_freqs.size else np.array([], dtype=float)
+    arrival_times_applied = (
+        applied_arrivals if residual_status == "ok" and applied_freqs.size else np.array([], dtype=float)
+    )
+    residuals_applied = (
+        applied_residuals if residual_status == "ok" and applied_freqs.size else np.array([], dtype=float)
+    )
     arrival_times_best = best_arrivals if residual_status == "ok" and best_freqs.size else np.array([], dtype=float)
     residuals_best = best_residuals if residual_status == "ok" and best_freqs.size else np.array([], dtype=float)
 

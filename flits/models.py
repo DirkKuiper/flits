@@ -16,10 +16,7 @@ def _jsonable(values: np.ndarray, digits: int = 4) -> list[Any]:
     rounded = np.round(np.asarray(values, dtype=float), digits)
     if rounded.ndim == 1:
         return [float(value) if np.isfinite(value) else None for value in rounded]
-    return [
-        [float(value) if np.isfinite(value) else None for value in row]
-        for row in rounded
-    ]
+    return [[float(value) if np.isfinite(value) else None for value in row] for row in rounded]
 
 
 def _jsonable_parameter_dict(
@@ -54,13 +51,17 @@ def _bool_or_none(value: Any) -> bool | None:
     return bool(value)
 
 
-def _array_1d(values: Any, *, dtype: np.dtype[Any] | type[np.floating[Any]] | type[np.integer[Any]] = float) -> np.ndarray:
+def _array_1d(
+    values: Any, *, dtype: np.dtype[Any] | type[np.floating[Any]] | type[np.integer[Any]] = float
+) -> np.ndarray:
     if values is None:
         return np.array([], dtype=dtype)
     return np.asarray(values, dtype=dtype)
 
 
-def _array_2d(values: Any, *, dtype: np.dtype[Any] | type[np.floating[Any]] | type[np.integer[Any]] = float) -> np.ndarray:
+def _array_2d(
+    values: Any, *, dtype: np.dtype[Any] | type[np.floating[Any]] | type[np.integer[Any]] = float
+) -> np.ndarray:
     if values is None:
         return np.empty((0, 0), dtype=dtype)
     arr = np.asarray(values, dtype=dtype)
@@ -72,21 +73,17 @@ def _array_2d(values: Any, *, dtype: np.dtype[Any] | type[np.floating[Any]] | ty
 FORMAL_UNCERTAINTY_CLASSIFICATIONS: frozenset[str] = frozenset({"formal_1sigma", "model_hessian"})
 
 
-def _uncertainty_detail_map_to_dict(values: dict[str, "UncertaintyDetail"]) -> dict[str, Any]:
+def _uncertainty_detail_map_to_dict(values: dict[str, UncertaintyDetail]) -> dict[str, Any]:
     return {str(key): detail.to_dict() for key, detail in values.items()}
 
 
-def _uncertainty_detail_map_from_dict(payload: dict[str, Any] | None) -> dict[str, "UncertaintyDetail"]:
+def _uncertainty_detail_map_from_dict(payload: dict[str, Any] | None) -> dict[str, UncertaintyDetail]:
     if payload is None:
         return {}
-    return {
-        str(key): UncertaintyDetail.from_dict(value)
-        for key, value in payload.items()
-        if isinstance(value, dict)
-    }
+    return {str(key): UncertaintyDetail.from_dict(value) for key, value in payload.items() if isinstance(value, dict)}
 
 
-def compatible_scalar_uncertainty(detail: "UncertaintyDetail | None") -> float | None:
+def compatible_scalar_uncertainty(detail: UncertaintyDetail | None) -> float | None:
     if detail is None or detail.value is None:
         return None
     if detail.classification not in FORMAL_UNCERTAINTY_CLASSIFICATIONS:
@@ -118,7 +115,7 @@ class UncertaintyDetail:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "UncertaintyDetail":
+    def from_dict(cls, payload: dict[str, Any]) -> UncertaintyDetail:
         return cls(
             value=_float_or_none(payload.get("value")),
             units=None if payload.get("units") in (None, "") else str(payload.get("units")),
@@ -140,7 +137,7 @@ class BurstRegion:
         return {"start_bin": int(self.start_bin), "end_bin": int(self.end_bin)}
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "BurstRegion":
+    def from_dict(cls, payload: dict[str, Any]) -> BurstRegion:
         return cls(start_bin=int(payload["start_bin"]), end_bin=int(payload["end_bin"]))
 
 
@@ -153,7 +150,7 @@ class OffPulseRegion:
         return {"start_bin": int(self.start_bin), "end_bin": int(self.end_bin)}
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "OffPulseRegion":
+    def from_dict(cls, payload: dict[str, Any]) -> OffPulseRegion:
         return cls(start_bin=int(payload["start_bin"]), end_bin=int(payload["end_bin"]))
 
 
@@ -165,7 +162,7 @@ class NoiseEstimateSettings:
         return {"estimator": self.estimator}
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any] | None) -> "NoiseEstimateSettings":
+    def from_dict(cls, payload: dict[str, Any] | None) -> NoiseEstimateSettings:
         if payload is None:
             return cls()
         return cls(estimator=str(payload.get("estimator", "mean_std")))
@@ -193,7 +190,7 @@ class NoiseEstimateSummary:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "NoiseEstimateSummary":
+    def from_dict(cls, payload: dict[str, Any]) -> NoiseEstimateSummary:
         return cls(
             estimator=str(payload.get("estimator", "mean_std")),
             basis=str(payload.get("basis", "implicit_event_complement")),
@@ -221,7 +218,7 @@ class WidthAnalysisSettings:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any] | None) -> "WidthAnalysisSettings":
+    def from_dict(cls, payload: dict[str, Any] | None) -> WidthAnalysisSettings:
         if payload is None:
             return cls()
         return cls(
@@ -257,9 +254,7 @@ class WidthResult:
             "units": self.units,
             "event_window_ms": [float(value) for value in self.event_window_ms],
             "spectral_extent_mhz": [float(value) for value in self.spectral_extent_mhz],
-            "offpulse_windows_ms": [
-                [float(value) for value in window] for window in self.offpulse_windows_ms
-            ],
+            "offpulse_windows_ms": [[float(value) for value in window] for window in self.offpulse_windows_ms],
             "masked_channels": [int(value) for value in self.masked_channels],
             "effective_bandwidth_mhz": _float_or_none(self.effective_bandwidth_mhz),
             "algorithm_name": self.algorithm_name,
@@ -268,7 +263,7 @@ class WidthResult:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "WidthResult":
+    def from_dict(cls, payload: dict[str, Any]) -> WidthResult:
         return cls(
             method=str(payload["method"]),
             label=str(payload.get("label", payload["method"])),
@@ -306,7 +301,7 @@ class AcceptedWidthSelection:
         }
 
     @classmethod
-    def from_result(cls, result: WidthResult) -> "AcceptedWidthSelection":
+    def from_result(cls, result: WidthResult) -> AcceptedWidthSelection:
         return cls(
             method=result.method,
             value=result.value,
@@ -316,7 +311,7 @@ class AcceptedWidthSelection:
         )
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "AcceptedWidthSelection":
+    def from_dict(cls, payload: dict[str, Any]) -> AcceptedWidthSelection:
         return cls(
             method=str(payload["method"]),
             value=_float_or_none(payload.get("value")),
@@ -346,7 +341,7 @@ class WidthAnalysisSummary:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "WidthAnalysisSummary":
+    def from_dict(cls, payload: dict[str, Any]) -> WidthAnalysisSummary:
         return cls(
             settings=WidthAnalysisSettings.from_dict(payload.get("settings")),
             results=[WidthResult.from_dict(item) for item in payload.get("results", [])],
@@ -375,7 +370,7 @@ class DmMetricReference:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "DmMetricReference":
+    def from_dict(cls, payload: dict[str, Any]) -> DmMetricReference:
         return cls(
             label=str(payload.get("label", "")),
             citation=str(payload.get("citation", "")),
@@ -404,7 +399,7 @@ class DmMetricDefinition:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "DmMetricDefinition":
+    def from_dict(cls, payload: dict[str, Any]) -> DmMetricDefinition:
         return cls(
             key=str(payload.get("key", "")),
             label=str(payload.get("label", payload.get("key", ""))),
@@ -431,7 +426,7 @@ class DmOptimizationSettings:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "DmOptimizationSettings":
+    def from_dict(cls, payload: dict[str, Any]) -> DmOptimizationSettings:
         return cls(
             center_dm=float(payload.get("center_dm", 0.0)),
             half_range=float(payload.get("half_range", payload.get("requested_half_range", 0.0))),
@@ -456,9 +451,7 @@ class DmOptimizationProvenance:
         return {
             "event_window_ms": [float(value) for value in self.event_window_ms],
             "spectral_extent_mhz": [float(value) for value in self.spectral_extent_mhz],
-            "offpulse_windows_ms": [
-                [float(value) for value in window] for window in self.offpulse_windows_ms
-            ],
+            "offpulse_windows_ms": [[float(value) for value in window] for window in self.offpulse_windows_ms],
             "masked_channels": [int(value) for value in self.masked_channels],
             "effective_bandwidth_mhz": _float_or_none(self.effective_bandwidth_mhz),
             "tsamp_ms": float(self.tsamp_ms),
@@ -468,7 +461,7 @@ class DmOptimizationProvenance:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any] | None) -> "DmOptimizationProvenance":
+    def from_dict(cls, payload: dict[str, Any] | None) -> DmOptimizationProvenance:
         if payload is None:
             return cls(
                 event_window_ms=[],
@@ -529,7 +522,7 @@ class DmComponentOptimizationResult:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "DmComponentOptimizationResult":
+    def from_dict(cls, payload: dict[str, Any]) -> DmComponentOptimizationResult:
         return cls(
             component_id=str(payload.get("component_id", "component")),
             label=str(payload.get("label", payload.get("component_id", "Component"))),
@@ -587,7 +580,7 @@ class SessionSourceRef:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "SessionSourceRef":
+    def from_dict(cls, payload: dict[str, Any]) -> SessionSourceRef:
         source_path = Path(payload["source_path"])
         return cls(
             source_path=source_path,
@@ -669,7 +662,7 @@ class FilterbankMetadata:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "FilterbankMetadata":
+    def from_dict(cls, payload: dict[str, Any]) -> FilterbankMetadata:
         return cls(
             source_path=Path(payload["source_path"]),
             source_name=payload.get("source_name"),
@@ -695,9 +688,7 @@ class FilterbankMetadata:
             time_reference_frame=str(payload.get("time_reference_frame", "topocentric")),
             barycentric_header_flag=_bool_or_none(payload.get("barycentric_header_flag")),
             pulsarcentric_header_flag=_bool_or_none(payload.get("pulsarcentric_header_flag")),
-            dedispersion_reference_frequency_mhz=_float_or_none(
-                payload.get("dedispersion_reference_frequency_mhz")
-            ),
+            dedispersion_reference_frequency_mhz=_float_or_none(payload.get("dedispersion_reference_frequency_mhz")),
             dedispersion_reference_basis=payload.get("dedispersion_reference_basis"),
         )
 
@@ -732,7 +723,7 @@ class AutoMaskRunSummary:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any] | None) -> "AutoMaskRunSummary | None":
+    def from_dict(cls, payload: dict[str, Any] | None) -> AutoMaskRunSummary | None:
         if payload is None:
             return None
         return cls(
@@ -766,7 +757,7 @@ class GaussianFit1D:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "GaussianFit1D":
+    def from_dict(cls, payload: dict[str, Any]) -> GaussianFit1D:
         return cls(
             amp=float(payload["amp"]),
             mu_ms=float(payload["mu_ms"]),
@@ -839,7 +830,7 @@ class DmOptimizationResult:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "DmOptimizationResult":
+    def from_dict(cls, payload: dict[str, Any]) -> DmOptimizationResult:
         return cls(
             center_dm=float(payload["center_dm"]),
             requested_half_range=float(payload.get("requested_half_range", payload.get("actual_half_range", 0.0))),
@@ -867,16 +858,13 @@ class DmOptimizationResult:
             residual_slope_best_ms_per_mhz=_float_or_none(payload.get("residual_slope_best_ms_per_mhz")),
             uncertainty_details=_uncertainty_detail_map_from_dict(payload.get("uncertainty_details")),
             component_results=[
-                DmComponentOptimizationResult.from_dict(item)
-                for item in payload.get("component_results", [])
+                DmComponentOptimizationResult.from_dict(item) for item in payload.get("component_results", [])
             ],
             settings=(
                 None if payload.get("settings") is None else DmOptimizationSettings.from_dict(payload["settings"])
             ),
             provenance=(
-                None
-                if payload.get("provenance") is None
-                else DmOptimizationProvenance.from_dict(payload["provenance"])
+                None if payload.get("provenance") is None else DmOptimizationProvenance.from_dict(payload["provenance"])
             ),
         )
 
@@ -943,7 +931,7 @@ class SpectralAnalysisResult:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any] | None) -> "SpectralAnalysisResult | None":
+    def from_dict(cls, payload: dict[str, Any] | None) -> SpectralAnalysisResult | None:
         if payload is None:
             return None
         return cls(
@@ -1067,7 +1055,7 @@ class TemporalStructureResult:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any] | None) -> "TemporalStructureResult | None":
+    def from_dict(cls, payload: dict[str, Any] | None) -> TemporalStructureResult | None:
         if payload is None:
             return None
         return cls(
@@ -1151,13 +1139,11 @@ class MeasurementUncertainties:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any] | None) -> "MeasurementUncertainties":
+    def from_dict(cls, payload: dict[str, Any] | None) -> MeasurementUncertainties:
         if payload is None:
             return cls()
         return cls(
-            toa_peak_topo_mjd=_float_or_none(
-                payload.get("toa_peak_topo_mjd", payload.get("toa_topo_mjd"))
-            ),
+            toa_peak_topo_mjd=_float_or_none(payload.get("toa_peak_topo_mjd", payload.get("toa_topo_mjd"))),
             toa_topo_mjd=_float_or_none(payload.get("toa_topo_mjd")),
             toa_inf_topo_mjd=_float_or_none(payload.get("toa_inf_topo_mjd")),
             toa_inf_bary_mjd_tdb=_float_or_none(payload.get("toa_inf_bary_mjd_tdb")),
@@ -1273,7 +1259,7 @@ class MeasurementProvenance:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "MeasurementProvenance":
+    def from_dict(cls, payload: dict[str, Any]) -> MeasurementProvenance:
         return cls(
             manual_selection=bool(payload.get("manual_selection", False)),
             peak_selection=str(payload.get("peak_selection", "automatic")),
@@ -1430,7 +1416,7 @@ class ModelFitDiagnostics:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "ModelFitDiagnostics":
+    def from_dict(cls, payload: dict[str, Any]) -> ModelFitDiagnostics:
         return cls(
             status=str(payload.get("status", "unknown")),
             message=payload.get("message"),
@@ -1496,7 +1482,7 @@ class SaturationDiagnostic:
     event_negative_min_sn: float | None = None
 
     @classmethod
-    def ok(cls) -> "SaturationDiagnostic":
+    def ok(cls) -> SaturationDiagnostic:
         return cls(status="ok")
 
     def to_dict(self) -> dict[str, Any]:
@@ -1515,7 +1501,7 @@ class SaturationDiagnostic:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any] | None) -> "SaturationDiagnostic":
+    def from_dict(cls, payload: dict[str, Any] | None) -> SaturationDiagnostic:
         if not isinstance(payload, dict):
             return cls.ok()
         return cls(
@@ -1525,9 +1511,7 @@ class SaturationDiagnostic:
             left_wing_min_sn=_float_or_none(payload.get("left_wing_min_sn")),
             right_wing_min_sn=_float_or_none(payload.get("right_wing_min_sn")),
             negative_wing_min_sn=_float_or_none(payload.get("negative_wing_min_sn")),
-            negative_wing_excess_significance=_float_or_none(
-                payload.get("negative_wing_excess_significance")
-            ),
+            negative_wing_excess_significance=_float_or_none(payload.get("negative_wing_excess_significance")),
             negative_wing_max_run_bins=int(payload.get("negative_wing_max_run_bins", 0)),
             negative_wing_run_threshold_bins=int(payload.get("negative_wing_run_threshold_bins", 0)),
             event_negative_fraction=_float_or_none(payload.get("event_negative_fraction")),
@@ -1569,7 +1553,7 @@ class MeasurementDiagnostics:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "MeasurementDiagnostics":
+    def from_dict(cls, payload: dict[str, Any]) -> MeasurementDiagnostics:
         return cls(
             gaussian_fits=[GaussianFit1D.from_dict(item) for item in payload.get("gaussian_fits", [])],
             time_axis_ms=_array_1d(payload.get("time_axis_ms"), dtype=float),
@@ -1583,9 +1567,7 @@ class MeasurementDiagnostics:
             spectral_acf=_array_1d(payload.get("spectral_acf"), dtype=float),
             spectral_acf_lags_mhz=_array_1d(payload.get("spectral_acf_lags_mhz"), dtype=float),
             model_fit=(
-                None
-                if payload.get("model_fit") is None
-                else ModelFitDiagnostics.from_dict(payload["model_fit"])
+                None if payload.get("model_fit") is None else ModelFitDiagnostics.from_dict(payload["model_fit"])
             ),
             saturation=SaturationDiagnostic.from_dict(payload.get("saturation")),
         )
@@ -1665,20 +1647,16 @@ class BurstMeasurements:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "BurstMeasurements":
+    def from_dict(cls, payload: dict[str, Any]) -> BurstMeasurements:
         return cls(
             burst_name=str(payload["burst_name"]),
             dm=float(payload["dm"]),
-            toa_peak_topo_mjd=_float_or_none(
-                payload.get("toa_peak_topo_mjd", payload.get("toa_topo_mjd"))
-            ),
+            toa_peak_topo_mjd=_float_or_none(payload.get("toa_peak_topo_mjd", payload.get("toa_topo_mjd"))),
             toa_topo_mjd=_float_or_none(payload.get("toa_topo_mjd")),
             mjd_at_peak=_float_or_none(payload.get("mjd_at_peak")),
             toa_inf_topo_mjd=_float_or_none(payload.get("toa_inf_topo_mjd")),
             toa_inf_bary_mjd_tdb=_float_or_none(payload.get("toa_inf_bary_mjd_tdb")),
-            dispersion_to_infinite_frequency_ms=_float_or_none(
-                payload.get("dispersion_to_infinite_frequency_ms")
-            ),
+            dispersion_to_infinite_frequency_ms=_float_or_none(payload.get("dispersion_to_infinite_frequency_ms")),
             barycentric_correction_ms=_float_or_none(payload.get("barycentric_correction_ms")),
             toa_reference_frequency_mhz=_float_or_none(payload.get("toa_reference_frequency_mhz")),
             toa_status=str(payload.get("toa_status", "peak_topo_only")),
@@ -1795,7 +1773,7 @@ class AnalysisSessionSnapshot:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "AnalysisSessionSnapshot":
+    def from_dict(cls, payload: dict[str, Any]) -> AnalysisSessionSnapshot:
         return cls(
             schema_version=str(payload.get("schema_version", "1.0")),
             source=SessionSourceRef.from_dict(payload["source"]),
@@ -1824,11 +1802,7 @@ class AnalysisSessionSnapshot:
             noise_settings=NoiseEstimateSettings.from_dict(payload.get("noise_settings")),
             width_settings=WidthAnalysisSettings.from_dict(payload.get("width_settings")),
             notes=payload.get("notes"),
-            results=(
-                None
-                if payload.get("results") is None
-                else BurstMeasurements.from_dict(payload["results"])
-            ),
+            results=(None if payload.get("results") is None else BurstMeasurements.from_dict(payload["results"])),
             width_analysis=(
                 None
                 if payload.get("width_analysis") is None

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import json
 import os
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
@@ -19,13 +19,13 @@ from flits.models import FilterbankMetadata, SpectralAnalysisResult, TemporalStr
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
 from flits.web.app import (
+    SESSION_SNAPSHOT_PATHS,
+    SESSIONS,
+    STATIC_DIR,
     ActionRequest,
     CreateSessionRequest,
     DetectFilterbankRequest,
     ImportSessionRequest,
-    SESSIONS,
-    SESSION_SNAPSHOT_PATHS,
-    STATIC_DIR,
     SaveSessionSnapshotRequest,
     auto_mask_profiles,
     create_session,
@@ -46,12 +46,11 @@ from flits.web.app import (
     session_snapshots,
 )
 
-
 ROOT = Path(__file__).resolve().parents[1]
 _SAMPLE_NAME = "blc_s_guppi_60385_53711_DIAG_FRB20240114A_0057_40.265_41.518_b32_I0_D527_851_F192D_K_t30_d1.fil"
 _SAMPLE_CANDIDATES = (ROOT / _SAMPLE_NAME, ROOT / "data" / "GBT-L" / _SAMPLE_NAME)
 SAMPLE = next((path for path in _SAMPLE_CANDIDATES if path.exists()), _SAMPLE_CANDIDATES[0])
-DM_CONST = 1 / (2.41 * 10 ** -4)
+DM_CONST = 1 / (2.41 * 10**-4)
 
 
 @pytest.mark.parametrize("synthetic_waterfall", ["psrfits_fold"], indirect=True)
@@ -66,7 +65,7 @@ def _synthetic_session(*, auto_mask_profile: str = "auto") -> BurstSession:
     num_time_bins = 256
     aligned_bin = 120
     pulse = np.exp(-0.5 * ((np.arange(num_time_bins, dtype=float) - aligned_bin) / 2.5) ** 2)
-    time_shift = DM_CONST * 50.0 * (float(np.max(freqs)) ** -2.0 - freqs ** -2.0)
+    time_shift = DM_CONST * 50.0 * (float(np.max(freqs)) ** -2.0 - freqs**-2.0)
     bin_shift = np.round(time_shift / tsamp).astype(int)
     rng = np.random.default_rng(54321)
 
@@ -170,7 +169,9 @@ class WebApiTest(unittest.TestCase):
 
     @patch("flits.web.app.inspect_filterbank")
     @patch("flits.web.app.resolve_burst_path")
-    def test_detect_endpoint_reports_chime_catalog_dm_guidance(self, mock_resolve_path: object, mock_inspect: object) -> None:
+    def test_detect_endpoint_reports_chime_catalog_dm_guidance(
+        self, mock_resolve_path: object, mock_inspect: object
+    ) -> None:
         burst_path = Path("/tmp/catalog.h5")
         mock_resolve_path.return_value = burst_path
         mock_inspect.return_value = FilterbankInspection(
@@ -374,7 +375,8 @@ class WebApiTest(unittest.TestCase):
             finally:
                 os.chdir(original_cwd)
 
-    @patch("flits.web.app.uvicorn.run")
+    # uvicorn is imported inside flits.cli.serve, so patch it on the module.
+    @patch("uvicorn.run")
     def test_main_accepts_data_dir_flag(self, mock_run: object) -> None:
         with TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir).resolve()
@@ -484,7 +486,9 @@ class WebApiTest(unittest.TestCase):
         self.assertIn('id="sourceContextDetails"', index_html)
         self.assertIn('id="timingMetadataDetails"', index_html)
         self.assertIn('id="updateTimingButton"', index_html)
-        self.assertIn('id="dmInput" type="number" step="0.001" placeholder="enter DM or 0 if already dedispersed"', index_html)
+        self.assertIn(
+            'id="dmInput" type="number" step="0.001" placeholder="enter DM or 0 if already dedispersed"', index_html
+        )
         self.assertNotIn('value="527.851"', index_html)
         self.assertIn("Acquisition Overrides", index_html)
         self.assertIn("Source Context", index_html)
@@ -591,7 +595,9 @@ class WebApiTest(unittest.TestCase):
 
         payload = session_action(
             session_id,
-            ActionRequest(type="preview_export_results", payload={"include": ["json", "plots"], "plot_formats": ["png"]}),
+            ActionRequest(
+                type="preview_export_results", payload={"include": ["json", "plots"], "plot_formats": ["png"]}
+            ),
         )
 
         self.assertIsNone(payload["export_manifest"])
@@ -606,11 +612,15 @@ class WebApiTest(unittest.TestCase):
             },
         )
         self.assertTrue(any(item["label"] == "Science JSON" for item in payload["export_preview"]["artifacts"]))
-        self.assertTrue(any(item["plot_key"] == "dynamic_spectrum" for item in payload["export_preview"]["plot_previews"]))
+        self.assertTrue(
+            any(item["plot_key"] == "dynamic_spectrum" for item in payload["export_preview"]["plot_previews"])
+        )
 
     @patch("flits.web.app.BurstSession.from_file")
     @patch("flits.web.app.resolve_burst_path")
-    def test_create_session_passes_selected_auto_mask_profile(self, mock_resolve_path: object, mock_from_file: object) -> None:
+    def test_create_session_passes_selected_auto_mask_profile(
+        self, mock_resolve_path: object, mock_from_file: object
+    ) -> None:
         mock_resolve_path.return_value = Path("/tmp/synthetic.fil")
         session = _synthetic_session(auto_mask_profile="thorough")
         session.config = ObservationConfig.from_preset(
@@ -1189,7 +1199,9 @@ class WebApiTest(unittest.TestCase):
     def test_import_session_endpoint_creates_session_from_snapshot(self, mock_from_snapshot: object) -> None:
         mock_from_snapshot.return_value = _synthetic_session()
 
-        payload = import_session(ImportSessionRequest(snapshot={"schema_version": "1.0", "source": {"source_path": "synthetic_dm.fil"}}))
+        payload = import_session(
+            ImportSessionRequest(snapshot={"schema_version": "1.0", "source": {"source_path": "synthetic_dm.fil"}})
+        )
 
         try:
             self.assertIn("session_id", payload)

@@ -4,6 +4,7 @@ Prefer [flits/io/reader.py](reader.py) and [flits/io/your_reader.py](your_reader
 in new code. This module exists so existing imports (`from flits.io.filterbank
 import ...`) keep working.
 """
+
 from __future__ import annotations
 
 from flits.io.reader import (

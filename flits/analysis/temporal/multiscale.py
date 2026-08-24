@@ -7,6 +7,7 @@ subtracted from the event response.  This produces a power distribution
 across timescales without selecting the first scale that crosses a detection
 threshold.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -14,7 +15,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
-
 
 MIN_COEFFICIENTS = 4
 
@@ -67,7 +67,7 @@ def _finite_runs(values: np.ndarray | Sequence[float]) -> list[np.ndarray]:
         return []
     padded = np.concatenate(([False], finite, [False]))
     changes = np.flatnonzero(padded[1:] != padded[:-1])
-    return [profile[start:end] for start, end in zip(changes[::2], changes[1::2])]
+    return [profile[start:end] for start, end in zip(changes[::2], changes[1::2], strict=False)]
 
 
 def _haar_differences(profile: np.ndarray, scale_bins: int) -> np.ndarray:
@@ -161,17 +161,10 @@ def haar_excess_power(
     for scale in requested_scales:
         event_coefficients = _haar_differences(event, int(scale))
         noise_coefficients = [
-            coefficients
-            for run in noise_runs
-            if (coefficients := _haar_differences(run, int(scale))).size
+            coefficients for run in noise_runs if (coefficients := _haar_differences(run, int(scale))).size
         ]
-        pooled_noise = (
-            np.concatenate(noise_coefficients) if noise_coefficients else np.array([], dtype=float)
-        )
-        if (
-            event_coefficients.size < int(min_coefficients)
-            or pooled_noise.size < int(min_coefficients)
-        ):
+        pooled_noise = np.concatenate(noise_coefficients) if noise_coefficients else np.array([], dtype=float)
+        if event_coefficients.size < int(min_coefficients) or pooled_noise.size < int(min_coefficients):
             continue
         kept_scales.append(int(scale))
         event_power.append(float(np.mean(np.square(event_coefficients))))
@@ -191,11 +184,7 @@ def haar_excess_power(
     excess_array = event_array - noise_array
     positive_excess = np.clip(excess_array, 0.0, None)
     total_positive = float(np.sum(positive_excess))
-    normalized = (
-        positive_excess / total_positive
-        if total_positive > 0.0
-        else np.zeros_like(positive_excess)
-    )
+    normalized = positive_excess / total_positive if total_positive > 0.0 else np.zeros_like(positive_excess)
     scales_ms = scale_array.astype(float) * float(tsamp_ms)
     warning_flags: list[str] = []
     characteristic_scale_ms = None
@@ -207,9 +196,7 @@ def haar_excess_power(
         message = "Event Haar power does not exceed the empirical off-pulse power."
         warning_flags.append("no_positive_excess")
     else:
-        characteristic_scale_ms = float(
-            np.exp(np.sum(normalized * np.log(scales_ms)))
-        )
+        characteristic_scale_ms = float(np.exp(np.sum(normalized * np.log(scales_ms))))
         dominant_scale_ms = float(scales_ms[int(np.argmax(positive_excess))])
     if np.any(excess_array < 0.0):
         warning_flags.append("negative_excess_at_some_scales")

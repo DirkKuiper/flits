@@ -8,10 +8,11 @@ analysis, and temporal-structure analysis.
 from __future__ import annotations
 
 from flits.analysis.dm_optimization import optimize_dm_trials
-# Preserve the historical package-level default_segment_bins export for now.
-from flits.analysis.spectral.core import default_segment_bins, run_averaged_spectral_analysis
 from flits.analysis.morphology import compute_width_analysis
 from flits.analysis.polarization import extract_normalized_linear_spectrum, run_rm_synthesis
+
+# Preserve the historical package-level default_segment_bins export for now.
+from flits.analysis.spectral.core import default_segment_bins, run_averaged_spectral_analysis
 from flits.analysis.temporal.core import run_temporal_structure_analysis
 from flits.analysis.temporal.multiscale import (
     HaarExcessPowerResult,
@@ -20,14 +21,14 @@ from flits.analysis.temporal.multiscale import (
 )
 
 __all__ = [
+    "HaarExcessPowerResult",
     "compute_width_analysis",
     "default_segment_bins",
+    "excess_power_fraction_below",
+    "extract_normalized_linear_spectrum",
+    "haar_excess_power",
     "optimize_dm_trials",
     "run_averaged_spectral_analysis",
     "run_rm_synthesis",
-    "extract_normalized_linear_spectrum",
-    "HaarExcessPowerResult",
-    "excess_power_fraction_below",
-    "haar_excess_power",
     "run_temporal_structure_analysis",
 ]

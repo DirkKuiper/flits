@@ -59,16 +59,14 @@ class BurstReader(Protocol):
         """
         ...
 
-    def inspect(self, path: Path) -> FilterbankInspection:
-        ...
+    def inspect(self, path: Path) -> FilterbankInspection: ...
 
     def load(
         self,
         path: Path,
         config: ObservationConfig,
         inspection: FilterbankInspection | None = None,
-    ) -> tuple[np.ndarray, FilterbankMetadata]:
-        ...
+    ) -> tuple[np.ndarray, FilterbankMetadata]: ...
 
 
 _BUILTIN_READERS: tuple[str, ...] = (
@@ -240,8 +238,7 @@ def detect_reader(
             )
         if _any_other_reader_claims(reader, resolved):
             raise FormatDetectionError(
-                f"Reader {format_hint!r} rejected the file at sniff time "
-                f"(another registered reader matched instead)",
+                f"Reader {format_hint!r} rejected the file at sniff time (another registered reader matched instead)",
                 path=resolved,
             )
         return reader
@@ -304,12 +301,12 @@ def load_filterbank_data(
 
 
 __all__ = [
-    "FilterbankInspection",
     "BurstReader",
+    "FilterbankInspection",
     "detect_reader",
     "inspect_filterbank",
-    "load_filterbank_data",
     "list_readers",
+    "load_filterbank_data",
     "reader_diagnostics",
     "register_reader",
     "unregister_reader",
