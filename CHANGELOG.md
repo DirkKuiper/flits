@@ -4,6 +4,42 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.0.0](https://github.com/DirkKuiper/flits/compare/flits-v0.8.0...flits-v1.0.0) (2026-08-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* the data directory is now a containment boundary. Paths resolving outside --data-dir are rejected with 403; pass --allow-outside-data-dir to restore the previous behaviour. Cross-origin browser requests are no longer accepted from any origin by default; name them with --cors-origin.
+
+### Features
+
+* **analysis:** add selection-aware temporal metrics ([adc8c4b](https://github.com/DirkKuiper/flits/commit/adc8c4b0bf7b19b66e0baf64f1a5d71a4606d2d9))
+* **cli:** add headless session replay ([ad8b2dd](https://github.com/DirkKuiper/flits/commit/ad8b2dd75de478537fd6c27f688364680a94c467))
+* JOSS v1.0 readiness ([#91](https://github.com/DirkKuiper/flits/issues/91)) ([f3d95d4](https://github.com/DirkKuiper/flits/commit/f3d95d48cda7797d7bbb513de3e59780259bbcc8))
+* **polarization:** complete RM synthesis workflow ([823bbd1](https://github.com/DirkKuiper/flits/commit/823bbd15aec25c1626251f7c9b50185d7ab39f23))
+* **web:** log failures and bound the session store ([c0ab87c](https://github.com/DirkKuiper/flits/commit/c0ab87cecab5393405632c09a3a9e558c7c0df1a))
+
+
+### Bug Fixes
+
+* **analysis:** stop dedispersion wrapping and compounding rounding error ([d531213](https://github.com/DirkKuiper/flits/commit/d5312138bd4432acd6eff5a1eebae5584c0c224e))
+* **ci:** accept pip's vendored advisories with a written justification ([6e1c1ae](https://github.com/DirkKuiper/flits/commit/6e1c1ae150b00fa8699c4f5070bb69874b01c294))
+* **ci:** make browser tests opt-in and unpin the mypy target ([ae85998](https://github.com/DirkKuiper/flits/commit/ae8599822187e1a530a4fc9c53ddea89b9155d4b))
+* **deps:** declare compatible ranges instead of exact pins ([6477338](https://github.com/DirkKuiper/flits/commit/6477338536ba458ed6b74dfe9f9cc929f3ed3d91))
+* **docker:** apply the security floors last and verify them ([55ffa64](https://github.com/DirkKuiper/flits/commit/55ffa6426a6eff5e359196902f68f1fa796c72c4))
+* **docker:** clear the container vulnerability scan ([b55e0bb](https://github.com/DirkKuiper/flits/commit/b55e0bbd0344be66cfc5768a390956dfcd3b9d2e))
+* **io:** treat NRT IQUV pol headers as AA/BB coherency ([#88](https://github.com/DirkKuiper/flits/issues/88)) ([ddaab63](https://github.com/DirkKuiper/flits/commit/ddaab6339f651ec27efde1febc143482e18950e4))
+* **web:** contain file access within the configured data directory ([1ec0206](https://github.com/DirkKuiper/flits/commit/1ec0206c0c6f350527a5fc762de317525c42fcdb))
+
+
+### Documentation
+
+* add contributing, conduct, and security guidelines ([0f90378](https://github.com/DirkKuiper/flits/commit/0f90378c04b6223b5f040b952d9d3d2893c9c0bb))
+* add JOSS paper and a statement of need ([ff91a9e](https://github.com/DirkKuiper/flits/commit/ff91a9ebf733135af9b06657f74ddfe4b1affd92))
+* deepen the analysis pages and state the polarization scope ([7f94e80](https://github.com/DirkKuiper/flits/commit/7f94e80af6ea4792ff4247a342ea4f310b19834a))
+* document the Python API and attribute the methods ([6e74ab2](https://github.com/DirkKuiper/flits/commit/6e74ab28bdbea3f3784e05a83afad4e068b98652))
+* move the import to the top of the api reference example ([f12a7cf](https://github.com/DirkKuiper/flits/commit/f12a7cf5f9721e80075be6f97c9d10afbf050275))
+
 ## [0.8.0](https://github.com/DirkKuiper/flits/compare/flits-v0.7.3...flits-v0.8.0) (2026-07-11)
 
 
