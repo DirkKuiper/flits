@@ -298,6 +298,126 @@ def _write_folded_psrfits(
     fits.HDUList([primary, psrparam, subint]).writeto(path)
 
 
+@dataclass(frozen=True)
+class FullStokesWaterfall:
+    """A four-IF SIGPROC filterbank holding a burst with a known rotation measure."""
+
+    path: Path
+    rm_rad_m2: float
+    linear_fraction: float
+    intrinsic_angle_rad: float
+    nchan: int
+    ntime: int
+    burst_time_idx: int
+    fch1_mhz: float
+    foff_mhz: float
+    tsamp_s: float
+
+
+_STOKES_NCHAN = 64
+_STOKES_NTIME = 512
+_STOKES_BURST_BIN = 256
+_STOKES_FCH1_MHZ = 1500.0
+_STOKES_FOFF_MHZ = -4.0
+_STOKES_TSAMP_S = 1e-3
+_C_M_S = 299_792_458.0
+
+
+def _linear_feed_products(
+    *,
+    rm_rad_m2: float,
+    linear_fraction: float,
+    intrinsic_angle_rad: float,
+    rng_seed: int,
+) -> np.ndarray:
+    """Coherency products AA/BB/CR/CI for a Faraday-rotated linear burst."""
+    rng = np.random.default_rng(rng_seed)
+    freqs = _STOKES_FCH1_MHZ + _STOKES_FOFF_MHZ * np.arange(_STOKES_NCHAN, dtype=float)
+    lambda_sq = (_C_M_S / (freqs * 1e6)) ** 2
+
+    times = np.arange(_STOKES_NTIME, dtype=float)
+    profile = np.exp(-((times - _STOKES_BURST_BIN) ** 2) / (2 * 3.0**2))
+    stokes_i = 40.0 * np.ones(_STOKES_NCHAN)[:, None] * profile[None, :]
+
+    angle = rm_rad_m2 * lambda_sq + intrinsic_angle_rad
+    stokes_q = linear_fraction * stokes_i * np.cos(2.0 * angle)[:, None]
+    stokes_u = linear_fraction * stokes_i * np.sin(2.0 * angle)[:, None]
+    stokes_v = 0.05 * stokes_i
+
+    # A linear feed records AA=(I+Q)/2, BB=(I-Q)/2, CR=U/2, CI=V/2, on a positive
+    # system-temperature pedestal with radiometer noise.
+    def noise() -> np.ndarray:
+        return rng.normal(0.0, 1.0, size=(_STOKES_NCHAN, _STOKES_NTIME))
+
+    return np.stack(
+        [
+            100.0 + 0.5 * (stokes_i + stokes_q) + noise(),
+            100.0 + 0.5 * (stokes_i - stokes_q) + noise(),
+            0.5 * stokes_u + noise(),
+            0.5 * stokes_v + noise(),
+        ]
+    ).astype(np.float32)
+
+
+def write_full_stokes_filterbank(
+    path: Path,
+    *,
+    telescope_id: int = 3,
+    rm_rad_m2: float = 137.5,
+    linear_fraction: float = 0.8,
+    intrinsic_angle_rad: float = 0.4,
+    rng_seed: int = 7,
+) -> FullStokesWaterfall:
+    """Write a four-IF filterbank and describe the burst that was injected.
+
+    `telescope_id` 3 selects the NRT preset, which declares the linear-feed
+    coherency basis; 0 selects the generic preset, which declares none, and is
+    how tests reach the "basis unknown" path.
+    """
+    from flits.io.sigproc import SigprocFilterbankHeader, build_sigproc_filterbank_bytes
+
+    products = _linear_feed_products(
+        rm_rad_m2=rm_rad_m2,
+        linear_fraction=linear_fraction,
+        intrinsic_angle_rad=intrinsic_angle_rad,
+        rng_seed=rng_seed,
+    )
+    header = SigprocFilterbankHeader(
+        rawdatafile=path.name,
+        source_name="STOKES_TEST",
+        nchans=_STOKES_NCHAN,
+        foff=_STOKES_FOFF_MHZ,
+        fch1=_STOKES_FCH1_MHZ,
+        tsamp=_STOKES_TSAMP_S,
+        tstart=60000.0,
+        telescope_id=int(telescope_id),
+        machine_id=0,
+        src_raj=123456.78,
+        src_dej=-123456.78,
+        nbits=32,
+        nifs=4,
+    )
+    path.write_bytes(build_sigproc_filterbank_bytes(products, header))
+    return FullStokesWaterfall(
+        path=path,
+        rm_rad_m2=rm_rad_m2,
+        linear_fraction=linear_fraction,
+        intrinsic_angle_rad=intrinsic_angle_rad,
+        nchan=_STOKES_NCHAN,
+        ntime=_STOKES_NTIME,
+        burst_time_idx=_STOKES_BURST_BIN,
+        fch1_mhz=_STOKES_FCH1_MHZ,
+        foff_mhz=_STOKES_FOFF_MHZ,
+        tsamp_s=_STOKES_TSAMP_S,
+    )
+
+
+@pytest.fixture
+def full_stokes_waterfall(tmp_path: Path) -> FullStokesWaterfall:
+    """A four-IF burst whose rotation measure is known exactly."""
+    return write_full_stokes_filterbank(tmp_path / "full_stokes.fil")
+
+
 @pytest.fixture
 def synthetic_waterfall(request, tmp_path: Path) -> SyntheticWaterfall:
     """Generate a synthetic burst and materialize it in the requested format.

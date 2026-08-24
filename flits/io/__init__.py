@@ -7,11 +7,14 @@ protocol a reader must satisfy."""
 from flits.io.reader import (
     BurstReader,
     FilterbankInspection,
+    StokesBurstReader,
     detect_reader,
     inspect_filterbank,
     list_readers,
     load_filterbank_data,
+    load_stokes_data,
     reader_diagnostics,
+    reader_supports_stokes,
     register_reader,
     unregister_reader,
 )
@@ -19,11 +22,14 @@ from flits.io.reader import (
 __all__ = [
     "BurstReader",
     "FilterbankInspection",
+    "StokesBurstReader",
     "detect_reader",
     "inspect_filterbank",
     "list_readers",
     "load_filterbank_data",
+    "load_stokes_data",
     "reader_diagnostics",
+    "reader_supports_stokes",
     "register_reader",
     "unregister_reader",
 ]

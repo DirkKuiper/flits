@@ -27,6 +27,38 @@ def normalize(ds: np.ndarray, offpulse: np.ndarray) -> np.ndarray:
     return normalized
 
 
+def normalize_stokes(cube: np.ndarray, offpulse: np.ndarray) -> np.ndarray:
+    """Baseline and scale a Stokes cube without distorting its polarization.
+
+    Each Stokes parameter has its own off-pulse median removed, but all four are
+    divided by the *same* per-channel scale, taken from the off-pulse standard
+    deviation of Stokes I. Scaling the four independently would rescale Q/I and
+    U/I channel by channel and corrupt every polarization fraction and every
+    Faraday rotation measured from them; using one scale per channel only
+    flattens the bandpass, exactly as `normalize` does for Stokes I alone.
+
+    Parameters
+    ----------
+    cube
+        Stokes data with shape ``(4, n_channels, n_time)`` in I/Q/U/V order.
+    offpulse
+        Off-pulse samples with shape ``(4, n_channels, n_offpulse)``.
+    """
+    if cube.ndim != 3 or cube.shape[0] < 4:
+        raise ValueError("A Stokes cube must have shape (4, n_channels, n_time).")
+    if offpulse.ndim != 3 or offpulse.shape[:2] != cube.shape[:2]:
+        raise ValueError("Off-pulse samples must match the Stokes and channel axes of the cube.")
+
+    dtype = np.result_type(cube.dtype, np.float32)
+    values = cube.astype(dtype, copy=True)
+    reference = offpulse.astype(dtype, copy=False)
+
+    baseline = np.nanmedian(reference, axis=2)
+    scale = np.nanstd(reference[0], axis=1)
+    scale = np.where(np.isfinite(scale) & (scale > 0.0), scale, 1.0)
+    return (values - baseline[:, :, None]) / scale[None, :, None]
+
+
 # Dispersion constant in MHz^2 pc^-1 cm^3 s, as k_DM = 1 / (2.41e-4). This is
 # the pulsar-astronomy convention rather than the exact physical constant; see
 # Manchester & Taylor (1977) and the discussion in Kulkarni (2020),

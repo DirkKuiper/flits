@@ -49,6 +49,27 @@ class MetadataMissingError(FlitsReaderError):
         self.fields = tuple(fields)
 
 
+class PolarizationUnavailableError(FlitsReaderError):
+    """The file cannot yield a Stokes cube.
+
+    Raised when a reader has no full-Stokes path at all, when the file holds
+    fewer than four polarization products, or when nothing -- header, preset, or
+    operator override -- establishes which four products those are. The `reason`
+    attribute distinguishes the cases so callers can tell "this file is Stokes I"
+    from "tell FLITS which basis this file uses".
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: Path | str | None = None,
+        reason: str = "unsupported",
+    ) -> None:
+        super().__init__(message, path=path)
+        self.reason = reason
+
+
 class UnsupportedSchemaError(FlitsReaderError):
     """The file's container format is supported but its schema/version is not.
 
@@ -71,6 +92,7 @@ __all__ = [
     "FlitsReaderError",
     "FormatDetectionError",
     "MetadataMissingError",
+    "PolarizationUnavailableError",
     "UnsupportedFormatError",
     "UnsupportedSchemaError",
 ]
