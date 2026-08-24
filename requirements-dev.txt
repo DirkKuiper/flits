@@ -1,4 +1,7 @@
 -r requirements-full.txt
 build>=1.2.2
+httpx>=0.27
+mypy>=1.11
 pytest>=8.3
+ruff>=0.6
 twine>=6.1

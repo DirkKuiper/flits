@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flits"
-dynamic = ["version", "dependencies"]
+dynamic = ["version"]
 description = "Browser-based FRB burst analysis software (SIGPROC, PSRFITS, CHIME/FRB HDF5)"
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
@@ -25,6 +25,23 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Astronomy",
 ]
 
+# Runtime requirements are declared as compatible ranges so FLITS can be
+# installed alongside an existing scientific Python stack. Exact, tested
+# versions live in requirements.txt, which is used as a pip constraints file
+# for reproducible container and CI installs -- see docs/developer/testing.md.
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+  "numpy>=1.26,<3",
+  "scipy>=1.11.4,<2",
+  "astropy>=6.0,<9",
+  "pydantic>=2.7,<3",
+  "your>=0.6.7,<0.7",
+  "jess>=0.3.1,<0.4",
+  "matplotlib>=3.8,<4",
+  "h5py>=3.10,<4",
+]
+
 [project.scripts]
 flits = "flits.web.app:main"
 
@@ -36,7 +53,10 @@ chime_hdf5 = "flits.io.chime_hdf5_reader:ChimeHdf5Reader"
 [project.optional-dependencies]
 dev = [
   "build>=1.4.3",
+  "httpx>=0.27",
+  "mypy>=1.11",
   "pytest>=9.0.3",
+  "ruff>=0.6",
   "twine>=6.2.0",
 ]
 docs = [
@@ -58,7 +78,6 @@ include = ["flits*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "flits.__version__" }
-dependencies = { file = ["requirements.txt"] }
 
 [tool.setuptools.package-data]
 flits = [

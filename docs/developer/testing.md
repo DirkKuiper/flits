@@ -15,6 +15,27 @@ python -m pip install -e .
 `requirements-dev.txt` includes the optional `fitburst` dependency so the
 scattering-fit tests exercise the full feature set.
 
+## Dependency declarations
+
+FLITS separates *what it supports* from *what it pins*:
+
+- **`pyproject.toml`** declares the runtime requirements as compatible ranges
+  (for example `numpy>=1.26,<3`). These are what a user gets from
+  `pip install flits`, and they are deliberately wide so FLITS can be installed
+  alongside an existing scientific Python stack.
+- **`requirements.txt`** pins the exact, tested version of each runtime
+  dependency. It is a pip *constraints* file for reproducible container and CI
+  installs, not the source of the package's install requirements:
+
+  ```bash
+  python -m pip install -c requirements.txt .
+  ```
+
+Both ends of the range are exercised in CI. The `test` job runs against the
+pinned versions; the `minimum-versions` job installs the oldest permitted
+release of every direct dependency and runs the suite against that. If you raise
+a lower bound in `pyproject.toml`, raise it in the `minimum-versions` job too.
+
 ## Run the test suite
 
 Use the module form of `pytest`:
