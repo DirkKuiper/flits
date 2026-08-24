@@ -15,12 +15,13 @@ authors = [
 ]
 keywords = ["astronomy", "fast radio bursts", "FRB", "radio astronomy", "filterbank", "SIGPROC", "PSRFITS", "HDF5", "CHIME"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Science/Research",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Operating System :: OS Independent",
   "Topic :: Scientific/Engineering :: Astronomy",
 ]
@@ -86,6 +87,7 @@ flits = [
   "web_static/*.css",
   "web_static/*.js",
   "web_static/vendor/*.js",
+  "web_static/vendor/*.txt",
 ]
 
 [tool.ruff]

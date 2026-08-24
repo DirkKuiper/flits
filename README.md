@@ -112,3 +112,7 @@ If you use FLITS in research, cite the software and link to the repository:
 ## License
 
 FLITS is released under the GNU GPLv3. See [LICENSE](./LICENSE).
+
+The interface bundles [plotly.js](https://github.com/plotly/plotly.js) (MIT) so
+it works without fetching anything from a CDN; its licence travels with the copy
+in [`flits/web_static/vendor/`](./flits/web_static/vendor/).

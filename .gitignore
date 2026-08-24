@@ -11,7 +11,7 @@ __pycache__/
 .flits/
 *.fil
 *.npz
-burst_properties.csv
+burst_properties*.csv
 tools/
 data/
 .claude/
@@ -19,6 +19,7 @@ data/
 .agentrules
 
 # Research data, outputs, and manuscript working copies (not part of FLITS)
+tmp/
 analysis_outputs/
 R147_paper/
 R147_paper.zip

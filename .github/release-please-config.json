@@ -7,7 +7,7 @@
       "package-name": "flits",
       "changelog-path": "CHANGELOG.md",
       "include-v-in-tag": true,
-      "bump-minor-pre-major": true,
+      "bump-minor-pre-major": false,
       "date-format": "%Y-%m-%d",
       "extra-files": [
         {
