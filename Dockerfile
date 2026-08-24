@@ -28,18 +28,25 @@ COPY requirements.txt requirements-full.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements-full.txt
 
-# Lift transitive dependencies that resolve to versions with known advisories.
-# These are not imported by FLITS directly; the constraint exists so the shipped
-# image passes a vulnerability scan.
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade "msgpack>=1.2.1" "setuptools>=78.1.1"
-
 # Then install the project itself; --no-deps skips re-resolving requirements.
 COPY pyproject.toml README.md MANIFEST.in ./
 COPY docs ./docs
 COPY flits ./flits
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-deps .
+
+# Lift transitive dependencies that resolve to versions carrying advisories.
+# None of these are imported by FLITS directly, but the image is a release
+# artifact and should not ship known-vulnerable packages.
+#
+# This runs last so nothing installed earlier can pull a fixed version back
+# down, and the versions are asserted afterwards so a regression fails the build
+# instead of reaching the registry and the scheduled scan.
+COPY docker/verify_security_floors.py /tmp/verify_security_floors.py
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade "msgpack>=1.2.1" "setuptools>=78.1.1" && \
+    python /tmp/verify_security_floors.py && \
+    rm /tmp/verify_security_floors.py
 
 EXPOSE 8123
 
