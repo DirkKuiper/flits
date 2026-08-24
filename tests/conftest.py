@@ -412,6 +412,91 @@ def write_full_stokes_filterbank(
     )
 
 
+def write_full_stokes_folded_psrfits(
+    path: Path,
+    *,
+    feed_polarization: str | None = "LIN",
+    pol_type: str = "AABBCRCI",
+    rm_rad_m2: float = 137.5,
+    linear_fraction: float = 0.8,
+    intrinsic_angle_rad: float = 0.4,
+    rng_seed: int = 11,
+) -> FullStokesWaterfall:
+    """Write a four-polarization folded PSRFITS whose header names the basis.
+
+    This is the one input format that can settle the polarization basis on its
+    own, through ``POL_TYPE`` and ``FD_POLN``. Pass ``feed_polarization=None`` to
+    write the ambiguous file that names ``AABBCRCI`` without saying which feed
+    produced it.
+    """
+    fits = pytest.importorskip("astropy.io.fits")
+
+    products = _linear_feed_products(
+        rm_rad_m2=rm_rad_m2,
+        linear_fraction=linear_fraction,
+        intrinsic_angle_rad=intrinsic_angle_rad,
+        rng_seed=rng_seed,
+    )
+    npol, nchan, nbin = products.shape
+    freqs = _STOKES_FCH1_MHZ + _STOKES_FOFF_MHZ * np.arange(nchan, dtype=float)
+    period = float(_STOKES_TSAMP_S) * nbin
+    tstart_mjd = 60000.0
+    stt_imjd = int(tstart_mjd)
+    stt_seconds = (tstart_mjd - stt_imjd) * 86400.0
+
+    primary = fits.PrimaryHDU()
+    primary.header["FITSTYPE"] = "PSRFITS"
+    primary.header["OBS_MODE"] = "PSR"
+    primary.header["SRC_NAME"] = "STOKES_FOLD_TEST"
+    primary.header["TELESCOP"] = "SYNTH"
+    primary.header["OBSFREQ"] = float(np.mean(freqs))
+    primary.header["OBSBW"] = float(_STOKES_FOFF_MHZ * nchan)
+    primary.header["OBSNCHAN"] = nchan
+    primary.header["STT_IMJD"] = stt_imjd
+    primary.header["STT_SMJD"] = int(stt_seconds)
+    primary.header["STT_OFFS"] = stt_seconds - int(stt_seconds)
+    primary.header["RAJ"] = "12:34:56.78"
+    primary.header["DECJ"] = "-12:34:56.78"
+    if feed_polarization is not None:
+        primary.header["FD_POLN"] = feed_polarization
+
+    subint = fits.BinTableHDU.from_columns(
+        [
+            fits.Column(name="PERIOD", format="D", array=np.array([period])),
+            fits.Column(name="DAT_FREQ", format=f"{nchan}D", array=freqs.reshape(1, nchan)),
+            fits.Column(name="DAT_OFFS", format=f"{npol * nchan}E", array=np.zeros((1, npol * nchan), dtype=">f4")),
+            fits.Column(name="DAT_SCL", format=f"{npol * nchan}E", array=np.ones((1, npol * nchan), dtype=">f4")),
+            fits.Column(
+                name="DATA",
+                format=f"{npol * nchan * nbin}I",
+                dim=f"({nbin},{nchan},{npol})",
+                array=np.rint(products).astype(">i2").reshape(1, npol, nchan, nbin),
+            ),
+        ],
+        name="SUBINT",
+    )
+    subint.header["NBIN"] = nbin
+    subint.header["NCHAN"] = nchan
+    subint.header["NPOL"] = npol
+    subint.header["TBIN"] = float(_STOKES_TSAMP_S)
+    subint.header["CHAN_BW"] = float(_STOKES_FOFF_MHZ)
+    subint.header["POL_TYPE"] = pol_type
+
+    fits.HDUList([primary, subint]).writeto(path)
+    return FullStokesWaterfall(
+        path=path,
+        rm_rad_m2=rm_rad_m2,
+        linear_fraction=linear_fraction,
+        intrinsic_angle_rad=intrinsic_angle_rad,
+        nchan=nchan,
+        ntime=nbin,
+        burst_time_idx=_STOKES_BURST_BIN,
+        fch1_mhz=_STOKES_FCH1_MHZ,
+        foff_mhz=_STOKES_FOFF_MHZ,
+        tsamp_s=_STOKES_TSAMP_S,
+    )
+
+
 @pytest.fixture
 def full_stokes_waterfall(tmp_path: Path) -> FullStokesWaterfall:
     """A four-IF burst whose rotation measure is known exactly."""

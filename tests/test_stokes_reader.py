@@ -6,7 +6,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from conftest import FullStokesWaterfall, write_full_stokes_filterbank
+from conftest import (
+    FullStokesWaterfall,
+    write_full_stokes_filterbank,
+    write_full_stokes_folded_psrfits,
+)
 
 from flits.io import detect_reader, load_filterbank_data, load_stokes_data, reader_supports_stokes
 from flits.io.errors import PolarizationUnavailableError
@@ -85,3 +89,48 @@ def test_normalization_keeps_the_polarization_fraction_intact(full_stokes_waterf
     fraction = float(np.sum(linear) / np.sum(integrated[0]))
     # Per-channel scaling must not move the injected linear fraction.
     assert fraction == pytest.approx(full_stokes_waterfall.linear_fraction, abs=0.1)
+
+
+def test_a_folded_psrfits_header_settles_its_own_basis(tmp_path: Path) -> None:
+    waterfall = write_full_stokes_folded_psrfits(tmp_path / "fold_lin.fits")
+    reader = detect_reader(waterfall.path)
+    inspection = reader.inspect(waterfall.path)
+    assert inspection.polarization_products == 4
+    assert inspection.polarization_basis == "coherency_linear"
+    assert inspection.polarization_basis_source == "file_header"
+
+    config = ObservationConfig.from_preset(dm=0.0, preset_key="generic")
+    cube, metadata = load_stokes_data(waterfall.path, config)
+    stokes_i, _ = load_filterbank_data(waterfall.path, config)
+    assert cube.shape == (4, *stokes_i.shape)
+    assert metadata.polarization_basis_source == "file_header"
+
+    burst = waterfall.burst_time_idx
+    integrated = np.sum(cube[:, :, burst - 8 : burst + 8], axis=2)
+    linear = np.hypot(integrated[1], integrated[2])
+    assert float(np.sum(linear) / np.sum(integrated[0])) == pytest.approx(waterfall.linear_fraction, abs=0.1)
+
+
+def test_a_circular_feed_header_is_read_as_a_circular_feed(tmp_path: Path) -> None:
+    waterfall = write_full_stokes_folded_psrfits(tmp_path / "fold_circ.fits", feed_polarization="CIRC")
+    inspection = detect_reader(waterfall.path).inspect(waterfall.path)
+    assert inspection.polarization_basis == "coherency_circular"
+
+
+def test_a_psrfits_header_without_a_feed_leaves_the_basis_unresolved(tmp_path: Path) -> None:
+    waterfall = write_full_stokes_folded_psrfits(tmp_path / "fold_ambiguous.fits", feed_polarization=None)
+    inspection = detect_reader(waterfall.path).inspect(waterfall.path)
+    assert inspection.polarization_products == 4
+    assert inspection.polarization_basis is None
+    assert not inspection.stokes_available
+
+    config = ObservationConfig.from_preset(dm=0.0, preset_key="generic")
+    with pytest.raises(PolarizationUnavailableError) as excinfo:
+        load_stokes_data(waterfall.path, config)
+    assert excinfo.value.reason == "unknown_basis"
+
+
+def test_a_total_intensity_psrfits_offers_no_stokes_path(tmp_path: Path) -> None:
+    waterfall = write_full_stokes_folded_psrfits(tmp_path / "fold_inten.fits", pol_type="AA+BB")
+    inspection = detect_reader(waterfall.path).inspect(waterfall.path)
+    assert inspection.polarization_basis is None
