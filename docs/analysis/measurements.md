@@ -26,6 +26,49 @@ or specify an SEFD explicitly.
 Without an SEFD, FLITS can still report selection- and timing-related outputs,
 but not calibrated flux-density values.
 
+## Uncertainties, and what FLITS will not claim
+
+Every reported quantity carries its own uncertainty *and its own classification
+of what that uncertainty means*. FLITS distinguishes two cases, and refuses to
+blur them:
+
+| Classification | Meaning |
+| --- | --- |
+| `formal_1sigma` | The statistical term and the systematic terms it needs were both available, and are combined in quadrature. This is a complete 1-sigma uncertainty. |
+| `statistical_only` | Only the statistical (radiometer-noise) term is known. The systematic contribution is missing, so the stated value is a **lower bound** on the true uncertainty. |
+
+For flux-like quantities the systematic term that matters is the fractional
+uncertainty on the SEFD. Supply it as `sefd_fractional_uncertainty` when opening
+the session:
+
+```python
+session = BurstSession.from_file(
+    "burst.fil",
+    dm=527.65,
+    sefd_jy=10.0,
+    sefd_fractional_uncertainty=0.1,  # 10% SEFD uncertainty
+)
+```
+
+Without it, FLITS still reports a fluence — the statistical part is real and
+useful for relative comparisons — but marks it **not publishable** and records
+why. A fluence quoted from a `statistical_only` result understates its
+uncertainty, often by a large factor, because SEFD uncertainty typically
+dominates.
+
+Each quantity also records the *basis* of its uncertainty in words: which noise
+reference was used, and which terms were combined. That text is carried into
+exports, so a number in a table can be traced back to how it was derived
+without rerunning anything.
+
+Distance-dependent quantities behave the same way: isotropic energy needs
+`distance_fractional_uncertainty` before it is reported as a formal uncertainty.
+
+!!! tip "Check the flags before quoting a number"
+    `measurement_flags` records what was missing or suspect —
+    `missing_sefd`, `missing_sefd_fractional_uncertainty`, `edge_clipped` and
+    others. They are the fastest way to see whether a value is ready to use.
+
 ## Provenance matters
 
 Measurements depend on:
