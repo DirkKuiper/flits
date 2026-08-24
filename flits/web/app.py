@@ -91,12 +91,29 @@ class RMSynthesisRequest(BaseModel):
 
 
 app = FastAPI(title="FLITS")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+
+def cors_origins() -> list[str]:
+    """Return the cross-origin list configured via ``FLITS_CORS_ORIGINS``.
+
+    The bundled interface is served from the same origin as the API, so it needs
+    no CORS headers at all. Cross-origin access is therefore opt-in: only origins
+    named explicitly in the environment variable (comma separated) are allowed.
+    """
+    configured = os.environ.get("FLITS_CORS_ORIGINS", "").strip()
+    if not configured:
+        return []
+    return [origin.strip() for origin in configured.split(",") if origin.strip()]
+
+
+_CORS_ORIGINS = cors_origins()
+if _CORS_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_CORS_ORIGINS,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -106,15 +123,59 @@ def data_dir() -> Path:
     return base.resolve()
 
 
+def allow_outside_data_dir() -> bool:
+    """Return True when FLITS may open paths outside the configured data dir.
+
+    Defaults to False so that ``--data-dir`` acts as a containment boundary
+    rather than only a browsing convenience. Set ``FLITS_ALLOW_OUTSIDE_DATA_DIR``
+    (or pass ``--allow-outside-data-dir``) to opt out.
+    """
+    value = os.environ.get("FLITS_ALLOW_OUTSIDE_DATA_DIR", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _is_within_data_dir(path: Path) -> bool:
+    try:
+        path.relative_to(data_dir())
+    except ValueError:
+        return False
+    return True
+
+
+def ensure_within_data_dir(path: Path, *, original: str) -> Path:
+    """Reject a resolved path that escapes the configured data directory."""
+    if allow_outside_data_dir() or _is_within_data_dir(path):
+        return path
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            f"Path is outside the FLITS data directory ({data_dir()}): {original}. "
+            "Restart FLITS with --data-dir covering this location, or with "
+            "--allow-outside-data-dir to disable containment."
+        ),
+    )
+
+
 def resolve_burst_path(path_str: str) -> Path:
     candidate = Path(path_str).expanduser()
     if not candidate.is_absolute():
         candidate = (data_dir() / candidate).resolve()
     else:
         candidate = candidate.resolve()
+    candidate = ensure_within_data_dir(candidate, original=path_str)
     if not candidate.exists():
         raise HTTPException(status_code=404, detail=f"Filterbank file not found: {path_str}")
     return candidate
+
+
+def _contained_session_loader(path_str: str, **kwargs: Any) -> BurstSession:
+    """Load a session while enforcing the data-directory containment boundary.
+
+    Session snapshots carry the path of the burst they were built from. That
+    path arrives from user-supplied JSON on the import endpoint, so it goes
+    through the same containment check as any other request.
+    """
+    return BurstSession.from_file(str(resolve_burst_path(path_str)), **kwargs)
 
 
 def get_session(session_id: str) -> BurstSession:
@@ -530,7 +591,9 @@ def open_session_snapshot(snapshot_id: str) -> dict[str, Any]:
     snapshot_path = _session_snapshot_path_by_id(snapshot_id)
     try:
         snapshot = _load_snapshot_payload(snapshot_path)
-        session = BurstSession.from_snapshot(snapshot)
+        session = BurstSession.from_snapshot(snapshot, loader=_contained_session_loader)
+    except HTTPException:
+        raise
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -670,7 +733,9 @@ def save_session_snapshot(session_id: str, request: SaveSessionSnapshotRequest) 
 @app.post("/api/sessions/import")
 def import_session(request: ImportSessionRequest) -> dict[str, Any]:
     try:
-        session = BurstSession.from_snapshot(request.snapshot)
+        session = BurstSession.from_snapshot(request.snapshot, loader=_contained_session_loader)
+    except HTTPException:
+        raise
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -842,9 +907,32 @@ def main() -> None:
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument(
+        "--allow-outside-data-dir",
+        action="store_true",
+        help=(
+            "Allow opening files outside --data-dir. Off by default: the data "
+            "directory is a containment boundary, not only a browsing root."
+        ),
+    )
+    parser.add_argument(
+        "--cors-origin",
+        action="append",
+        default=None,
+        metavar="ORIGIN",
+        help=(
+            "Allow cross-origin browser requests from ORIGIN (repeatable). The "
+            "bundled interface is same-origin and needs none; only add an origin "
+            "when serving the interface from somewhere else."
+        ),
+    )
     args = parser.parse_args()
     if args.data_dir is not None:
         os.environ["FLITS_DATA_DIR"] = str(Path(args.data_dir).expanduser().resolve())
+    if args.allow_outside_data_dir:
+        os.environ["FLITS_ALLOW_OUTSIDE_DATA_DIR"] = "1"
+    if args.cors_origin:
+        os.environ["FLITS_CORS_ORIGINS"] = ",".join(args.cors_origin)
     uvicorn.run("flits.web.app:app", host=args.host, port=args.port, reload=False)
 
 
