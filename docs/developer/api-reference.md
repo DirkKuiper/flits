@@ -46,11 +46,22 @@ with open("burst_flits_session.json", "w") as handle:
       members:
         - inspect_filterbank
         - load_filterbank_data
+        - load_stokes_data
+        - reader_supports_stokes
         - list_readers
 
 ::: flits.io.reader.BurstReader
 
+::: flits.io.reader.StokesBurstReader
+
 ::: flits.io.reader.FilterbankInspection
+
+::: flits.stokes
+    options:
+      members:
+        - normalize_polarization_basis
+        - basis_from_psrfits
+        - stokes_from_products
 
 ## Analysis
 
@@ -72,6 +83,10 @@ with open("burst_flits_session.json", "w") as handle:
 
 ## Polarization
 
+::: flits.models.PolarizationSettings
+
+::: flits.models.PolarizationAnalysisResult
+
 ::: flits.analysis.polarization.extract_normalized_linear_spectrum
 
 ::: flits.analysis.polarization.run_rm_synthesis
@@ -87,6 +102,7 @@ with open("burst_flits_session.json", "w") as handle:
         - dedispersion_bin_resolution
         - shift_channels
         - normalize
+        - normalize_stokes
         - block_reduce_mean
         - radiometer
 

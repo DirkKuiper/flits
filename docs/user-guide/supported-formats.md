@@ -144,6 +144,38 @@ In practice, this means:
   `DM = DM_coherent`.
 - The UI auto-suggests `DM = DM_coherent` for these files.
 
+## Full-Stokes input
+
+`load` returns Stokes I for every reader. A reader that can also produce
+Stokes I/Q/U/V implements one further method, `load_stokes`, returning a
+`(4, channels, time)` cube on the same time and frequency grid as the Stokes I
+array for the same file and config. The SIGPROC/PSRFITS reader implements it;
+the CHIME HDF5 reader does not.
+
+A file yields a cube only when it holds four polarization products *and* the
+polarization basis is established — by an explicit setting, by the telescope
+preset, or by the file header (PSRFITS `POL_TYPE` with `FD_POLN`). SIGPROC
+records nothing about which four products a `nifs=4` file holds, so those need a
+preset or an explicit basis. Anything else raises
+`PolarizationUnavailableError`. See [Rotation-Measure
+Synthesis](../analysis/rm-synthesis.md) for the bases and the in-session
+workflow.
+
+```python
+from flits.io import load_stokes_data, reader_supports_stokes, detect_reader
+from flits.settings import ObservationConfig
+
+config = ObservationConfig.from_preset(dm=528.0, preset_key="nrt")
+inspection = detect_reader("burst.fil").inspect("burst.fil")
+if inspection.stokes_available:
+    cube, metadata = load_stokes_data("burst.fil", config)
+```
+
+`FilterbankInspection` reports `polarization_products`, `polarization_basis`,
+`polarization_basis_source` and the derived `stokes_available`, so a caller can
+tell "this file is Stokes I" from "tell FLITS which basis this file uses"
+without attempting a load.
+
 ## Programmatic use
 
 ```python
@@ -169,3 +201,5 @@ All I/O errors derive from `flits.io.errors.FlitsReaderError`:
 - `CorruptedDataError` — file is recognized but contents are inconsistent.
 - `MetadataMissingError` — required header fields absent; `.fields` lists them.
 - `UnsupportedSchemaError` — HDF5 schema version is not known.
+- `PolarizationUnavailableError` — no Stokes cube can be built; `.reason` is
+  `reader_unsupported`, `insufficient_products` or `unknown_basis`.
