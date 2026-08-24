@@ -52,3 +52,18 @@ The following are known and accepted properties rather than vulnerabilities:
 
 Reports that FLITS is insecure *when deliberately bound to a public interface
 with `--host 0.0.0.0`* will be closed as working as documented.
+
+## Scanning and accepted findings
+
+Every push and a weekly schedule run `pip-audit` over the dependency tree and
+Trivy over both the repository and the published container image, failing on any
+HIGH or CRITICAL finding. The container build additionally asserts version
+floors for transitive packages with known advisories, so a regression fails the
+build rather than reaching the registry.
+
+A small number of findings are accepted rather than fixed, each recorded with
+its justification in [`.trivyignore`](.trivyignore) or inline in the workflow.
+They are all cases where the vulnerable code is vendored inside another tool
+(pip's private copies of msgpack and setuptools, for instance) and is not
+reachable from FLITS. These entries are reviewed whenever the base image or pip
+is bumped.
