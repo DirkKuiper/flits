@@ -11,6 +11,8 @@ For reproducing a saved analysis without writing code, see
 ## A minimal analysis
 
 ```python
+import json
+
 from flits import BurstSession
 
 session = BurstSession.from_file(
@@ -29,7 +31,6 @@ measurements = session.compute_properties()
 print(measurements.fluence_jyms, measurements.snr)
 
 # Persist everything needed to reproduce this later.
-import json
 with open("burst_flits_session.json", "w") as handle:
     json.dump(session.snapshot_dict(), handle, indent=2)
 ```
