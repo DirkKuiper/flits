@@ -17,6 +17,39 @@ including public catalog waterfalls and beamformed `BBData`
 `tiedbeam_power` files. The I/O layer is pluggable — third parties can
 register custom formats via `importlib` entry points without forking.
 
+Every interactive decision is recorded in a JSON session snapshot, and
+`flits replay` re-runs that snapshot headlessly to reproduce the exported
+measurements without a browser.
+
+## Why FLITS exists
+
+Turning a detected burst into a number you can defend takes several steps —
+tune the DM, mask interference, place the event and off-pulse windows, choose a
+spectral extent, then measure — and every one of them is a judgement call that
+moves the answer.
+
+The tools that do these steps well do them separately. Search pipelines stop at
+detection; format libraries read data without offering a workflow; and the
+strong single-purpose tools each expect their own input conventions. So a burst
+campaign accumulates per-instrument glue scripts, and the decisions that
+produced the numbers survive only in someone's notebook.
+
+That gets harder for repeating sources, where the same population is observed by
+many telescopes. FLITS was built for a repeater campaign spanning GBT at L and P
+band, Nançay, Westerbork, Onsala, Stockert and CHIME — three file formats,
+sampling times differing by more than an order of magnitude, and instruments
+with different bandwidths, polarization conventions and SEFDs.
+
+FLITS makes the session, rather than the script, the unit of analysis. One
+interface covers every supported instrument, the reader layer absorbs the format
+differences, telescope presets carry the instrument-specific calibration, and
+the snapshot makes the analysis inspectable and replayable afterwards.
+Measurements state their own uncertainty basis: FLITS separates a formal 1-sigma
+uncertainty from a statistical-only one, and will not mark a fluence publishable
+when the SEFD systematic it needs was never supplied.
+
+FLITS is not a search pipeline — it starts from a burst you already have.
+
 ## Quick Start
 
 Install the published package:
