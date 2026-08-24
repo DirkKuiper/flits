@@ -79,7 +79,7 @@ jobs:
         run: python -m playwright install --with-deps chromium
 
       - name: Run browser tests
-        run: python -m pytest tests/test_frontend_e2e.py -q
+        run: python -m pytest tests/test_frontend_e2e.py -q -m e2e
 
   lint:
     runs-on: ubuntu-latest

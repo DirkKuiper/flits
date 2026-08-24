@@ -129,7 +129,10 @@ ignore = [
 known-first-party = ["flits"]
 
 [tool.mypy]
-python_version = "3.11"
+# No python_version pin: mypy analyses with the running interpreter. Pinning it
+# to the 3.11 floor makes numpy's bundled stubs unparseable, since they use
+# `type` statements. Source-level 3.11 compatibility is enforced by ruff's
+# target-version instead.
 files = ["flits"]
 ignore_missing_imports = true
 warn_unused_ignores = true
@@ -166,7 +169,7 @@ module = [
 ignore_errors = true
 
 [tool.pytest.ini_options]
-addopts = "-ra"
+addopts = "-ra -m 'not e2e'"
 testpaths = ["tests"]
 markers = [
   "e2e: browser tests that need Playwright and a real server (deselect with -m 'not e2e')",

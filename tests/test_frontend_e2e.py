@@ -106,8 +106,9 @@ def test_interface_loads_without_javascript_errors(page) -> None:
 
 
 def test_file_listing_offers_the_burst(page, synthetic_waterfall) -> None:
-    options = page.locator("#fileSelect option").all_text_contents()
-    assert any(synthetic_waterfall.path.name in option for option in options)
+    # The listing is fetched after load, so let the assertion retry rather than
+    # racing the request on a slow runner.
+    expect(page.locator("#fileSelect")).to_contain_text(synthetic_waterfall.path.name, timeout=30_000)
 
 
 def test_loading_a_burst_renders_the_waterfall(page, synthetic_waterfall) -> None:
