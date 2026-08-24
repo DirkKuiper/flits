@@ -219,3 +219,77 @@ class TestCrossOriginPolicy:
             assert "access-control-allow-origin" not in denied.headers
         finally:
             self._reload_app(monkeypatch, None)
+
+
+class TestSessionStoreBounds:
+    """Sessions are capped so a long-running server cannot grow without limit."""
+
+    def test_least_recently_used_session_is_evicted(
+        self, client: TestClient, synthetic_waterfall, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("FLITS_MAX_SESSIONS", "2")
+
+        first = _create_session(client, synthetic_waterfall)
+        second = _create_session(client, synthetic_waterfall)
+
+        # Touch the first so the second becomes least recently used.
+        assert client.get(f"/api/sessions/{first}").status_code == 200
+
+        third = _create_session(client, synthetic_waterfall)
+
+        assert client.get(f"/api/sessions/{first}").status_code == 200
+        assert client.get(f"/api/sessions/{third}").status_code == 200
+        assert client.get(f"/api/sessions/{second}").status_code == 404
+
+    def test_eviction_message_points_at_the_snapshot(
+        self, client: TestClient, synthetic_waterfall, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("FLITS_MAX_SESSIONS", "1")
+        first = _create_session(client, synthetic_waterfall)
+        _create_session(client, synthetic_waterfall)
+
+        response = client.get(f"/api/sessions/{first}")
+        assert response.status_code == 404
+        assert "snapshot" in response.json()["detail"]
+
+    def test_invalid_cap_falls_back_to_the_default(
+        self, client: TestClient, synthetic_waterfall, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("FLITS_MAX_SESSIONS", "not-a-number")
+        session_id = _create_session(client, synthetic_waterfall)
+        assert client.get(f"/api/sessions/{session_id}").status_code == 200
+
+
+class TestErrorReporting:
+    """Bad input and internal faults must be distinguishable."""
+
+    def test_bad_action_input_is_a_client_error(
+        self, client: TestClient, synthetic_waterfall
+    ) -> None:
+        session_id = _create_session(client, synthetic_waterfall)
+        response = client.post(
+            f"/api/sessions/{session_id}/actions",
+            json={"type": "time_factor", "payload": {}},
+        )
+        assert response.status_code == 400
+
+    def test_internal_failure_is_reported_as_a_server_error(
+        self, client: TestClient, synthetic_waterfall, monkeypatch, caplog
+    ) -> None:
+        session_id = _create_session(client, synthetic_waterfall)
+
+        def explode(self, *args, **kwargs):
+            raise RuntimeError("synthetic internal fault")
+
+        monkeypatch.setattr("flits.session.BurstSession.reset_view", explode)
+
+        with caplog.at_level("ERROR"):
+            response = client.post(
+                f"/api/sessions/{session_id}/actions",
+                json={"type": "reset_view", "payload": {}},
+            )
+
+        assert response.status_code == 500
+        assert "reset_view" in response.json()["detail"]
+        # The traceback must survive rather than being discarded.
+        assert "synthetic internal fault" in caplog.text

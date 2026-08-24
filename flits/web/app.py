@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import argparse
+from collections import OrderedDict
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -24,10 +25,42 @@ from flits.session import BurstSession
 from flits.settings import available_auto_mask_profiles, available_presets, get_preset
 
 
+logger = logging.getLogger("flits.web")
+
 PACKAGE_DIR = Path(__file__).resolve().parents[1]
 STATIC_DIR = PACKAGE_DIR / "web_static"
-SESSIONS: dict[str, BurstSession] = {}
+
+# Each session holds a full dedispersed waterfall, so an unbounded store grows
+# until the process is restarted. Keep the most recently used ones and drop the
+# rest; a dropped session can be reopened from its snapshot.
+DEFAULT_MAX_SESSIONS = 8
+
+
+def max_sessions() -> int:
+    """Return how many sessions are kept in memory at once."""
+    configured = os.environ.get("FLITS_MAX_SESSIONS", "").strip()
+    if not configured:
+        return DEFAULT_MAX_SESSIONS
+    try:
+        value = int(configured)
+    except ValueError:
+        logger.warning("Ignoring invalid FLITS_MAX_SESSIONS=%r", configured)
+        return DEFAULT_MAX_SESSIONS
+    return max(1, value)
+
+
+SESSIONS: OrderedDict[str, BurstSession] = OrderedDict()
 SESSION_SNAPSHOT_PATHS: dict[str, Path] = {}
+
+
+def register_session(session_id: str, session: BurstSession) -> None:
+    """Store a session, evicting the least recently used one past the cap."""
+    SESSIONS[session_id] = session
+    SESSIONS.move_to_end(session_id)
+    while len(SESSIONS) > max_sessions():
+        evicted_id, _ = SESSIONS.popitem(last=False)
+        SESSION_SNAPSHOT_PATHS.pop(evicted_id, None)
+        logger.info("Evicted least recently used session %s", evicted_id)
 
 _SKIP_DIRS: frozenset[str] = frozenset(
     {"site-packages", "node_modules", "__pycache__", "dist", "build"}
@@ -182,7 +215,14 @@ def _contained_session_loader(path_str: str, **kwargs: Any) -> BurstSession:
 def get_session(session_id: str) -> BurstSession:
     session = SESSIONS.get(session_id)
     if session is None:
-        raise HTTPException(status_code=404, detail="Unknown session id")
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Unknown session id. It may have been evicted to free memory; "
+                "reopen it from its saved snapshot."
+            ),
+        )
+    SESSIONS.move_to_end(session_id)
     return session
 
 
@@ -598,10 +638,11 @@ def open_session_snapshot(snapshot_id: str) -> dict[str, Any]:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception("Could not restore session from snapshot")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     session_id = uuid4().hex
-    SESSIONS[session_id] = session
+    register_session(session_id, session)
     SESSION_SNAPSHOT_PATHS[session_id] = _resolve_existing_or_candidate(snapshot_path)
     return {
         "session_id": session_id,
@@ -680,7 +721,7 @@ def create_session(request: CreateSessionRequest) -> dict[str, Any]:
         observatory_height_m=request.observatory_height_m,
     )
     session_id = uuid4().hex
-    SESSIONS[session_id] = session
+    register_session(session_id, session)
     return {"session_id": session_id, "view": session.get_view()}
 
 
@@ -740,10 +781,11 @@ def import_session(request: ImportSessionRequest) -> dict[str, Any]:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception("Could not restore session from snapshot")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     session_id = uuid4().hex
-    SESSIONS[session_id] = session
+    register_session(session_id, session)
     return {"session_id": session_id, "view": session.get_view()}
 
 
@@ -887,8 +929,18 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
             raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
     except HTTPException:
         raise
-    except Exception as exc:
+    except (ValueError, KeyError, TypeError) as exc:
+        # Bad input for the requested action: the caller can fix this.
+        logger.info("Action %s rejected for session %s: %s", action, session_id, exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        # Anything else is a fault in FLITS. Keep the traceback -- previously it
+        # was discarded and the failure was indistinguishable from bad input.
+        logger.exception("Action %s failed for session %s", action, session_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"FLITS failed while running '{action}': {exc}",
+        ) from exc
 
     return {
         "session_id": session_id,
