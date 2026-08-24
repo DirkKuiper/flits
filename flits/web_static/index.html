@@ -582,11 +582,38 @@
                 <strong>Calibration required</strong>
                 <span>FLITS does not infer Q/U from Stokes I. Correct instrumental leakage and polarization calibration upstream. Apply or record an ionospheric correction before reporting an intrinsic source RM.</span>
               </div>
+              <section class="rm-config-panel" id="sessionPolarizationPanel">
+                <div class="analysis-panel-head compact">
+                  <h5>Measure From This Session</h5>
+                  <p>Integrate Stokes Q and U over the event window, take the noise from the off-pulse regions, and run RM synthesis on the channels this session has not masked. Requires a burst file that carries four polarization products.</p>
+                </div>
+                <div id="sessionPolarizationStatus" class="rm-input-summary">
+                  <span class="panel-badge">No session loaded</span>
+                </div>
+                <div class="field-row rm-grid-fields">
+                  <label class="field">
+                    <span>Minimum channel L S/N <span class="tooltip-icon" data-tooltip="Channels whose integrated linear polarization falls below this significance are dropped before RM synthesis.">?</span></span>
+                    <input id="sessionPolMinSnrInput" type="number" min="0" step="0.5" value="5">
+                  </label>
+                  <label class="field">
+                    <span>Polarization basis <span class="tooltip-icon" data-tooltip="Which four products the file holds. Detected from the file header or the telescope preset; override only if you know the instrument writes something else.">?</span></span>
+                    <select id="sessionPolBasisInput">
+                      <option value="">Auto (header or preset)</option>
+                      <option value="iquv">Stokes I, Q, U, V</option>
+                      <option value="coherency_linear">Coherency, linear feed (AA, BB, CR, CI)</option>
+                      <option value="coherency_circular">Coherency, circular feed (AA, BB, CR, CI)</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="export-actions rm-actions">
+                  <button class="primary-button" id="sessionPolRunButton" type="button" disabled>Measure RM From Session</button>
+                </div>
+              </section>
               <div class="rm-workflow-grid">
                 <section class="rm-config-panel">
                   <div class="analysis-panel-head compact">
                     <h5>1. Load Q/U Spectrum</h5>
-                    <p>JSON arrays or a CSV table with frequency, Q, and U columns.</p>
+                    <p>Alternative to the above, for Q/U prepared outside FLITS: JSON arrays or a CSV table with frequency, Q, and U columns.</p>
                   </div>
                   <div class="export-actions rm-actions">
                     <button class="primary-button" id="rmImportButton" type="button">Import JSON or CSV</button>

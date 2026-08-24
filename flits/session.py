@@ -23,6 +23,7 @@ from flits.analysis.fitting import fit_model_selected_band
 from flits.analysis.fitting.fitburst_adapter import ModelFitRequestConfig
 from flits.analysis.localization import BurstLocalization, localize_burst
 from flits.analysis.morphology import compute_width_analysis
+from flits.analysis.polarization import extract_normalized_linear_spectrum, run_rm_synthesis
 from flits.analysis.temporal.core import run_temporal_structure_analysis, temporal_to_spectral_result
 from flits.exports import MAX_EXPORT_SNAPSHOTS, StoredExportSnapshot, create_export_snapshot, preview_export
 from flits.measurements import (
@@ -49,6 +50,8 @@ from flits.models import (
     FilterbankMetadata,
     NoiseEstimateSettings,
     OffPulseRegion,
+    PolarizationAnalysisResult,
+    PolarizationSettings,
     SessionSourceRef,
     SpectralAnalysisResult,
     TemporalStructureResult,
@@ -62,6 +65,7 @@ from flits.signal import (
     dedispersion_shift_bins,
     shift_channels,
 )
+from flits.stokes import normalize_polarization_basis
 from flits.timing import ObservatoryLocation, TimingContext
 
 try:
@@ -74,7 +78,7 @@ except Exception as exc:  # pragma: no cover - optional dependency
     jess = SimpleNamespace(channel_masks=SimpleNamespace(channel_masker=None))
 
 
-SESSION_SNAPSHOT_SCHEMA_VERSION = "1.4"
+SESSION_SNAPSHOT_SCHEMA_VERSION = "1.5"
 SOURCE_HASH_ALGORITHM = "sha256"
 SOURCE_HASH_CHUNK_BYTES = 1024 * 1024
 JESS_MASK_DTYPE = np.float32
@@ -284,6 +288,11 @@ def _resolve_snapshot_source_path(source: SessionSourceRef) -> Path:
     return existing[0]
 
 
+def _public_capability(capability: dict[str, Any]) -> dict[str, Any]:
+    """Drop the private cache key before a capability dict leaves the session."""
+    return {key: value for key, value in capability.items() if not key.startswith("_")}
+
+
 @dataclass(frozen=True)
 class ReducedAnalysisGrid:
     masked: np.ndarray
@@ -357,6 +366,8 @@ class BurstSession:
     dm_optimization: DmOptimizationResult | None = None
     spectral_analysis: SpectralAnalysisResult | None = None
     temporal_structure: TemporalStructureResult | None = None
+    polarization_settings: PolarizationSettings = field(default_factory=PolarizationSettings)
+    polarization: PolarizationAnalysisResult | None = None
     export_snapshots: dict[str, StoredExportSnapshot] = field(default_factory=dict)
     export_order: list[str] = field(default_factory=list)
     # Dispersion state relative to the DM the data was loaded at. Retuning the
@@ -365,6 +376,13 @@ class BurstSession:
     # rounding error.
     _load_dm: float | None = field(default=None, repr=False, compare=False)
     _applied_shift_bins: np.ndarray | None = field(default=None, repr=False, compare=False)
+    # Full-Stokes data is loaded only when a polarization analysis asks for it,
+    # and is cached at the DM the file was opened with. The session's own
+    # dispersion shift is re-applied on use, so the cube always lines up with
+    # `data` no matter how many times the DM has been retuned since.
+    _stokes_base_cube: np.ndarray | None = field(default=None, repr=False, compare=False)
+    _stokes_metadata: FilterbankMetadata | None = field(default=None, repr=False, compare=False)
+    _polarization_capability: dict[str, Any] | None = field(default=None, repr=False, compare=False)
 
     @classmethod
     def from_file(
@@ -388,6 +406,7 @@ class BurstSession:
         observatory_longitude_deg: float | None = None,
         observatory_latitude_deg: float | None = None,
         observatory_height_m: float | None = None,
+        polarization_basis: str | None = None,
     ) -> BurstSession:
         """Open a burst file and build a session at the given DM.
 
@@ -417,6 +436,7 @@ class BurstSession:
             observatory_longitude_deg=observatory_longitude_deg,
             observatory_latitude_deg=observatory_latitude_deg,
             observatory_height_m=observatory_height_m,
+            polarization_basis=polarization_basis,
         )
         data, metadata = load_filterbank_data(bfile, config, inspection=inspection)
         num_time_bins = data.shape[1]
@@ -433,6 +453,9 @@ class BurstSession:
             spec_ex_lo=0,
             spec_ex_hi=data.shape[0] - 1,
             channel_mask=np.zeros(data.shape[0], dtype=bool),
+            # Keep the stated basis on the settings too, so a later partial
+            # settings update does not read it back as "not stated".
+            polarization_settings=PolarizationSettings(polarization_basis=config.polarization_basis),
         )
 
     @classmethod
@@ -470,6 +493,7 @@ class BurstSession:
             observatory_longitude_deg=snapshot.observatory_longitude_deg,
             observatory_latitude_deg=snapshot.observatory_latitude_deg,
             observatory_height_m=snapshot.observatory_height_m,
+            polarization_basis=snapshot.polarization_basis,
         )
         session._validate_snapshot_source(snapshot.source)
 
@@ -508,6 +532,7 @@ class BurstSession:
         session.last_auto_mask = snapshot.last_auto_mask
         session.noise_settings = snapshot.noise_settings
         session.width_settings = snapshot.width_settings
+        session.polarization_settings = snapshot.polarization_settings
         session.notes = snapshot.notes
         if snapshot.schema_version != "1.0":
             session.results = snapshot.results
@@ -515,6 +540,7 @@ class BurstSession:
             session.dm_optimization = snapshot.dm_optimization
             session.spectral_analysis = snapshot.spectral_analysis
             session.temporal_structure = snapshot.temporal_structure
+            session.polarization = snapshot.polarization
             if session.results is not None:
                 session._apply_width_analysis_to_results()
         return session
@@ -678,6 +704,15 @@ class BurstSession:
         """Discard the cached temporal-structure analysis."""
         self.temporal_structure = None
 
+    def clear_polarization(self) -> None:
+        """Discard the cached polarization analysis.
+
+        The loaded Stokes cube is kept: it is expensive to read and stays valid
+        under every selection change, because the session re-applies its own
+        dispersion shift to it on use.
+        """
+        self.polarization = None
+
     def invalidate_analysis_state(self) -> None:
         """Discard every cached analysis, after a change that invalidates them all."""
         self.invalidate_results()
@@ -685,6 +720,7 @@ class BurstSession:
         self.clear_dm_optimization()
         self.clear_spectral_analysis()
         self.clear_temporal_structure()
+        self.clear_polarization()
 
     def bin_to_ms(self, time_bin: int | float) -> float:
         """Convert a time-sample index to milliseconds from the start of the window."""
@@ -1624,6 +1660,9 @@ class BurstSession:
             "dm_optimization": self.dm_optimization.to_dict() if self.dm_optimization is not None else None,
             "spectral_analysis": (None if self.spectral_analysis is None else self.spectral_analysis.to_dict()),
             "temporal_structure": (None if self.temporal_structure is None else self.temporal_structure.to_dict()),
+            "polarization": (None if self.polarization is None else self.polarization.to_dict()),
+            "polarization_settings": self.polarization_settings.to_dict(),
+            "polarization_capability": self.polarization_capability(),
         }
 
     def _sync_selections_to_crop(self) -> None:
@@ -2519,6 +2558,224 @@ class BurstSession:
         self.run_temporal_structure_analysis(segment_length_ms)
         return self.spectral_analysis
 
+    # ------------------------------------------------------------------
+    # Polarization
+    # ------------------------------------------------------------------
+
+    def _file_load_dm(self) -> float:
+        """The DM the file was read at, which the cached Stokes cube is aligned to."""
+        return float(self._load_dm) if self._load_dm is not None else float(self.dm)
+
+    def polarization_capability(self) -> dict[str, Any]:
+        """Report whether this burst can support an in-session RM measurement.
+
+        Answers the three questions separately -- does the reader have a
+        full-Stokes path, does the file carry four products, and is it known
+        which four -- because they call for different responses: a different
+        file, a different file, and a stated basis.
+        """
+        from flits.io import detect_reader, reader_supports_stokes
+
+        override = normalize_polarization_basis(self.config.polarization_basis)
+        cached = self._polarization_capability
+        if cached is not None and cached.get("_override") == override:
+            return _public_capability({**cached, "loaded": self._stokes_base_cube is not None})
+
+        capability: dict[str, Any] = {
+            "_override": override,
+            "supported": False,
+            "available": False,
+            "products": None,
+            "basis": normalize_polarization_basis(self.config.polarization_basis),
+            "basis_source": "config_override" if self.config.polarization_basis else None,
+            "loaded": self._stokes_base_cube is not None,
+            "reason": None,
+        }
+        try:
+            path = Path(self.burst_file)
+            reader = detect_reader(path)
+            capability["supported"] = reader_supports_stokes(reader)
+            inspection = reader.inspect(path)
+        except Exception as exc:
+            capability["reason"] = f"inspection_failed: {exc}"
+            self._polarization_capability = capability
+            return _public_capability(capability)
+
+        capability["products"] = inspection.polarization_products
+        if capability["basis"] is None:
+            capability["basis"] = inspection.polarization_basis
+            capability["basis_source"] = inspection.polarization_basis_source
+
+        if not capability["supported"]:
+            capability["reason"] = "reader_unsupported"
+        elif (inspection.polarization_products or 0) < 4:
+            capability["reason"] = "insufficient_products"
+        elif capability["basis"] is None:
+            capability["reason"] = "unknown_basis"
+        else:
+            capability["available"] = True
+        self._polarization_capability = capability
+        return _public_capability(capability)
+
+    def load_stokes_cube(self, *, reload: bool = False) -> np.ndarray:
+        """Return the burst as a (4, channels, time) Stokes I/Q/U/V cube.
+
+        The cube is read once, at the DM the file was opened with, and cached.
+        The session's accumulated dispersion shift is applied on every call, so
+        the returned cube is aligned with `data` even after the DM has been
+        retuned -- and retuning does not force a re-read.
+        """
+        from flits.io import load_stokes_data
+
+        basis = normalize_polarization_basis(self.config.polarization_basis)
+        cached_basis = None if self._stokes_metadata is None else self._stokes_metadata.polarization_basis
+        if reload or self._stokes_base_cube is None or (basis is not None and cached_basis != basis):
+            load_config = replace(self.config, dm=self._file_load_dm())
+            cube, metadata = load_stokes_data(self.burst_file, load_config)
+            if cube.shape[1:] != self.data.shape:
+                raise ValueError(
+                    f"The Stokes cube shape {cube.shape[1:]} does not match the loaded "
+                    f"dynamic spectrum {self.data.shape}; the file may have changed since it was opened."
+                )
+            self._stokes_base_cube = cube
+            self._stokes_metadata = metadata
+
+        cube = self._stokes_base_cube
+        shift = self._applied_shift_bins
+        if shift is None or not np.any(shift):
+            return cube
+        return np.stack([shift_channels(plane, shift) for plane in cube], axis=0)
+
+    def set_polarization_settings(self, settings: PolarizationSettings | dict[str, Any]) -> PolarizationSettings:
+        """Replace the polarization settings, discarding any stale result."""
+        if isinstance(settings, PolarizationSettings):
+            resolved = settings
+        else:
+            # A dict updates only the keys it names, so a caller tuning one knob
+            # cannot silently reset the declared basis or the calibration flag.
+            merged = self.polarization_settings.to_dict()
+            merged.update(dict(settings))
+            resolved = PolarizationSettings.from_dict(merged)
+        basis = normalize_polarization_basis(resolved.polarization_basis)
+        resolved = replace(resolved, polarization_basis=basis)
+        if basis != normalize_polarization_basis(self.config.polarization_basis):
+            # None means "auto": drop the override and go back to whatever the
+            # file header or the telescope preset establishes.
+            self.config = replace(self.config, polarization_basis=basis)
+            self._stokes_base_cube = None
+            self._stokes_metadata = None
+            self._polarization_capability = None
+        self.polarization_settings = resolved
+        self.clear_polarization()
+        return resolved
+
+    def run_polarization_analysis(
+        self,
+        settings: PolarizationSettings | dict[str, Any] | None = None,
+    ) -> PolarizationAnalysisResult:
+        """Measure the rotation measure from this session's own selections.
+
+        Integrates Stokes Q and U over the session's event window, takes the
+        noise from its off-pulse regions, drops the channels its mask and
+        spectral extent exclude, and runs RM synthesis on what is left. Nothing
+        is imported and nothing is re-selected: the RM is measured against the
+        same burst definition as every other number in the session.
+        """
+        if settings is not None:
+            self.set_polarization_settings(settings)
+        resolved = self.polarization_settings
+
+        if not self.offpulse_regions:
+            raise ValueError(
+                "A polarization analysis needs at least one off-pulse region: the "
+                "channel uncertainties are measured from it."
+            )
+        if self.event_end <= self.event_start:
+            raise ValueError("A polarization analysis needs a non-empty event window.")
+
+        cube = self.load_stokes_cube()
+        event_bins = (int(self.event_start), int(self.event_end))
+        offpulse_regions = [(int(start), int(end)) for start, end in self.offpulse_regions if end - start >= 2]
+        if not offpulse_regions:
+            raise ValueError("Every off-pulse region is shorter than two samples.")
+
+        spectrum = extract_normalized_linear_spectrum(
+            stokes_iquv=cube,
+            freqs_mhz=self.freqs,
+            event_bins=event_bins,
+            offpulse_regions=offpulse_regions,
+            channel_mask=self.channel_mask,
+            spectral_channels=(int(self.spec_ex_lo), int(self.spec_ex_hi)),
+            channel_width_mhz=abs(float(self.freqres)),
+            min_linear_snr=float(resolved.min_linear_snr),
+            calibration_status="calibrated" if resolved.calibration_confirmed else "unknown",
+        )
+
+        rm_result = run_rm_synthesis(
+            freqs_mhz=spectrum.freqs_mhz,
+            stokes_q=spectrum.stokes_q,
+            stokes_u=spectrum.stokes_u,
+            sigma_q=spectrum.sigma_q,
+            sigma_u=spectrum.sigma_u,
+            channel_width_mhz=spectrum.channel_width_mhz,
+            phi_min_rad_m2=resolved.phi_min_rad_m2,
+            phi_max_rad_m2=resolved.phi_max_rad_m2,
+            phi_step_rad_m2=resolved.phi_step_rad_m2,
+            clean=bool(resolved.clean),
+            clean_gain=float(resolved.clean_gain),
+            clean_threshold_sigma=float(resolved.clean_threshold_sigma),
+            clean_max_iterations=int(resolved.clean_max_iterations),
+        )
+
+        total_i = float(np.sum(spectrum.integrated_stokes_i))
+        linear_fraction: float | None = None
+        circular_fraction: float | None = None
+        if np.isfinite(total_i) and total_i != 0.0:
+            linear = float(np.sum(np.hypot(spectrum.integrated_stokes_q, spectrum.integrated_stokes_u)))
+            linear_fraction = linear / total_i
+            circular_fraction = float(np.sum(spectrum.integrated_stokes_v)) / total_i
+
+        metadata = self._stokes_metadata
+        warnings_list = list(spectrum.warnings)
+        if rm_result.warnings:
+            warnings_list.extend(str(item) for item in rm_result.warnings)
+
+        result = PolarizationAnalysisResult(
+            status=spectrum.status if rm_result.status == "ok" else rm_result.status,
+            message=spectrum.message if rm_result.status == "ok" else rm_result.message,
+            calibration_status=spectrum.calibration_status,
+            normalization=spectrum.normalization,
+            polarization_basis=str(getattr(metadata, "polarization_basis", "") or ""),
+            polarization_basis_source=str(getattr(metadata, "polarization_basis_source", "") or ""),
+            freqs_mhz=spectrum.freqs_mhz,
+            channel_indices=spectrum.channel_indices,
+            stokes_q=spectrum.stokes_q,
+            stokes_u=spectrum.stokes_u,
+            sigma_q=spectrum.sigma_q,
+            sigma_u=spectrum.sigma_u,
+            integrated_stokes_i=spectrum.integrated_stokes_i,
+            integrated_stokes_q=spectrum.integrated_stokes_q,
+            integrated_stokes_u=spectrum.integrated_stokes_u,
+            integrated_stokes_v=spectrum.integrated_stokes_v,
+            linear_snr=spectrum.linear_snr,
+            channel_width_mhz=spectrum.channel_width_mhz,
+            event_bins=[event_bins[0], event_bins[1]],
+            event_window_ms=[self.bin_to_ms(event_bins[0]), self.bin_to_ms(event_bins[1])],
+            offpulse_regions=[[start, end] for start, end in offpulse_regions],
+            offpulse_windows_ms=self._offpulse_regions_ms(),
+            offpulse_block_count=int(spectrum.offpulse_block_count),
+            masked_channels=np.flatnonzero(self.channel_mask).astype(int).tolist(),
+            spectral_extent_channels=[int(self.spec_ex_lo), int(self.spec_ex_hi)],
+            linear_fraction=linear_fraction,
+            circular_fraction=circular_fraction,
+            dm=float(self.dm),
+            rm_synthesis=rm_result.to_dict(),
+            settings=resolved,
+            warnings=warnings_list,
+        )
+        self.polarization = result
+        return result
+
     def _build_source_ref(self) -> SessionSourceRef:
         source_path = Path(self.burst_file).expanduser().resolve()
         content_hash_sha256: str | None = None
@@ -2620,6 +2877,9 @@ class BurstSession:
             dm_optimization=self.dm_optimization,
             spectral_analysis=self.spectral_analysis,
             temporal_structure=self.temporal_structure,
+            polarization=self.polarization,
+            polarization_settings=self.polarization_settings,
+            polarization_basis=self.config.polarization_basis,
             source_ra_deg=self.config.source_ra_deg,
             source_dec_deg=self.config.source_dec_deg,
             time_scale=self.config.time_scale,

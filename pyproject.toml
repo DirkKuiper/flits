@@ -169,8 +169,9 @@ module = [
 ignore_errors = true
 
 [tool.pytest.ini_options]
-addopts = "-ra -m 'not e2e'"
+addopts = "-ra -m 'not e2e and not realdata'"
 testpaths = ["tests"]
 markers = [
   "e2e: browser tests that need Playwright and a real server (deselect with -m 'not e2e')",
+  "realdata: tests that read the multi-hundred-megabyte observatory data under data/ (select with -m realdata)",
 ]
