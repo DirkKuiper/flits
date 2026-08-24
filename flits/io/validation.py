@@ -1,3 +1,9 @@
+"""Validation of the metadata a reader returns.
+
+Every reader's output passes through here, so a malformed or incomplete header
+fails at load time with a specific message rather than producing quietly wrong
+measurements later."""
+
 from __future__ import annotations
 
 import numpy as np

@@ -1,3 +1,10 @@
+"""Data models for measurements, analyses, metadata and export manifests.
+
+These are plain dataclasses with explicit ``to_dict``/``from_dict`` conversions
+rather than serialization magic, because the same shapes are the session
+snapshot schema and the web API payloads, and both need to stay stable across
+releases."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

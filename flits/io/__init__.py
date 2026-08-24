@@ -1,3 +1,9 @@
+"""Input layer: format detection and burst loading.
+
+Readers are discovered through ``flits.readers`` entry points, so a third party
+can add a format without modifying FLITS. See ``flits.io.reader`` for the
+protocol a reader must satisfy."""
+
 from flits.io.reader import (
     BurstReader,
     FilterbankInspection,

@@ -1,3 +1,9 @@
+"""Export bundles: measurements, plots and data products from a session.
+
+An export is built as an immutable snapshot of the session state at the moment
+it was requested, so a bundle stays consistent even if the session changes
+afterwards. A bounded number of recent bundles is retained for download."""
+
 from __future__ import annotations
 
 import csv

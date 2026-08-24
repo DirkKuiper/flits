@@ -1,3 +1,9 @@
+"""Reader for CHIME/FRB HDF5 products.
+
+Handles both public catalogue waterfalls, which arrive already dedispersed, and
+beamformed ``BBData`` ``tiedbeam_power`` files, which are coherently dedispersed
+at a known DM and to which FLITS applies only a residual."""
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,3 +1,9 @@
+"""The analysis session: burst state, selections and cached analyses.
+
+A :class:`BurstSession` owns one loaded burst together with every decision made
+about it, and is the unit that snapshots capture and ``flits replay``
+reproduces."""
+
 from __future__ import annotations
 
 import hashlib
@@ -297,6 +303,34 @@ class ReducedAnalysisGrid:
 
 @dataclass
 class BurstSession:
+    """One burst, loaded and under analysis.
+
+    A session owns the dedispersed dynamic spectrum together with every
+    decision made about it: the crop, the event window, the off-pulse regions
+    used as the noise reference, the channel mask, the spectral extent, and the
+    calibration inputs. Analyses are computed against that state and cached on
+    the session, and are discarded automatically when a change invalidates them.
+
+    The whole of that state round-trips through `to_snapshot` and
+    `from_snapshot`, which is what makes an analysis reproducible: the snapshot
+    plus the original file is enough to obtain the same numbers again, either in
+    the interface or through `flits replay`.
+
+    Examples
+    --------
+    >>> session = BurstSession.from_file("burst.fil", dm=527.65, sefd_jy=10.0)
+    >>> session.set_event_ms(120.0, 128.0)
+    >>> session.add_offpulse_ms(0.0, 80.0)
+    >>> measurements = session.compute_properties()
+    >>> measurements.fluence_jyms is not None
+    True
+
+    Notes
+    -----
+    A session is not thread-safe and is not intended to be shared between
+    concurrent requests.
+    """
+
     config: ObservationConfig
     metadata: FilterbankMetadata
     data: np.ndarray
@@ -355,6 +389,12 @@ class BurstSession:
         observatory_latitude_deg: float | None = None,
         observatory_height_m: float | None = None,
     ) -> BurstSession:
+        """Open a burst file and build a session at the given DM.
+
+        The file's format is detected automatically and a matching telescope
+        preset is applied unless `telescope` names one explicitly. The data is
+        dedispersed to `dm` on load.
+        """
         from flits.io import inspect_filterbank, load_filterbank_data
 
         inspection = inspect_filterbank(bfile)
@@ -402,6 +442,12 @@ class BurstSession:
         *,
         loader: Callable[..., BurstSession] | None = None,
     ) -> BurstSession:
+        """Rebuild a session from a snapshot produced by `to_snapshot`.
+
+        Reopens the burst the snapshot names and restores every recorded
+        selection. Pass `loader` to control how the burst file is opened -- the
+        web layer uses this to enforce data-directory containment.
+        """
         snapshot = _coerce_snapshot(snapshot)
         session_loader = cls.from_file if loader is None else loader
         source_path = _resolve_snapshot_source_path(snapshot.source)
@@ -475,58 +521,72 @@ class BurstSession:
 
     @property
     def burst_file(self) -> str:
+        """Path of the burst file this session was opened from."""
         return str(self.metadata.source_path)
 
     @property
     def dm(self) -> float:
+        """Dispersion measure the data is currently dedispersed to, in pc cm^-3."""
         return self.config.dm
 
     @property
     def telescope(self) -> str:
+        """Key of the telescope preset in use."""
         return self.config.telescope_label
 
     @property
     def detected_telescope(self) -> str:
+        """Telescope preset detected from the file header, before any override."""
         return get_preset(self.metadata.detected_preset_key).label
 
     @property
     def tsamp(self) -> float:
+        """Sample interval of the loaded data, in seconds."""
         return self.metadata.tsamp
 
     @property
     def freqres(self) -> float:
+        """Channel width of the loaded data, in MHz."""
         return self.metadata.freqres
 
     @property
     def start_mjd(self) -> float:
+        """MJD of the first sample in the read window."""
         return self.metadata.start_mjd
 
     @property
     def plus_mjd_sec(self) -> float:
+        """Offset of the read window from the file start, in seconds."""
         return self.metadata.read_start_sec
 
     @property
     def sefd(self) -> float | None:
+        """System-equivalent flux density in Jy, or None when uncalibrated."""
         return self.metadata.sefd_jy
 
     @property
     def bw(self) -> float:
+        """Total bandwidth of the loaded data, in MHz."""
         return self.metadata.bandwidth_mhz
 
     @property
     def npol(self) -> int:
+        """Number of polarizations used for calibration, after any override."""
         return self.metadata.npol
 
     @property
     def header_npol(self) -> int:
+        """Number of polarizations declared by the file header."""
         return self.metadata.header_npol
 
     @property
     def polarization_order(self) -> str | None:
+        """Polarization ordering declared by the file header, if any."""
         return self.metadata.polarization_order
 
     @property
     def freqs(self) -> np.ndarray:
+        """Channel centre frequencies, in MHz."""
         return self.metadata.freqs_mhz
 
     def _source_position(self) -> tuple[float | None, float | None, str | None]:
@@ -583,34 +643,43 @@ class BurstSession:
 
     @property
     def total_time_bins(self) -> int:
+        """Number of time samples in the read window."""
         return int(self.data.shape[1])
 
     @property
     def total_channels(self) -> int:
+        """Number of frequency channels."""
         return int(self.data.shape[0])
 
     @property
     def tsamp_ms(self) -> float:
+        """Sample interval of the loaded data, in milliseconds."""
         return float(self.tsamp * 1e3)
 
     def invalidate_results(self) -> None:
+        """Discard cached burst measurements."""
         self.results = None
 
     def clear_width_analysis(self) -> None:
+        """Discard the cached width analysis."""
         self.width_analysis = None
         if self.results is not None:
             self.results = replace(self.results, width_results=[], accepted_width=None)
 
     def clear_dm_optimization(self) -> None:
+        """Discard the cached DM sweep result."""
         self.dm_optimization = None
 
     def clear_spectral_analysis(self) -> None:
+        """Discard the cached spectral analysis."""
         self.spectral_analysis = None
 
     def clear_temporal_structure(self) -> None:
+        """Discard the cached temporal-structure analysis."""
         self.temporal_structure = None
 
     def invalidate_analysis_state(self) -> None:
+        """Discard every cached analysis, after a change that invalidates them all."""
         self.invalidate_results()
         self.clear_width_analysis()
         self.clear_dm_optimization()
@@ -618,23 +687,31 @@ class BurstSession:
         self.clear_temporal_structure()
 
     def bin_to_ms(self, time_bin: int | float) -> float:
+        """Convert a time-sample index to milliseconds from the start of the window."""
         return float(time_bin) * self.tsamp_ms + float(self.config.read_start_sec) * 1000.0
 
     def ms_to_bin(self, time_ms: float) -> int:
+        """Convert milliseconds from the start of the window to a time-sample index."""
         return int(round((float(time_ms) - float(self.config.read_start_sec) * 1000.0) / self.tsamp_ms))
 
     def _bins_to_ms_array(self, time_bins: np.ndarray) -> np.ndarray:
         return np.asarray(time_bins, dtype=float) * self.tsamp_ms + float(self.config.read_start_sec) * 1000.0
 
     def clamp_bin(self, value: int, is_end: bool = False) -> int:
+        """Clamp a time-sample index into the valid range.
+
+        Pass `is_end=True` for an exclusive end index.
+        """
         if is_end:
             return max(1, min(int(value), self.total_time_bins))
         return max(0, min(int(value), self.total_time_bins - 1))
 
     def clamp_channel(self, value: int) -> int:
+        """Clamp a channel index into the valid range."""
         return max(0, min(int(value), self.total_channels - 1))
 
     def freq_to_channel(self, freq_mhz: float) -> int:
+        """Return the channel index nearest to a frequency in MHz."""
         return int(np.argmin(np.abs(self.freqs - float(freq_mhz))))
 
     def _ordered_channel_bounds(self, start: int, end: int) -> tuple[int, int]:
@@ -850,6 +927,7 @@ class BurstSession:
         )
 
     def get_masked_crop(self, data: np.ndarray | None = None) -> np.ndarray:
+        """Return the cropped dynamic spectrum with masked channels removed."""
         source = self.data if data is None else data
         arr = np.array(source[:, self.crop_start : self.crop_end], copy=True)
         if not np.issubdtype(arr.dtype, np.floating):
@@ -859,6 +937,7 @@ class BurstSession:
         return arr
 
     def get_display_crop(self, data: np.ndarray | None = None) -> np.ndarray:
+        """Return the cropped dynamic spectrum at the current display decimation."""
         display = self.get_masked_crop(data)
         if display.size == 0:
             return display
@@ -1443,6 +1522,7 @@ class BurstSession:
         return components
 
     def get_view(self) -> dict[str, Any]:
+        """Return the full session state the interface renders, as plain data."""
         grid = self._reduced_analysis_grid()
         context = self._measurement_context_from_grid(grid)
         freq_lo_mhz, freq_hi_mhz = self._frequency_range_mhz()
@@ -1574,6 +1654,7 @@ class BurstSession:
         self.manual_peaks = bool(self.peak_positions) if self.manual_peaks else self.manual_peaks
 
     def reset_view(self) -> None:
+        """Reset crop, selections and decimation to their initial state."""
         self.time_factor = default_time_factor(self.total_time_bins)
         self.freq_factor = 1
         self.crop_start = 0
@@ -1587,18 +1668,21 @@ class BurstSession:
         self.invalidate_analysis_state()
 
     def set_time_factor(self, factor: int) -> None:
+        """Set the time decimation factor used for display and analysis."""
         next_factor = max(1, min(int(factor), self.crop_end - self.crop_start))
         if next_factor != self.time_factor:
             self.time_factor = next_factor
             self.invalidate_analysis_state()
 
     def set_freq_factor(self, factor: int) -> None:
+        """Set the frequency decimation factor used for display and analysis."""
         next_factor = max(1, min(int(factor), self.total_channels))
         if next_factor != self.freq_factor:
             self.freq_factor = next_factor
             self.invalidate_analysis_state()
 
     def set_crop_ms(self, start_ms: float, end_ms: float) -> None:
+        """Set the crop window, in milliseconds from the start of the read window."""
         start, end = sorted((self.ms_to_bin(start_ms), self.ms_to_bin(end_ms)))
         self.crop_start = self.clamp_bin(start)
         self.crop_end = self.clamp_bin(end, is_end=True)
@@ -1606,6 +1690,7 @@ class BurstSession:
         self.invalidate_analysis_state()
 
     def set_event_ms(self, start_ms: float, end_ms: float) -> None:
+        """Set the event window that measurements integrate over."""
         start, end = sorted((self.ms_to_bin(start_ms), self.ms_to_bin(end_ms)))
         self.event_start = max(self.crop_start, self.clamp_bin(start))
         self.event_end = min(self.crop_end, self.clamp_bin(end, is_end=True))
@@ -1614,6 +1699,7 @@ class BurstSession:
         self.invalidate_analysis_state()
 
     def add_region_ms(self, start_ms: float, end_ms: float) -> None:
+        """Add a burst sub-region, used to separate components."""
         start, end = sorted((self.ms_to_bin(start_ms), self.ms_to_bin(end_ms)))
         start = max(self.crop_start, self.clamp_bin(start))
         end = min(self.crop_end, self.clamp_bin(end, is_end=True))
@@ -1622,10 +1708,12 @@ class BurstSession:
             self.invalidate_results()
 
     def clear_regions(self) -> None:
+        """Remove every burst sub-region."""
         self.burst_regions = []
         self.invalidate_results()
 
     def add_offpulse_ms(self, start_ms: float, end_ms: float) -> None:
+        """Add an off-pulse region, used as the noise reference."""
         start, end = sorted((self.ms_to_bin(start_ms), self.ms_to_bin(end_ms)))
         start = max(self.crop_start, self.clamp_bin(start))
         end = min(self.crop_end, self.clamp_bin(end, is_end=True))
@@ -1635,10 +1723,12 @@ class BurstSession:
             self.invalidate_analysis_state()
 
     def clear_offpulse(self) -> None:
+        """Remove every off-pulse region."""
         self.offpulse_regions = []
         self.invalidate_analysis_state()
 
     def add_peak_ms(self, time_ms: float) -> None:
+        """Mark a component peak at the given time, switching to manual peaks."""
         peak = self.clamp_bin(self.ms_to_bin(time_ms))
         if peak not in self.peak_positions:
             self.manual_peaks = True
@@ -1647,6 +1737,7 @@ class BurstSession:
             self.invalidate_results()
 
     def remove_peak_ms(self, time_ms: float, tolerance_bins: int = 40) -> None:
+        """Remove the manually marked peak nearest the given time."""
         if not self.peak_positions:
             return
         target = self.ms_to_bin(time_ms)
@@ -1668,13 +1759,16 @@ class BurstSession:
             self.invalidate_analysis_state()
 
     def mask_channel_freq(self, freq_mhz: float) -> None:
+        """Mask the channel nearest the given frequency."""
         self._mask_batch([self.freq_to_channel(freq_mhz)])
 
     def mask_range_freq(self, low_freq_mhz: float, high_freq_mhz: float) -> None:
+        """Mask every channel in a frequency range."""
         low, high = self._channel_bounds_for_freqs(low_freq_mhz, high_freq_mhz)
         self._mask_batch(list(range(low, high + 1)))
 
     def undo_mask(self) -> None:
+        """Undo the most recent masking step."""
         if not self.mask_history:
             return
         latest = self.mask_history.pop()
@@ -1683,16 +1777,19 @@ class BurstSession:
         self.invalidate_analysis_state()
 
     def reset_mask(self) -> None:
+        """Clear the channel mask entirely."""
         self.channel_mask[:] = False
         self.mask_history = []
         self.invalidate_analysis_state()
 
     def set_spectral_extent_freq(self, low_freq_mhz: float, high_freq_mhz: float) -> None:
+        """Set the frequency extent measurements are restricted to."""
         low, high = self._channel_bounds_for_freqs(low_freq_mhz, high_freq_mhz)
         self.spec_ex_lo, self.spec_ex_hi = low, high
         self.invalidate_analysis_state()
 
     def set_notes(self, notes: str | None) -> None:
+        """Attach free-text notes, carried through snapshots and exports."""
         text = None if notes is None else str(notes).strip()
         self.notes = text or None
 
@@ -1706,6 +1803,7 @@ class BurstSession:
         observatory_latitude_deg: float | None = None,
         observatory_height_m: float | None = None,
     ) -> None:
+        """Set the source position and observatory location used for barycentring."""
         self.config = replace(
             self.config,
             source_ra_deg=None if source_ra_deg is None else float(source_ra_deg),
@@ -1769,6 +1867,7 @@ class BurstSession:
         return result
 
     def auto_mask_jess(self, profile: str | None = None) -> None:
+        """Mask interference automatically using the jess statistical tests."""
         if jess.channel_masks.channel_masker is None:
             if _jess_import_error is not None:
                 message = f"{type(_jess_import_error).__name__}: {_jess_import_error}"
@@ -1925,6 +2024,7 @@ class BurstSession:
         self.invalidate_analysis_state()
 
     def apply_best_dm(self) -> DmOptimizationResult:
+        """Adopt the best DM found by the last sweep and re-dedisperse to it."""
         optimization = self.dm_optimization
         if optimization is None:
             raise ValueError("No DM optimization is available to apply.")
@@ -1967,6 +2067,7 @@ class BurstSession:
         )
 
     def compute_widths(self) -> WidthAnalysisSummary:
+        """Measure the burst width by every supported method."""
         grid, context = self._build_measurement_context_for_data()
         existing_method = None
         if self.width_analysis is not None and self.width_analysis.accepted_width is not None:
@@ -2003,6 +2104,7 @@ class BurstSession:
         return self.width_analysis
 
     def accept_width_result(self, method: str) -> WidthAnalysisSummary:
+        """Adopt one width method's result as the reported width."""
         if self.width_analysis is None:
             self.compute_widths()
         assert self.width_analysis is not None
@@ -2023,6 +2125,11 @@ class BurstSession:
         step: float,
         metric: str = "integrated_event_snr",
     ) -> DmOptimizationResult:
+        """Sweep DM around a centre value and score each trial.
+
+        `metric` selects the criterion: integrated event signal-to-noise, or the
+        structure-maximizing DM_phase score.
+        """
         grid, context = self._build_measurement_context_for_data(self.data)
         reduced_metric_data = np.asarray(grid.masked, dtype=float)
         reduced_metric_freqs = np.asarray(grid.freqs_mhz, dtype=float)
@@ -2147,6 +2254,11 @@ class BurstSession:
         )
 
     def compute_properties(self) -> BurstMeasurements:
+        """Measure the burst and cache the result.
+
+        Produces width, peak flux, fluence and signal-to-noise, together with the
+        provenance and uncertainty classification of each quantity.
+        """
         previous_results = self.results
         grid = self._reduced_analysis_grid()
         measurements = compute_burst_measurements(
@@ -2219,6 +2331,7 @@ class BurstSession:
         return self.results
 
     def fit_model(self, config_data: dict[str, Any] | None = None) -> BurstMeasurements:
+        """Fit a burst model to the selected event using fitburst."""
         if self.results is None:
             self.compute_properties()
         assert self.results is not None
@@ -2376,6 +2489,7 @@ class BurstSession:
         return [np.asarray(values[run], dtype=float) for run in np.split(indices, split_after) if run.size]
 
     def run_temporal_structure_analysis(self, segment_length_ms: float) -> TemporalStructureResult:
+        """Run temporal-structure and power-spectral analysis on the selection."""
         grid, context = self._build_measurement_context_for_data()
         event_series = np.asarray(
             context.selected_profile_baselined[context.event_rel_start : context.event_rel_end],
@@ -2401,6 +2515,7 @@ class BurstSession:
         return self.temporal_structure
 
     def run_spectral_analysis(self, segment_length_ms: float) -> SpectralAnalysisResult:
+        """Run averaged spectral analysis on the selection."""
         self.run_temporal_structure_analysis(segment_length_ms)
         return self.spectral_analysis
 
@@ -2469,6 +2584,7 @@ class BurstSession:
                 raise ValueError("Session source metadata mismatch for polarization_order.")
 
     def to_snapshot(self) -> AnalysisSessionSnapshot:
+        """Capture the full session state as a snapshot object."""
         return AnalysisSessionSnapshot(
             schema_version=SESSION_SNAPSHOT_SCHEMA_VERSION,
             source=self._build_source_ref(),
@@ -2513,6 +2629,7 @@ class BurstSession:
         )
 
     def snapshot_dict(self) -> dict[str, Any]:
+        """Capture the full session state as a JSON-compatible dict."""
         return self.to_snapshot().to_dict()
 
     def export_results(
@@ -2524,6 +2641,7 @@ class BurstSession:
         window_formats: list[str] | tuple[str, ...] | None = None,
         window_resolutions: list[str] | tuple[str, ...] | None = None,
     ) -> ExportManifest:
+        """Build an export bundle and retain it for download."""
         snapshot = create_export_snapshot(
             self,
             session_id=session_id,
@@ -2547,6 +2665,7 @@ class BurstSession:
         window_formats: list[str] | tuple[str, ...] | None = None,
         window_resolutions: list[str] | tuple[str, ...] | None = None,
     ) -> ExportPreview:
+        """Describe the bundle `export_results` would build, without building it."""
         return preview_export(
             self,
             include=include,
@@ -2556,12 +2675,14 @@ class BurstSession:
         )
 
     def get_export_manifest(self, export_id: str) -> ExportManifest:
+        """Return the manifest of a previously built export bundle."""
         snapshot = self.export_snapshots.get(export_id)
         if snapshot is None:
             raise KeyError(export_id)
         return snapshot.manifest
 
     def get_export_artifact(self, export_id: str, artifact_name: str) -> tuple[ExportArtifact, bytes]:
+        """Return one artifact from a previously built bundle, as (metadata, bytes)."""
         snapshot = self.export_snapshots.get(export_id)
         if snapshot is None:
             raise KeyError(export_id)

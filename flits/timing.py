@@ -1,3 +1,8 @@
+"""Arrival-time referencing: infinite-frequency and barycentric corrections.
+
+Corrections are applied only when the inputs they require are present, and the
+result records which reference frame it is in rather than assuming one."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

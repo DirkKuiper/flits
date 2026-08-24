@@ -21,6 +21,17 @@ theme:
 
 plugins:
   - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: numpy
+            show_source: false
+            show_root_heading: true
+            show_signature_annotations: true
+            separate_signature: true
+            members_order: source
+            filters: ["!^_"]
 
 markdown_extensions:
   - admonition
@@ -55,6 +66,9 @@ nav:
       - Multiscale Temporal Power: analysis/temporal-multiscale.md
       - Rotation-Measure Synthesis: analysis/rm-synthesis.md
       - Model Fitting: analysis/model-fitting.md
+  - Reference:
+      - Python API: developer/api-reference.md
+      - References: references.md
   - Developer:
       - Testing: developer/testing.md
       - Publishing: developer/publishing.md

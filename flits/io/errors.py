@@ -1,3 +1,5 @@
+"""Exception types raised by the input layer."""
+
 from __future__ import annotations
 
 from pathlib import Path

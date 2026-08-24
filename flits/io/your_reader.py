@@ -1,3 +1,5 @@
+"""Reader for SIGPROC filterbank and PSRFITS data, backed by ``your``."""
+
 from __future__ import annotations
 
 import errno

@@ -1,3 +1,10 @@
+"""Burst measurement: width, flux, fluence, signal-to-noise and energy.
+
+Measurements are computed against an explicit off-pulse noise reference and
+carry their own uncertainty classification. A quantity is only reported as a
+formal 1-sigma uncertainty when the systematic inputs it requires were supplied;
+otherwise it is marked statistical-only and flagged as not publishable."""
+
 from __future__ import annotations
 
 import warnings
@@ -797,6 +804,24 @@ def compute_burst_measurements(
     time_axis_ms: np.ndarray | None = None,
     timing_context: TimingContext | None = None,
 ) -> BurstMeasurements:
+    """Measure a burst from a prepared selection.
+
+    Integrates the event window against the off-pulse noise reference and
+    returns width, peak flux, fluence, signal-to-noise and, when a distance is
+    supplied, isotropic energy.
+
+    Every quantity carries its own uncertainty classification. A value is
+    reported as ``formal_1sigma`` only when the systematic inputs it needs were
+    supplied -- notably an SEFD fractional uncertainty for flux-like
+    quantities. Without them the value is ``statistical_only`` and is flagged as
+    not publishable, rather than being presented as a complete uncertainty.
+
+    Returns
+    -------
+    BurstMeasurements
+        Measured quantities together with their provenance, uncertainty detail
+        and any diagnostic flags raised during measurement.
+    """
     if time_axis_ms is None:
         time_axis_ms = (int(crop_start_bin) + np.arange(masked.shape[1], dtype=float)) * float(tsamp_ms) + float(
             read_start_sec

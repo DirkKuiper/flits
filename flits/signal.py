@@ -1,3 +1,5 @@
+"""Signal-processing primitives: dedispersion, normalization and decimation."""
+
 from __future__ import annotations
 
 import warnings

@@ -1,3 +1,9 @@
+"""HTTP API and static hosting for the FLITS interface.
+
+The server is intended to be reached from a browser on the same machine, or
+through an SSH tunnel. It has no authentication layer; the data directory acts
+as a containment boundary and cross-origin access is opt-in. See SECURITY.md."""
+
 from __future__ import annotations
 
 import hashlib

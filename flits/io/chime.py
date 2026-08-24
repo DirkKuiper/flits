@@ -1,3 +1,5 @@
+"""Shared helpers for reading CHIME/FRB HDF5 products."""
+
 from __future__ import annotations
 
 import datetime

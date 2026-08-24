@@ -1,3 +1,9 @@
+"""Observation configuration and telescope presets.
+
+Presets carry the instrument-specific values -- SEFD, polarization count,
+observatory location -- that calibrated measurements depend on, and are matched
+against file headers automatically where possible."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

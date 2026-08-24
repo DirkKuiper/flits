@@ -1,3 +1,10 @@
+"""The reader protocol and the registry that discovers implementations.
+
+A reader declares the extensions it handles, sniffs a candidate file cheaply,
+reports what it found through ``inspect``, and returns a dynamic spectrum plus
+metadata from ``load``. Built-in readers are listed here; third-party readers
+register through the ``flits.readers`` entry point group."""
+
 from __future__ import annotations
 
 import importlib
