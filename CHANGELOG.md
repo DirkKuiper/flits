@@ -4,6 +4,14 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.0.1](https://github.com/DirkKuiper/flits/compare/flits-v1.0.0...flits-v1.0.1) (2026-08-24)
+
+
+### Documentation
+
+* **joss:** prepare publication materials ([e3f9b35](https://github.com/DirkKuiper/flits/commit/e3f9b35026192abbc20aefa3500a6dd9c32bf719))
+* **joss:** prepare publication materials ([#96](https://github.com/DirkKuiper/flits/issues/96)) ([680ffde](https://github.com/DirkKuiper/flits/commit/680ffde47791a11b8b577c4b0926f313bd78d151))
+
 ## [1.0.0](https://github.com/DirkKuiper/flits/compare/flits-v0.8.0...flits-v1.0.0) (2026-08-24)
 
 
