@@ -57,6 +57,7 @@ dev = [
   "httpx>=0.27",
   "mypy>=1.11",
   "pytest>=9.0.3",
+  "pytest-playwright>=0.5",
   "ruff>=0.6",
   "twine>=6.2.0",
 ]
@@ -167,3 +168,6 @@ ignore_errors = true
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["tests"]
+markers = [
+  "e2e: browser tests that need Playwright and a real server (deselect with -m 'not e2e')",
+]

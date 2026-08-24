@@ -48,6 +48,41 @@ Using `python -m pytest` keeps the active interpreter and the editable checkout
 aligned, which is more reliable than relying on whichever `pytest` executable is
 first on `PATH`.
 
+## Browser tests
+
+The interface is how most people use FLITS, so it has its own tests that start a
+real server and drive a real browser through the workflow: load a burst, render
+the waterfall, switch analysis tabs, localize, measure, and build an export.
+
+They need Playwright and a browser binary:
+
+```bash
+python -m pip install pytest-playwright
+python -m playwright install chromium
+python -m pytest tests/test_frontend_e2e.py -q
+```
+
+Without Playwright installed they skip, so the ordinary `pytest` run is
+unaffected. CI runs them in a dedicated job. To skip them explicitly:
+
+```bash
+python -m pytest -m "not e2e"
+```
+
+These are behavioural tests. The older `test_frontend_*.py` files assert on the
+text of `app.js` and are gradually being replaced by these.
+
+## Lint, format and type check
+
+```bash
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy
+```
+
+All three run in CI. `pyproject.toml` lists the modules currently exempt from
+type checking; that list should only ever shrink.
+
 ## Docs build
 
 To build the documentation locally:

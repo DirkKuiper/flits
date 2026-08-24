@@ -51,6 +51,36 @@ jobs:
       - name: Run test suite
         run: python -m pytest -q
 
+  browser:
+    # The interface is how FLITS is used, and it is the largest surface the unit
+    # tests cannot reach. These drive a real browser against a real server.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest pytest-playwright
+          python -m pip install -e .
+
+      - name: Install browser
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run browser tests
+        run: python -m pytest tests/test_frontend_e2e.py -q
+
   lint:
     runs-on: ubuntu-latest
 
