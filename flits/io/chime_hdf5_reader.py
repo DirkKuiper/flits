@@ -364,7 +364,7 @@ class ChimeHdf5Reader:
             max(1, int(config.npol_override)) if config.npol_override is not None else header_npol
         )
 
-        stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp)
+        stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp, fill_value=0.0)
         stokes_i = _normalize_waterfall(stokes_i, config.normalization_tail_fraction)
 
         metadata = FilterbankMetadata(
@@ -656,7 +656,7 @@ class ChimeHdf5Reader:
             filterbank_inspection = inspection
 
         residual_dm = float(config.dm) - float(coherent_dm)
-        stokes_i = dedisperse(stokes_i, residual_dm, freqs_mhz, tsamp)
+        stokes_i = dedisperse(stokes_i, residual_dm, freqs_mhz, tsamp, fill_value=0.0)
         stokes_i = _normalize_waterfall(stokes_i, config.normalization_tail_fraction)
 
         freq_lo = float(np.min(freqs_mhz))

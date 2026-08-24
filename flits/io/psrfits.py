@@ -659,7 +659,7 @@ def _load_folded_psrfits(
         max(1, int(config.npol_override)) if config.npol_override is not None else effective_npol
     )
     if abs(float(config.dm)) > 0.0:
-        stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp)
+        stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp, fill_value=0.0)
 
     tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
     offpulse_start = min(stokes_i.shape[1] - 1, int((1 - tail_fraction) * stokes_i.shape[1]))

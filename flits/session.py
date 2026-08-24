@@ -50,7 +50,13 @@ from flits.models import (
     compatible_scalar_uncertainty,
 )
 from flits.settings import ObservationConfig, get_auto_mask_profile, get_preset
-from flits.signal import block_reduce_mean, dedisperse
+from flits.signal import (
+    block_reduce_mean,
+    dedisperse,
+    dedispersion_edge_bins,
+    dedispersion_shift_bins,
+    shift_channels,
+)
 from flits.timing import ObservatoryLocation, TimingContext
 
 try:
@@ -326,6 +332,12 @@ class BurstSession:
     temporal_structure: TemporalStructureResult | None = None
     export_snapshots: dict[str, StoredExportSnapshot] = field(default_factory=dict)
     export_order: list[str] = field(default_factory=list)
+    # Dispersion state relative to the DM the data was loaded at. Retuning the
+    # DM re-derives the absolute shift solution from this reference instead of
+    # rounding each incremental step, so repeated changes cannot accumulate
+    # rounding error.
+    _load_dm: float | None = field(default=None, repr=False, compare=False)
+    _applied_shift_bins: np.ndarray | None = field(default=None, repr=False, compare=False)
 
     @classmethod
     def from_file(
@@ -1914,11 +1926,27 @@ class BurstSession:
         )
 
     def set_dm(self, new_dm: float) -> None:
+        """Retune the dispersion measure of the loaded data.
+
+        The shift is computed as an absolute solution relative to the DM the
+        data was loaded at, and only the difference from the currently applied
+        shift is moved. Rounding therefore happens once per target DM rather
+        than once per step, so stepping out along a DM sweep and back returns
+        the data to its original alignment exactly.
+        """
         new_dm = float(new_dm)
         if new_dm == self.dm:
             return
-        delta_dm = new_dm - self.dm
-        self.data = dedisperse(self.data, delta_dm, self.freqs, self.tsamp)
+        if self._load_dm is None or self._applied_shift_bins is None:
+            self._load_dm = float(self.dm)
+            self._applied_shift_bins = np.zeros(self.freqs.size, dtype=np.int64)
+        target_shift = dedispersion_shift_bins(
+            new_dm - self._load_dm, self.freqs, self.tsamp
+        )
+        delta_shift = target_shift - self._applied_shift_bins
+        if np.any(delta_shift):
+            self.data = shift_channels(self.data, delta_shift)
+        self._applied_shift_bins = target_shift
         self.config = replace(self.config, dm=new_dm)
         self.metadata = replace(
             self.metadata,
