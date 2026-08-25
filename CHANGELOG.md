@@ -4,6 +4,24 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.2.0](https://github.com/DirkKuiper/flits/compare/flits-v1.1.0...flits-v1.2.0) (2026-08-25)
+
+
+### Features
+
+* **drift:** measure sub-burst drift rate ([a1f78f5](https://github.com/DirkKuiper/flits/commit/a1f78f506ec2805bb8a3e12aeced77fe1b92d835))
+* **drift:** measure the sub-burst drift rate ([9d939bf](https://github.com/DirkKuiper/flits/commit/9d939bf4e374222e6fc146af675e95699aca7512))
+* **exports:** carry the drift rate through every export artifact ([64b22e1](https://github.com/DirkKuiper/flits/commit/64b22e1cc9ee091de347e7ad137b1e6d49f18d50))
+* **web:** add the Drift tab and replay the drift rate headlessly ([1bc865f](https://github.com/DirkKuiper/flits/commit/1bc865f86e856867dfb70c4a09c2ab93665c236c))
+
+
+### Bug Fixes
+
+* **drift:** address the review of the drift measurement ([2d9c455](https://github.com/DirkKuiper/flits/commit/2d9c4557807f1ca9b9c862d3f3c46b31d29f6041))
+* **drift:** derive the DM degeneracy from the slope, not the drift rate ([cb0b1af](https://github.com/DirkKuiper/flits/commit/cb0b1afce2bb6aca7296610b203d8a8144afe063))
+* **drift:** harden analysis validation ([1b6a55e](https://github.com/DirkKuiper/flits/commit/1b6a55ea198d45c30738b65348a7454bd5b101eb))
+* **drift:** refuse irregular axes and judge significance against the real bar ([a9396e2](https://github.com/DirkKuiper/flits/commit/a9396e2cb992d43aa22e0e6dd344832985e3974b))
+
 ## [1.1.0](https://github.com/DirkKuiper/flits/compare/flits-v1.0.1...flits-v1.1.0) (2026-08-25)
 
 
