@@ -31,6 +31,7 @@ LOG_LEVELS = ("debug", "info", "warning", "error")
 _REPLAYABLE_ANALYSES: tuple[tuple[str, str], ...] = (
     ("width_analysis", "compute_widths"),
     ("results", "compute_properties"),
+    ("polarization", "run_polarization_analysis"),
 )
 
 
@@ -258,6 +259,18 @@ def replay(argv: Sequence[str]) -> int:
         logger.info("Recomputed %s", key)
 
     results = session.results.to_dict() if session.results is not None else None
+    polarization = session.polarization
+    polarization_report = (
+        None
+        if polarization is None
+        else {
+            "peak_rm_rad_m2": polarization.peak_rm_rad_m2,
+            "peak_rm_uncertainty_rad_m2": polarization.peak_rm_uncertainty_rad_m2,
+            "calibration_status": polarization.calibration_status,
+            "polarization_basis": polarization.polarization_basis,
+            "channel_count": int(len(polarization.freqs_mhz)),
+        }
+    )
     differences = _compare_measurements(results, stored_results, args.tolerance) if args.check else []
 
     exported: list[Path] = []
@@ -270,6 +283,7 @@ def replay(argv: Sequence[str]) -> int:
         "dm": session.dm,
         "recomputed": recomputed,
         "measurements": results,
+        "polarization": polarization_report,
         "exported": [str(path) for path in exported],
         "checked": bool(args.check),
         "differences": differences,
@@ -295,6 +309,14 @@ def _print_report(report: dict[str, Any]) -> None:
     for field in ("width_ms", "fluence_jyms", "peak_flux_jy", "snr"):
         if field in measurements and measurements[field] is not None:
             print(f"{field:<10} {measurements[field]}")
+
+    polarization = report.get("polarization")
+    if polarization:
+        rm = polarization.get("peak_rm_rad_m2")
+        sigma = polarization.get("peak_rm_uncertainty_rad_m2")
+        if rm is not None:
+            uncertainty = "" if sigma is None else f" +/- {sigma}"
+            print(f"{'rm_rad_m2':<10} {rm}{uncertainty} ({polarization.get('calibration_status')})")
 
     if report["exported"]:
         print(f"exported   {len(report['exported'])} files")

@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 
 from flits.analysis.polarization import run_rm_synthesis
 from flits.io import inspect_filterbank, list_readers
+from flits.io.errors import PolarizationUnavailableError
 from flits.session import BurstSession
 from flits.settings import available_auto_mask_profiles, available_presets, get_preset
 
@@ -885,6 +886,10 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
             session.run_spectral_analysis(
                 segment_length_ms=float(payload["segment_length_ms"]),
             )
+        elif action == "set_polarization_settings":
+            session.set_polarization_settings(payload)
+        elif action == "run_polarization_analysis":
+            session.run_polarization_analysis(payload or None)
         elif action == "set_notes":
             session.set_notes(payload.get("notes"))
         elif action == "set_timing_metadata":
@@ -926,6 +931,12 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
             raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
     except HTTPException:
         raise
+    except PolarizationUnavailableError as exc:
+        # The file cannot answer the question that was asked of it. That is a
+        # property of the data, not a fault, so report it as a bad request with
+        # the reason attached so the interface can say what would fix it.
+        logger.info("Polarization unavailable for session %s: %s", session_id, exc)
+        raise HTTPException(status_code=400, detail=f"{exc} (reason: {exc.reason})") from exc
     except (ValueError, KeyError, TypeError) as exc:
         # Bad input for the requested action: the caller can fix this.
         logger.info("Action %s rejected for session %s: %s", action, session_id, exc)

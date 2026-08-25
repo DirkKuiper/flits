@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from flits.session import BurstSession
 
 
-EXPORT_SCHEMA_VERSION = "1.6"
+EXPORT_SCHEMA_VERSION = "1.7"
 DEFAULT_EXPORT_INCLUDE = ("json", "csv", "npz", "plots")
 DEFAULT_PLOT_FORMATS = ("png", "svg")
 DEFAULT_WINDOW_FORMATS = ("npz",)
@@ -90,6 +90,7 @@ class ExportSnapshotData:
     width_analysis: dict[str, Any] | None
     dm_optimization: dict[str, Any] | None
     temporal_structure: dict[str, Any] | None
+    polarization: dict[str, Any] | None
     dynamic_spectrum: np.ndarray
     time_axis_ms: np.ndarray
     freq_axis_mhz: np.ndarray
@@ -369,6 +370,7 @@ def _build_snapshot_data(session: BurstSession) -> ExportSnapshotData:
         width_analysis=session.width_analysis.to_dict() if session.width_analysis is not None else None,
         dm_optimization=session.dm_optimization.to_dict() if session.dm_optimization is not None else None,
         temporal_structure=(session.temporal_structure.to_dict() if session.temporal_structure is not None else None),
+        polarization=(session.polarization.to_dict() if session.polarization is not None else None),
         dynamic_spectrum=np.asarray(grid.masked, dtype=float),
         time_axis_ms=np.asarray(context.time_axis_ms, dtype=float),
         freq_axis_mhz=np.asarray(grid.freqs_mhz, dtype=float),
@@ -767,6 +769,20 @@ def _plot_plan(snapshot: ExportSnapshotData) -> list[PlotPlan]:
             )
         )
 
+    polarization = snapshot.polarization or {}
+    faraday = (polarization.get("rm_synthesis") or {}).get("phi_rad_m2") or []
+    if len(faraday) > 0:
+        plots.append(PlotPlan(key="faraday_spectrum", title="Faraday Spectrum", status="ready", reason=None))
+    else:
+        plots.append(
+            PlotPlan(
+                key="faraday_spectrum",
+                title="Faraday Spectrum",
+                status="omitted",
+                reason="polarization_analysis_unavailable",
+            )
+        )
+
     temporal = snapshot.temporal_structure or {}
     if (
         snapshot.temporal_structure is not None
@@ -1013,6 +1029,7 @@ def _build_science_json(snapshot: ExportSnapshotData, manifest: ExportManifest) 
         "width_analysis": snapshot.width_analysis,
         "dm_optimization": snapshot.dm_optimization,
         "temporal_structure": snapshot.temporal_structure,
+        "polarization": snapshot.polarization,
         "artifacts": manifest.to_dict()["artifacts"],
     }
     return (json.dumps(payload, indent=2, allow_nan=False) + "\n").encode("utf-8")
@@ -1027,6 +1044,8 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
     result_uncertainty_details = results.get("uncertainty_details") or {}
     dm_uncertainty_details = dm.get("uncertainty_details") or {}
     temporal_uncertainty_details = temporal.get("uncertainty_details") or {}
+    polarization = snapshot.polarization or {}
+    rm_synthesis = polarization.get("rm_synthesis") or {}
 
     def uncertainty_columns(prefix: str, detail: dict[str, Any] | None) -> dict[str, str]:
         payload = detail or {}
@@ -1117,6 +1136,20 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         "dm_sampled_best_snr": dm.get("sampled_best_sn", ""),
         "dm_snr_metric": dm.get("snr_metric", ""),
         "residual_status": dm.get("residual_status", ""),
+        "polarization_status": polarization.get("status", ""),
+        "polarization_calibration_status": polarization.get("calibration_status", ""),
+        "polarization_basis": polarization.get("polarization_basis", ""),
+        "polarization_basis_source": polarization.get("polarization_basis_source", ""),
+        "rm_rad_m2": rm_synthesis.get("peak_rm_rad_m2", ""),
+        "rm_uncertainty_rad_m2": rm_synthesis.get("peak_rm_uncertainty_rad_m2", ""),
+        "rm_snr": rm_synthesis.get("peak_snr", ""),
+        "rm_channel_count": rm_synthesis.get("channel_count", ""),
+        "rm_rmsf_fwhm_rad_m2": rm_synthesis.get("rmsf_fwhm_rad_m2", ""),
+        "rm_reference_lambda2_m2": rm_synthesis.get("reference_lambda2_m2", ""),
+        "polarization_angle_deg": rm_synthesis.get("polarization_angle_deg", ""),
+        "intrinsic_polarization_angle_deg": rm_synthesis.get("intrinsic_polarization_angle_deg", ""),
+        "linear_fraction": polarization.get("linear_fraction", ""),
+        "circular_fraction": polarization.get("circular_fraction", ""),
     }
     row.update(uncertainty_columns("accepted_width", accepted_width.get("uncertainty_detail")))
     row.update(uncertainty_columns("toa_peak_topo_mjd", result_uncertainty_details.get("toa_peak_topo_mjd")))
@@ -1166,6 +1199,35 @@ def _build_diagnostics_npz(snapshot: ExportSnapshotData) -> bytes:
         "spectral_acf": np.asarray(snapshot.spectral_acf, dtype=float),
         "spectral_acf_lags_mhz": np.asarray(snapshot.spectral_acf_lags_mhz, dtype=float),
     }
+
+    if snapshot.polarization is not None:
+        polarization = snapshot.polarization
+        rm_synthesis = polarization.get("rm_synthesis") or {}
+        for key in (
+            "freqs_mhz",
+            "channel_indices",
+            "stokes_q",
+            "stokes_u",
+            "sigma_q",
+            "sigma_u",
+            "integrated_stokes_i",
+            "integrated_stokes_q",
+            "integrated_stokes_u",
+            "integrated_stokes_v",
+            "linear_snr",
+        ):
+            payload[f"polarization_{key}"] = np.asarray(polarization.get(key, []), dtype=float)
+        for key in (
+            "phi_rad_m2",
+            "faraday_real",
+            "faraday_imag",
+            "polarized_amplitude",
+            "rmsf_real",
+            "rmsf_imag",
+            "rmsf_amplitude",
+            "cleaned_polarized_amplitude",
+        ):
+            payload[f"rm_{key}"] = np.asarray(rm_synthesis.get(key, []), dtype=float)
 
     if snapshot.results is not None:
         diagnostics = snapshot.results.get("diagnostics", {})
@@ -1302,6 +1364,8 @@ def _plot_figure(snapshot: ExportSnapshotData, plot_key: str) -> plt.Figure:
         return _dm_curve_figure(snapshot)
     if plot_key == "dm_residuals":
         return _dm_residuals_figure(snapshot)
+    if plot_key == "faraday_spectrum":
+        return _faraday_spectrum_figure(snapshot)
     raise ValueError(f"Unsupported export plot: {plot_key}")
 
 
@@ -1561,6 +1625,54 @@ def _dm_residuals_figure(snapshot: ExportSnapshotData) -> plt.Figure:
     ax.set_ylabel("Residual Arrival Time (ms)")
     ax.legend(frameon=False, loc="best")
     _style_export_axis(ax)
+    return fig
+
+
+def _faraday_spectrum_figure(snapshot: ExportSnapshotData) -> plt.Figure:
+    polarization = snapshot.polarization or {}
+    rm_synthesis = polarization.get("rm_synthesis") or {}
+    phi = np.asarray(rm_synthesis.get("phi_rad_m2", []), dtype=float)
+    amplitude = np.asarray(rm_synthesis.get("polarized_amplitude", []), dtype=float)
+    cleaned = np.asarray(rm_synthesis.get("cleaned_polarized_amplitude", []), dtype=float)
+    freqs = np.asarray(polarization.get("freqs_mhz", []), dtype=float)
+    stokes_q = np.asarray(polarization.get("stokes_q", []), dtype=float)
+    stokes_u = np.asarray(polarization.get("stokes_u", []), dtype=float)
+
+    fig, (top, bottom) = plt.subplots(2, 1, figsize=(8.6, 6.4), constrained_layout=True)
+    top.plot(phi, amplitude, color=ASTROFLASH_COLORS["accent"], linewidth=1.4, label="Dirty FDF")
+    if cleaned.size == phi.size and cleaned.size:
+        top.plot(
+            phi,
+            cleaned,
+            color=ASTROFLASH_COLORS["accent_alt"],
+            linewidth=1.2,
+            linestyle="--",
+            label="RM-CLEAN restored",
+        )
+    peak_rm = rm_synthesis.get("peak_rm_rad_m2")
+    if peak_rm is not None and np.isfinite(float(peak_rm)):
+        top.axvline(float(peak_rm), color=ASTROFLASH_COLORS["alert"], linewidth=1.2, linestyle=":")
+    calibration = str(polarization.get("calibration_status", "unknown"))
+    title = "Faraday Spectrum"
+    if calibration != "calibrated":
+        title += " (polarization calibration unconfirmed)"
+    top.set_title(title)
+    top.set_xlabel("Faraday depth (rad m$^{-2}$)")
+    top.set_ylabel("Polarized amplitude")
+    top.legend(frameon=False, loc="best")
+    _style_export_axis(top)
+
+    bottom.plot(
+        freqs, stokes_q, color=ASTROFLASH_COLORS["accent"], linewidth=1.1, marker="o", markersize=2.5, label="Q/L"
+    )
+    bottom.plot(
+        freqs, stokes_u, color=ASTROFLASH_COLORS["crossover"], linewidth=1.1, marker="o", markersize=2.5, label="U/L"
+    )
+    bottom.axhline(0.0, color=ASTROFLASH_COLORS["neutral"], linewidth=1.0, linestyle="--")
+    bottom.set_xlabel("Frequency (MHz)")
+    bottom.set_ylabel("Normalized Stokes")
+    bottom.legend(frameon=False, loc="best")
+    _style_export_axis(bottom)
     return fig
 
 

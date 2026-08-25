@@ -10,20 +10,103 @@ The implementation follows [Brentjens & de Bruyn
 one-dimensional deconvolution described by [Heald, Braun & Edmonds
 (2009)](https://doi.org/10.1051/0004-6361/200811532).
 
-!!! info "This step works on an imported Q/U spectrum"
-    FLITS readers deliver Stokes I: a burst loaded from a filterbank, PSRFITS
-    or CHIME/FRB file gives an intensity dynamic spectrum, and the session's
-    measurement and timing analyses operate on that. RM synthesis is a separate
-    step that takes an **externally prepared, calibrated Q/U spectrum** imported
-    as JSON or CSV.
+There are two ways in:
 
-    There is no path from a full-Stokes file to an RM inside FLITS today. Full
-    Stokes input is planned; until then, prepare Q and U with your instrument's
-    own polarization calibration pipeline and import the result as described
-    below. RM results also live outside the session, so they are not carried in
-    session snapshots or export bundles.
+- **From the session**, when the burst file carries four polarization products.
+  FLITS builds the Stokes cube, integrates Q and U over the session's own event
+  window, takes the channel uncertainties from its off-pulse regions, and drops
+  the channels its mask and spectral extent exclude. The result is stored on the
+  session, so it travels in snapshots, export bundles and `flits replay` like
+  every other analysis.
+- **From an imported spectrum**, when Q and U were prepared elsewhere. This path
+  is unchanged: import a calibrated channelized Q/U spectrum as JSON or CSV.
 
-## Prepare the input
+## Measuring the RM from the session
+
+### What the file has to carry
+
+A burst file can only yield a Stokes cube if it holds four polarization products
+*and* something establishes which four they are. FLITS never guesses: reading
+coherency products as though they were Stokes swaps V into Q and produces an RM
+that is wrong without looking wrong.
+
+The basis is resolved in this order:
+
+1. an explicit `polarization_basis` on the session (the **Polarization basis**
+   control, or the `polarization_basis` argument to `BurstSession.from_file`);
+2. the telescope preset, for instruments whose headers are known to misreport
+   this — NRT filterbanks carry linear-feed coherency products while the header
+   claims `IQUV`;
+3. the file header: PSRFITS `POL_TYPE` together with `FD_POLN`.
+
+SIGPROC records nothing about which products a `nifs=4` file holds, so a
+filterbank always needs a preset or an explicit basis. If none of the three
+settles it, FLITS refuses with `unknown_basis` rather than picking one.
+
+The three recognized bases are:
+
+| Basis | Products | Stokes |
+| --- | --- | --- |
+| `iquv` | I, Q, U, V | used as-is |
+| `coherency_linear` | AA, BB, CR, CI from a linear feed | `I=AA+BB`, `Q=AA-BB`, `U=2CR`, `V=2CI` |
+| `coherency_circular` | AA, BB, CR, CI from a circular feed | `I=AA+BB`, `V=AA-BB`, `Q=2CR`, `U=2CI` |
+
+### Browser workflow
+
+Open **Polarization** in the Analysis Workspace and use **Measure From This
+Session**. The status line reports how many polarization products the file has
+and which basis was established, or what is missing. Set the minimum channel
+linear-polarization S/N, confirm the calibration checkbox if the polarization
+calibration of this dataset has been established, and click **Measure RM From
+Session**.
+
+The measurement uses the session's current selections, so refine the event
+window, the off-pulse regions, the channel mask and the spectral extent first —
+changing any of them discards the previous result rather than leaving a stale
+one on screen.
+
+### Python usage
+
+```python
+from flits.session import BurstSession
+
+session = BurstSession.from_file("burst.fil", dm=528.0)
+session.set_event_ms(97.4, 104.4)
+session.add_offpulse_ms(32.0, 82.0)
+session.add_offpulse_ms(120.0, 1200.0)
+
+result = session.run_polarization_analysis({"min_linear_snr": 3.0})
+print(result.peak_rm_rad_m2, result.peak_rm_uncertainty_rad_m2)
+print(result.linear_fraction, result.circular_fraction)
+```
+
+`result.rm_synthesis` holds the full RM-synthesis payload documented below.
+The result also records the basis and what established it, the exact event and
+off-pulse windows, the channels that survived, and the integrated Stokes I, Q, U
+and V spectra — which is what makes it reproducible from the snapshot alone.
+
+### Reading the cube directly
+
+```python
+from flits.io import load_stokes_data
+from flits.settings import ObservationConfig
+
+config = ObservationConfig.from_preset(dm=528.0, preset_key="nrt")
+cube, metadata = load_stokes_data("burst.fil", config)  # (4, channels, time)
+```
+
+`load_stokes_data` returns the same time and frequency grid as
+`load_filterbank_data` for the same file and config, so a cube can be used
+alongside the Stokes-I dynamic spectrum without re-deriving anything. Readers
+that cannot produce a cube raise `PolarizationUnavailableError` with a `reason`
+of `reader_unsupported`, `insufficient_products` or `unknown_basis`.
+
+Each Stokes parameter has its own off-pulse baseline removed, but all four are
+divided by a single per-channel scale taken from Stokes I. Scaling them
+independently would rescale Q/I and U/I channel by channel and corrupt every
+polarization fraction measured from them.
+
+## Prepare an imported spectrum
 
 RM synthesis needs a calibrated Q/U spectrum, not a Stokes-I dynamic spectrum.
 Before importing data:
@@ -40,7 +123,7 @@ use the same units. FLITS can run without uncertainties, but then uses equal
 weights and estimates the noise from the residual of the best Faraday-thin
 component. This is less reliable for complex sources.
 
-## Browser workflow
+## Browser workflow for an imported spectrum
 
 Open **Polarization** in the Analysis Workspace:
 

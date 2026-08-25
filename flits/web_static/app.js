@@ -28,6 +28,11 @@ const state = {
   sessionDirty: false,
   notesDraftDirty: false,
   rmResult: null,
+  // Which of the two routes produced the Faraday spectrum on screen: the
+  // session's own measurement, or a Q/U spectrum imported from a file. The
+  // last one the user ran owns the panel, so a routine view refresh cannot
+  // replace one with the other.
+  rmSource: null,
   rmInputData: null,
   rmInputName: "",
 }
@@ -157,6 +162,10 @@ const rmCleanInput = document.getElementById("rmCleanInput")
 const rmCleanGainInput = document.getElementById("rmCleanGainInput")
 const rmCleanThresholdInput = document.getElementById("rmCleanThresholdInput")
 const rmCleanIterationsInput = document.getElementById("rmCleanIterationsInput")
+const sessionPolarizationStatus = document.getElementById("sessionPolarizationStatus")
+const sessionPolMinSnrInput = document.getElementById("sessionPolMinSnrInput")
+const sessionPolBasisInput = document.getElementById("sessionPolBasisInput")
+const sessionPolRunButton = document.getElementById("sessionPolRunButton")
 const exportIncludeJson = document.getElementById("exportIncludeJson")
 const exportIncludeCsv = document.getElementById("exportIncludeCsv")
 const exportIncludeNpz = document.getElementById("exportIncludeNpz")
@@ -617,6 +626,7 @@ function bindControls() {
   })
   rmExampleButton.addEventListener("click", () => downloadRmExample())
   rmRunButton.addEventListener("click", () => runRmSynthesis())
+  sessionPolRunButton.addEventListener("click", () => runSessionPolarization())
   rmDownloadJsonButton.addEventListener("click", () => downloadRmResultJson())
   rmDownloadCsvButton.addEventListener("click", () => downloadRmSpectrumCsv())
   rmCleanInput.addEventListener("change", () => {
@@ -1032,6 +1042,9 @@ async function importSessionSnapshot(event) {
     state.activeSnapshot = null
     state.sessionDirty = false
     state.notesDraftDirty = false
+    // A new burst owns the polarization panel: an imported spectrum from the
+    // previous session must not keep the new session's own result off screen.
+    state.rmSource = null
     state.exportManifest = null
     resetExportSelection()
     applyView(payload.view, { preserveNotesDraft: false })
@@ -1132,6 +1145,7 @@ async function openStoredSession(snapshotId) {
     state.activeSnapshot = payload.snapshot || null
     state.sessionDirty = false
     state.notesDraftDirty = false
+    state.rmSource = null
     state.selectedSnapshotDirectory = snapshotDirectoryForSnapshot(state.activeSnapshot)
     state.selectedSnapshotId = state.activeSnapshot?.id || snapshotId
     state.exportManifest = null
@@ -1532,6 +1546,9 @@ async function loadSession(options = {}) {
     state.activeSnapshot = null
     state.sessionDirty = false
     state.notesDraftDirty = false
+    // A new burst owns the polarization panel: an imported spectrum from the
+    // previous session must not keep the new session's own result off screen.
+    state.rmSource = null
     state.exportManifest = null
     resetExportSelection()
     applyView(payload.view, { preserveNotesDraft: false })
@@ -1679,6 +1696,7 @@ function applyView(view, options = {}) {
   renderDmOptimization(view)
   renderFitting(view)
   renderSpectral(view)
+  renderSessionPolarization(view)
   renderExportPlanner()
   renderExportManifest()
   setAnalysisTab(state.activeAnalysisTab)
@@ -5261,7 +5279,10 @@ function setAnalysisTab(tab, options = {}) {
   } else if (normalizedTab === "temporal") {
     syncSpectralPlot()
   } else if (normalizedTab === "polarization") {
-    renderRmSynthesis(state.rmResult)
+    renderSessionPolarization(state.view)
+    if (state.rmSource !== "session") {
+      renderRmSynthesis(state.rmResult)
+    }
   } else if (normalizedTab === "export" && state.sessionId && exportSelectionCount() > 0 && (state.exportPreviewStale || !state.exportPreview)) {
     scheduleExportPreview({ immediate: true })
   }
@@ -5452,6 +5473,9 @@ async function importRmSpectrum() {
     state.rmInputData = payload
     state.rmInputName = file.name
     state.rmResult = null
+    // Importing a spectrum hands the panel to the imported route, so a session
+    // result already on screen is not restored over it by the next view refresh.
+    state.rmSource = "import"
     rmCalibrationConfirmedInput.checked = payload.calibration_status === "calibrated"
     if (payload.phi_min_rad_m2 !== undefined) rmPhiMinInput.value = payload.phi_min_rad_m2
     if (payload.phi_max_rad_m2 !== undefined) rmPhiMaxInput.value = payload.phi_max_rad_m2
@@ -5540,6 +5564,98 @@ function rmRequestPayload() {
   return payload
 }
 
+const sessionPolarizationReasons = {
+  reader_unsupported: "The reader for this file format has no full-Stokes path.",
+  insufficient_products: "This file carries fewer than four polarization products, so only Stokes I is available.",
+  unknown_basis: "The file carries four polarization products, but nothing establishes which four. Choose a polarization basis above.",
+}
+
+function renderSessionPolarization(view) {
+  if (!view) {
+    sessionPolarizationStatus.innerHTML = `<span class="panel-badge">No session loaded</span>`
+    sessionPolRunButton.disabled = true
+    return
+  }
+  const capability = view.polarization_capability || {}
+  const settings = view.polarization_settings || {}
+  if (document.activeElement !== sessionPolMinSnrInput && settings.min_linear_snr !== undefined && settings.min_linear_snr !== null) {
+    sessionPolMinSnrInput.value = String(settings.min_linear_snr)
+  }
+  if (document.activeElement !== sessionPolBasisInput) {
+    sessionPolBasisInput.value = settings.polarization_basis || ""
+  }
+
+  const products = capability.products === null || capability.products === undefined ? "unknown" : capability.products
+  if (capability.available) {
+    const source = String(capability.basis_source || "").replaceAll("_", " ")
+    sessionPolarizationStatus.innerHTML = `
+      <span class="panel-badge">${products} polarization products · ${escapeHtml(String(capability.basis).replaceAll("_", " "))}</span>
+      <p>Basis established by ${escapeHtml(source || "unknown")}. The measurement uses the current event window, off-pulse regions, channel mask and spectral extent.</p>
+    `
+    sessionPolRunButton.disabled = false
+  } else {
+    const reason = capability.reason || "unknown"
+    const message = sessionPolarizationReasons[reason] || `Full-Stokes data is unavailable (${String(reason).replaceAll("_", " ")}).`
+    sessionPolarizationStatus.innerHTML = `
+      <span class="panel-badge">${products} polarization products</span>
+      <p>${escapeHtml(message)}</p>
+    `
+    sessionPolRunButton.disabled = reason !== "unknown_basis"
+  }
+
+  if (view.polarization && state.rmSource !== "import") {
+    state.rmSource = "session"
+    renderSessionPolarizationResult(view.polarization)
+  }
+}
+
+function renderSessionPolarizationResult(polarization) {
+  const rm = polarization.rm_synthesis || {}
+  if (rm.status !== "ok") {
+    renderRmSynthesis(null, polarization.message || rm.message || "The session polarization analysis did not produce a Faraday spectrum.")
+    return
+  }
+  state.rmResult = rm
+  rmDownloadJsonButton.disabled = false
+  rmDownloadCsvButton.disabled = false
+  renderRmSynthesis(rm)
+  const calibration = polarization.calibration_status === "calibrated"
+    ? "Polarization calibration confirmed for this session."
+    : "Polarization calibration is unconfirmed: this Faraday depth is an instrumental measurement, not a source RM."
+  const banner = `
+    <div class="dm-fit-note" data-tone="warning">
+      <strong>Measured from the session</strong>
+      <span>${escapeHtml(polarization.polarization_basis.replaceAll("_", " "))} basis · ${polarization.freqs_mhz.length} channels ·
+      L/I ${fmt(polarization.linear_fraction, 3)} · V/I ${fmt(polarization.circular_fraction, 3)} ·
+      ${polarization.offpulse_block_count} off-pulse noise blocks. ${escapeHtml(calibration)}</span>
+    </div>
+  `
+  rmContent.insertAdjacentHTML("afterbegin", banner)
+}
+
+async function runSessionPolarization() {
+  const payload = {
+    min_linear_snr: Number(sessionPolMinSnrInput.value) || 5.0,
+    calibration_confirmed: rmCalibrationConfirmedInput.checked,
+    polarization_basis: sessionPolBasisInput.value || null,
+    clean: rmCleanInput.checked,
+    clean_gain: optionalRmNumber(rmCleanGainInput, "RM-CLEAN gain", { positive: true }) ?? 0.1,
+    clean_threshold_sigma: optionalRmNumber(rmCleanThresholdInput, "RM-CLEAN cutoff", { positive: true }) ?? 3.0,
+    clean_max_iterations: Math.round(optionalRmNumber(rmCleanIterationsInput, "RM-CLEAN iterations", { positive: true }) ?? 1000),
+  }
+  for (const [field, input, label, positive] of [
+    ["phi_min_rad_m2", rmPhiMinInput, "Minimum φ", false],
+    ["phi_max_rad_m2", rmPhiMaxInput, "Maximum φ", false],
+    ["phi_step_rad_m2", rmPhiStepInput, "φ step", true],
+  ]) {
+    const value = optionalRmNumber(input, label, { positive })
+    if (value !== undefined) payload[field] = value
+  }
+  state.activeAnalysisTab = "polarization"
+  state.rmSource = "session"
+  await postAction("run_polarization_analysis", payload)
+}
+
 async function runRmSynthesis() {
   if (!state.rmInputData) return
   rmRunButton.disabled = true
@@ -5557,6 +5673,7 @@ async function runRmSynthesis() {
     }
     if (result.status !== "ok") throw new Error(result.message || "RM synthesis failed.")
     state.rmResult = result
+    state.rmSource = "import"
     renderRmSynthesis(result)
     rmDownloadJsonButton.disabled = false
     rmDownloadCsvButton.disabled = false
@@ -6123,6 +6240,8 @@ function actionBusyText(action) {
     fit_model: "Running model fit",
     run_temporal_structure_analysis: "Running temporal structure",
     run_spectral_analysis: "Running power spectrum",
+    run_polarization_analysis: "Measuring rotation measure",
+    set_polarization_settings: "Updating polarization settings",
     export_results: "Building export bundle",
     set_notes: "Saving notes",
     set_timing_metadata: "Applying timing metadata",
@@ -6141,6 +6260,7 @@ function actionSuccessText(action) {
     undo_mask: "Last mask removed",
     reset_mask: "All masks cleared",
     optimize_dm: "DM sweep completed",
+    run_polarization_analysis: "Rotation measure computed",
     compute_widths: "Width comparison updated",
     accept_width_result: "Accepted width updated",
     fit_model: "Model fit completed",

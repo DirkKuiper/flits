@@ -6,12 +6,18 @@ from pathlib import Path
 
 import numpy as np
 
-from flits.io.errors import CorruptedDataError, FormatDetectionError, MetadataMissingError
+from flits.io.errors import (
+    CorruptedDataError,
+    FormatDetectionError,
+    MetadataMissingError,
+    PolarizationUnavailableError,
+)
 from flits.io.reader import FilterbankInspection
 from flits.io.validation import validate_metadata
 from flits.models import FilterbankMetadata
-from flits.settings import ObservationConfig, detect_preset, resolve_default_sefd_jy
-from flits.signal import dedisperse, normalize
+from flits.settings import ObservationConfig, detect_preset, get_preset, resolve_default_sefd_jy
+from flits.signal import dedisperse, normalize, normalize_stokes
+from flits.stokes import basis_from_psrfits, normalize_polarization_basis, stokes_from_products
 
 _PSRFITS_FOLD_MODES = frozenset({"PSR", "FOLD"})
 
@@ -47,6 +53,102 @@ def _polarization_order_for_preset(polarization_order: str | None, preset_key: s
     if normalized_order == "IQUV" and _normalise_preset_key(preset_key) == _NRT_PRESET_KEY:
         return None
     return normalized_order
+
+
+def _dedisperse_any(values: np.ndarray, dm: float, freqs_mhz: np.ndarray, tsamp: float) -> np.ndarray:
+    """Dedisperse a 2-D dynamic spectrum or a 3-D Stokes cube identically."""
+    if values.ndim == 2:
+        return dedisperse(values, dm, freqs_mhz, tsamp, fill_value=0.0)
+    return np.stack(
+        [dedisperse(plane, dm, freqs_mhz, tsamp, fill_value=0.0) for plane in values],
+        axis=0,
+    )
+
+
+def _preset_polarization_basis(preset_key: str | None) -> str | None:
+    key = _normalise_preset_key(preset_key)
+    if key is None:
+        return None
+    try:
+        return normalize_polarization_basis(get_preset(key).polarization_basis)
+    except ValueError:
+        return None
+
+
+def resolve_stokes_basis(
+    *,
+    config: object,
+    preset_key: str | None,
+    header_basis: str | None = None,
+) -> tuple[str | None, str]:
+    """Decide which four products a four-polarization file holds.
+
+    Resolution order, highest first:
+
+    1. An explicit ``polarization_basis`` on the observation config, because an
+       operator who states the basis has looked at the instrument.
+    2. The telescope preset, which only declares a basis for instruments whose
+       headers are known to misreport it -- NRT writes ``POL_TYPE=IQUV`` over
+       coherency products, and believing that header swaps Stokes V into Q.
+    3. The file header (PSRFITS ``POL_TYPE`` with ``FD_POLN``).
+
+    Returns ``(basis, source)``; ``basis`` is None when nothing settles it, and
+    ``source`` names whichever of the three decided, for provenance.
+    """
+    override = normalize_polarization_basis(getattr(config, "polarization_basis", None))
+    if override is not None:
+        return override, "config_override"
+    preset_basis = _preset_polarization_basis(preset_key)
+    if preset_basis is not None:
+        return preset_basis, f"preset:{_normalise_preset_key(preset_key)}"
+    resolved_header = normalize_polarization_basis(header_basis)
+    if resolved_header is not None:
+        return resolved_header, "file_header"
+    return None, "unresolved"
+
+
+def require_stokes_basis(
+    *,
+    config: object,
+    preset_key: str | None,
+    header_basis: str | None,
+    product_count: int,
+    path: Path,
+) -> tuple[str, str]:
+    """Return the basis to convert with, or explain why there is none."""
+    if product_count < 4:
+        raise PolarizationUnavailableError(
+            f"The file carries {product_count} polarization product(s); a Stokes cube needs four.",
+            path=path,
+            reason="insufficient_products",
+        )
+    basis, source = resolve_stokes_basis(config=config, preset_key=preset_key, header_basis=header_basis)
+    if basis is None:
+        raise PolarizationUnavailableError(
+            "The polarization basis of this file is unknown. Set polarization_basis "
+            "(iquv, coherency_linear or coherency_circular) to state which four "
+            "products it holds.",
+            path=path,
+            reason="unknown_basis",
+        )
+    return basis, source
+
+
+def _psrfits_feed_polarization(path: Path) -> str | None:
+    """Return the PSRFITS ``FD_POLN`` receiver basis (LIN or CIRC), if recorded."""
+    try:
+        from astropy.io import fits
+    except Exception:
+        return None
+    try:
+        with fits.open(path, memmap=False) as hdul:
+            value = hdul[0].header.get("FD_POLN")
+    except Exception:
+        return None
+    if value is None:
+        return None
+    text = str(value).strip().upper()
+    return text or None
 
 
 def _build_stokes_i(
@@ -551,6 +653,45 @@ def _folded_psrfits_waterfall(subint: object, path: Path, preset_key: str | None
     return np.mean(np.stack(rows, axis=0), axis=0).astype(np.float32, copy=False), effective_npol
 
 
+def _folded_psrfits_stokes(subint: object, path: Path, basis: str) -> np.ndarray:
+    """Build a folded (4, channels, bins) Stokes cube from the SUBINT table."""
+    nbin, nchan, npol = _folded_psrfits_dimensions(subint, path)
+    if npol < 4:
+        raise PolarizationUnavailableError(
+            f"Folded PSRFITS SUBINT declares NPOL={npol}; a Stokes cube needs four products.",
+            path=path,
+            reason="insufficient_products",
+        )
+    column_names = set(getattr(subint, "columns", ()).names or ())
+    rows: list[np.ndarray] = []
+    for row in subint.data:
+        raw = _folded_psrfits_raw_data(row, nbin=nbin, nchan=nchan, npol=npol, path=path)
+        scl = _folded_psrfits_scale(
+            row["DAT_SCL"] if "DAT_SCL" in column_names else None,
+            npol=npol,
+            nchan=nchan,
+            default=1.0,
+            path=path,
+            field_name="DAT_SCL",
+        )
+        offs = _folded_psrfits_scale(
+            row["DAT_OFFS"] if "DAT_OFFS" in column_names else None,
+            npol=npol,
+            nchan=nchan,
+            default=0.0,
+            path=path,
+            field_name="DAT_OFFS",
+        )
+        scaled = raw * scl[:, :, np.newaxis] + offs[:, :, np.newaxis]
+        rows.append(stokes_from_products(scaled, basis))
+
+    if not rows:
+        raise CorruptedDataError("Folded PSRFITS SUBINT table contains no rows", path=path)
+    if len(rows) == 1:
+        return rows[0].astype(np.float32, copy=False)
+    return np.mean(np.stack(rows, axis=0), axis=0).astype(np.float32, copy=False)
+
+
 def _inspect_folded_psrfits(path: Path) -> FilterbankInspection:
     try:
         from astropy.io import fits
@@ -565,6 +706,8 @@ def _inspect_folded_psrfits(path: Path) -> FilterbankInspection:
         primary = hdul[0].header
         source_name = _decode_source_name(primary.get("SRC_NAME"))
         telescope_name = _decode_telescope_name(primary.get("TELESCOP"))
+        _, _, npol = _folded_psrfits_dimensions(subint, path)
+        header_basis = basis_from_psrfits(subint.header.get("POL_TYPE"), primary.get("FD_POLN"))
 
     timing_metadata = _psrfits_primary_fallback(path)
     detected_preset_key, detection_basis = detect_preset(
@@ -575,11 +718,19 @@ def _inspect_folded_psrfits(path: Path) -> FilterbankInspection:
         freq_lo_mhz=float(np.min(freqs_mhz)),
         freq_hi_mhz=float(np.max(freqs_mhz)),
     )
+    basis, basis_source = resolve_stokes_basis(
+        config=None,
+        preset_key=detected_preset_key,
+        header_basis=header_basis,
+    )
     return FilterbankInspection(
         source_path=path,
         source_name=source_name,
         telescope_id=None,
         machine_id=None,
+        polarization_products=npol,
+        polarization_basis=basis,
+        polarization_basis_source=None if basis is None else basis_source,
         detected_preset_key=detected_preset_key,
         detection_basis=detection_basis,
         telescope_name=telescope_name,
@@ -600,7 +751,15 @@ def _load_folded_psrfits(
     path: Path,
     config: ObservationConfig,
     inspection: FilterbankInspection | None = None,
+    *,
+    want_stokes: bool = False,
 ) -> tuple[np.ndarray, FilterbankMetadata]:
+    """Load folded PSRFITS as Stokes I, or as a Stokes cube when `want_stokes`.
+
+    Both paths share every step that defines the axes -- read window,
+    dedispersion, per-channel normalization -- so the cube a caller receives is
+    the same data on the same grid as the Stokes I array.
+    """
     try:
         from astropy.io import fits
     except Exception as exc:
@@ -619,7 +778,20 @@ def _load_folded_psrfits(
         freqs_mhz = _folded_psrfits_freqs_mhz(hdul, subint, path)
         polarization_order = _normalise_polarization_order(str(subint.header.get("POL_TYPE", "")).strip())
         chan_bw = _safe_float(subint.header.get("CHAN_BW"))
-        stokes_i, effective_npol = _folded_psrfits_waterfall(subint, path, preset_key=preset_key)
+        stokes_basis: str | None = None
+        stokes_basis_source: str | None = None
+        if want_stokes:
+            stokes_basis, stokes_basis_source = require_stokes_basis(
+                config=config,
+                preset_key=preset_key,
+                header_basis=basis_from_psrfits(subint.header.get("POL_TYPE"), hdul[0].header.get("FD_POLN")),
+                product_count=header_npol,
+                path=path,
+            )
+            values = _folded_psrfits_stokes(subint, path, stokes_basis)
+            effective_npol = 2
+        else:
+            values, effective_npol = _folded_psrfits_waterfall(subint, path, preset_key=preset_key)
 
     timing_metadata = _psrfits_primary_fallback(path)
     start_mjd = _safe_float(timing_metadata.get("tstart"))
@@ -631,21 +803,24 @@ def _load_folded_psrfits(
         )
 
     read_start_sec = config.read_start_for_file(path.name)
-    nstart = min(max(int(read_start_sec / tsamp), 0), max(stokes_i.shape[1] - 1, 0))
-    nread = stokes_i.shape[1] - nstart
+    time_bins = values.shape[-1]
+    nstart = min(max(int(read_start_sec / tsamp), 0), max(time_bins - 1, 0))
+    nread = time_bins - nstart
     if config.read_end_sec is not None:
         nend = max(nstart + 1, int(config.read_end_sec / tsamp))
         nread = min(nread, nend - nstart)
-    stokes_i = stokes_i[:, nstart : nstart + nread]
+    values = values[..., nstart : nstart + nread]
 
     effective_npol = max(1, int(config.npol_override)) if config.npol_override is not None else effective_npol
     if abs(float(config.dm)) > 0.0:
-        stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp, fill_value=0.0)
+        values = _dedisperse_any(values, config.dm, freqs_mhz, tsamp)
 
     tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
-    offpulse_start = min(stokes_i.shape[1] - 1, int((1 - tail_fraction) * stokes_i.shape[1]))
-    offpulse = stokes_i[:, offpulse_start:]
-    stokes_i = normalize(stokes_i, offpulse).astype(np.float32, copy=False)
+    offpulse_start = min(values.shape[-1] - 1, int((1 - tail_fraction) * values.shape[-1]))
+    offpulse = values[..., offpulse_start:]
+    values = (normalize_stokes(values, offpulse) if want_stokes else normalize(values, offpulse)).astype(
+        np.float32, copy=False
+    )
 
     diffs = np.diff(freqs_mhz.astype(float))
     freqres = (
@@ -690,5 +865,7 @@ def _load_folded_psrfits(
         dedispersion_reference_basis=(
             "flits_integer_bin_dedispersion_max_frequency" if abs(float(config.dm)) > 0.0 else None
         ),
+        polarization_basis=stokes_basis,
+        polarization_basis_source=stokes_basis_source,
     )
-    return stokes_i, validate_metadata(metadata)
+    return values, validate_metadata(metadata)

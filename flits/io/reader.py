@@ -3,7 +3,13 @@
 A reader declares the extensions it handles, sniffs a candidate file cheaply,
 reports what it found through ``inspect``, and returns a dynamic spectrum plus
 metadata from ``load``. Built-in readers are listed here; third-party readers
-register through the ``flits.readers`` entry point group."""
+register through the ``flits.readers`` entry point group.
+
+Stokes I remains what ``load`` returns, for every reader. A reader that can also
+produce Stokes I/Q/U/V adds one further method, ``load_stokes``, described by
+the :class:`StokesBurstReader` protocol. Making it a separate optional method
+rather than a flag on ``load`` keeps the return type of ``load`` fixed and
+leaves readers written against the original protocol working untouched."""
 
 from __future__ import annotations
 
@@ -17,6 +23,7 @@ import numpy as np
 
 from flits.io.errors import (
     FormatDetectionError,
+    PolarizationUnavailableError,
     UnsupportedFormatError,
 )
 from flits.models import FilterbankMetadata
@@ -43,6 +50,17 @@ class FilterbankInspection:
     time_reference_frame: str | None = None
     barycentric_header_flag: bool | None = None
     pulsarcentric_header_flag: bool | None = None
+    # Polarization: how many products the file holds, and which four they are.
+    # `polarization_basis` is None whenever nothing has established the basis,
+    # which is the only state in which a Stokes cube must not be built.
+    polarization_products: int | None = None
+    polarization_basis: str | None = None
+    polarization_basis_source: str | None = None
+
+    @property
+    def stokes_available(self) -> bool:
+        """True when this file can yield a full Stokes I/Q/U/V cube."""
+        return (self.polarization_products or 0) >= 4 and self.polarization_basis is not None
 
 
 @runtime_checkable
@@ -69,6 +87,31 @@ class BurstReader(Protocol):
     def inspect(self, path: Path) -> FilterbankInspection: ...
 
     def load(
+        self,
+        path: Path,
+        config: ObservationConfig,
+        inspection: FilterbankInspection | None = None,
+    ) -> tuple[np.ndarray, FilterbankMetadata]: ...
+
+
+@runtime_checkable
+class StokesBurstReader(BurstReader, Protocol):
+    """A reader that can additionally return full-Stokes data.
+
+    ``load_stokes`` returns ``(cube, metadata)`` where ``cube`` has shape
+    ``(4, channels, time)`` in I/Q/U/V order and shares the time and frequency
+    axes of the Stokes I array ``load`` returns for the same file and config --
+    same dedispersion, same read window, same channel order. That equivalence is
+    what lets a session apply its event window, off-pulse regions and channel
+    mask to the cube without re-deriving any of them.
+
+    Implementations raise
+    :class:`~flits.io.errors.PolarizationUnavailableError` when the file has
+    fewer than four polarization products or when the polarization basis is
+    unknown, rather than guessing.
+    """
+
+    def load_stokes(
         self,
         path: Path,
         config: ObservationConfig,
@@ -307,14 +350,43 @@ def load_filterbank_data(
     return reader.load(resolved, config, inspection=inspection)
 
 
+def reader_supports_stokes(reader: object) -> bool:
+    """True if `reader` implements the optional full-Stokes path."""
+    return callable(getattr(reader, "load_stokes", None))
+
+
+def load_stokes_data(
+    path: str | Path,
+    config: ObservationConfig,
+    inspection: FilterbankInspection | None = None,
+) -> tuple[np.ndarray, FilterbankMetadata]:
+    """Load a full-Stokes I/Q/U/V cube for `path`.
+
+    Raises PolarizationUnavailableError if the matching reader has no
+    full-Stokes path, or if the file itself cannot provide one.
+    """
+    resolved = Path(path).expanduser().resolve()
+    reader = detect_reader(resolved)
+    if not reader_supports_stokes(reader):
+        raise PolarizationUnavailableError(
+            f"Reader {reader.format_id!r} does not implement a full-Stokes path.",
+            path=resolved,
+            reason="reader_unsupported",
+        )
+    return reader.load_stokes(resolved, config, inspection=inspection)  # type: ignore[attr-defined]
+
+
 __all__ = [
     "BurstReader",
     "FilterbankInspection",
+    "StokesBurstReader",
     "detect_reader",
     "inspect_filterbank",
     "list_readers",
     "load_filterbank_data",
+    "load_stokes_data",
     "reader_diagnostics",
+    "reader_supports_stokes",
     "register_reader",
     "unregister_reader",
 ]

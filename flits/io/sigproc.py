@@ -78,10 +78,21 @@ def _write_sigproc_field(handle: object, name: str, value: object, field_type: s
 
 
 def build_sigproc_filterbank_bytes(data: np.ndarray, header: SigprocFilterbankHeader) -> bytes:
+    """Serialize a waterfall as a SIGPROC filterbank.
+
+    Accepts either a ``(channels, time)`` single-IF array or a
+    ``(nifs, channels, time)`` multi-IF array. SIGPROC interleaves the IFs
+    within each spectrum, so the samples are written time-major as
+    ``[time][if][channel]``.
+    """
     spectra = np.asarray(data, dtype=np.float32)
-    if spectra.ndim != 2:
-        raise ValueError("SIGPROC export expects a 2D waterfall array.")
-    if int(spectra.shape[0]) != int(header.nchans):
+    if spectra.ndim == 2:
+        spectra = spectra[np.newaxis, :, :]
+    if spectra.ndim != 3:
+        raise ValueError("SIGPROC export expects a 2D waterfall array or a 3D (nifs, channels, time) array.")
+    if int(spectra.shape[0]) != int(header.nifs):
+        raise ValueError("SIGPROC export polarization count does not match header.nifs.")
+    if int(spectra.shape[1]) != int(header.nchans):
         raise ValueError("SIGPROC export channel count does not match header.nchans.")
 
     buffer = BytesIO()
@@ -89,7 +100,8 @@ def build_sigproc_filterbank_bytes(data: np.ndarray, header: SigprocFilterbankHe
     for name, field_type in _FIELD_TYPES:
         _write_sigproc_field(buffer, name, getattr(header, name), field_type)
     _write_sigproc_string(buffer, "HEADER_END")
-    buffer.write(np.ascontiguousarray(spectra.T, dtype=np.float32).tobytes(order="C"))
+    # (if, channel, time) -> (time, if, channel)
+    buffer.write(np.ascontiguousarray(spectra.transpose(2, 0, 1), dtype=np.float32).tobytes(order="C"))
     return buffer.getvalue()
 
 

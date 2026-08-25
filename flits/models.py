@@ -637,6 +637,10 @@ class FilterbankMetadata:
     pulsarcentric_header_flag: bool | None = None
     dedispersion_reference_frequency_mhz: float | None = None
     dedispersion_reference_basis: str | None = None
+    # Set only on data loaded through a full-Stokes path: which four products
+    # the file held, and what established that. None for Stokes I loads.
+    polarization_basis: str | None = None
+    polarization_basis_source: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -666,6 +670,8 @@ class FilterbankMetadata:
             "pulsarcentric_header_flag": _bool_or_none(self.pulsarcentric_header_flag),
             "dedispersion_reference_frequency_mhz": _float_or_none(self.dedispersion_reference_frequency_mhz),
             "dedispersion_reference_basis": self.dedispersion_reference_basis,
+            "polarization_basis": self.polarization_basis,
+            "polarization_basis_source": self.polarization_basis_source,
         }
 
     @classmethod
@@ -697,6 +703,8 @@ class FilterbankMetadata:
             pulsarcentric_header_flag=_bool_or_none(payload.get("pulsarcentric_header_flag")),
             dedispersion_reference_frequency_mhz=_float_or_none(payload.get("dedispersion_reference_frequency_mhz")),
             dedispersion_reference_basis=payload.get("dedispersion_reference_basis"),
+            polarization_basis=payload.get("polarization_basis"),
+            polarization_basis_source=payload.get("polarization_basis_source"),
         )
 
 
@@ -1697,6 +1705,189 @@ class BurstMeasurements:
 
 
 @dataclass(frozen=True)
+class PolarizationSettings:
+    """Operator-controlled inputs to an in-session polarization analysis.
+
+    `calibration_confirmed` is deliberately not a default-true convenience: an
+    RM measured from uncalibrated Q/U is a number, not a measurement, and the
+    workflow refuses to call it calibrated until someone states that the
+    polarization calibration of this data has been established.
+    """
+
+    min_linear_snr: float = 5.0
+    calibration_confirmed: bool = False
+    polarization_basis: str | None = None
+    phi_min_rad_m2: float | None = None
+    phi_max_rad_m2: float | None = None
+    phi_step_rad_m2: float | None = None
+    clean: bool = False
+    clean_gain: float = 0.1
+    clean_threshold_sigma: float = 3.0
+    clean_max_iterations: int = 1000
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "min_linear_snr": float(self.min_linear_snr),
+            "calibration_confirmed": bool(self.calibration_confirmed),
+            "polarization_basis": self.polarization_basis,
+            "phi_min_rad_m2": _float_or_none(self.phi_min_rad_m2),
+            "phi_max_rad_m2": _float_or_none(self.phi_max_rad_m2),
+            "phi_step_rad_m2": _float_or_none(self.phi_step_rad_m2),
+            "clean": bool(self.clean),
+            "clean_gain": float(self.clean_gain),
+            "clean_threshold_sigma": float(self.clean_threshold_sigma),
+            "clean_max_iterations": int(self.clean_max_iterations),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any] | None) -> PolarizationSettings:
+        if payload is None:
+            return cls()
+        return cls(
+            min_linear_snr=float(payload.get("min_linear_snr", 5.0)),
+            calibration_confirmed=bool(payload.get("calibration_confirmed", False)),
+            polarization_basis=(
+                None if payload.get("polarization_basis") is None else str(payload["polarization_basis"])
+            ),
+            phi_min_rad_m2=_float_or_none(payload.get("phi_min_rad_m2")),
+            phi_max_rad_m2=_float_or_none(payload.get("phi_max_rad_m2")),
+            phi_step_rad_m2=_float_or_none(payload.get("phi_step_rad_m2")),
+            clean=bool(payload.get("clean", False)),
+            clean_gain=float(payload.get("clean_gain", 0.1)),
+            clean_threshold_sigma=float(payload.get("clean_threshold_sigma", 3.0)),
+            clean_max_iterations=int(payload.get("clean_max_iterations", 1000)),
+        )
+
+
+@dataclass(frozen=True)
+class PolarizationAnalysisResult:
+    """A polarization analysis run against a session's own selections.
+
+    Holds both halves of the analysis: the channelized Q/U spectrum integrated
+    over the session's event window against its off-pulse regions, and the RM
+    synthesis computed from that spectrum. Keeping them together is what makes
+    the RM reproducible -- the spectrum records which channels survived the
+    mask and the S/N cut, and the provenance records which four products the
+    file held and what established that.
+    """
+
+    status: str
+    message: str
+    calibration_status: str
+    normalization: str
+    polarization_basis: str
+    polarization_basis_source: str
+    freqs_mhz: np.ndarray
+    channel_indices: np.ndarray
+    stokes_q: np.ndarray
+    stokes_u: np.ndarray
+    sigma_q: np.ndarray
+    sigma_u: np.ndarray
+    integrated_stokes_i: np.ndarray
+    integrated_stokes_q: np.ndarray
+    integrated_stokes_u: np.ndarray
+    integrated_stokes_v: np.ndarray
+    linear_snr: np.ndarray
+    channel_width_mhz: float | None
+    event_bins: list[int]
+    event_window_ms: list[float]
+    offpulse_regions: list[list[int]]
+    offpulse_windows_ms: list[list[float]]
+    offpulse_block_count: int
+    masked_channels: list[int]
+    spectral_extent_channels: list[int]
+    linear_fraction: float | None
+    circular_fraction: float | None
+    dm: float
+    rm_synthesis: dict[str, Any]
+    settings: PolarizationSettings
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def peak_rm_rad_m2(self) -> float | None:
+        return _float_or_none(self.rm_synthesis.get("peak_rm_rad_m2"))
+
+    @property
+    def peak_rm_uncertainty_rad_m2(self) -> float | None:
+        return _float_or_none(self.rm_synthesis.get("peak_rm_uncertainty_rad_m2"))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "message": self.message,
+            "calibration_status": self.calibration_status,
+            "normalization": self.normalization,
+            "polarization_basis": self.polarization_basis,
+            "polarization_basis_source": self.polarization_basis_source,
+            "freqs_mhz": _jsonable_1d(self.freqs_mhz, digits=6),
+            "channel_indices": [int(value) for value in np.asarray(self.channel_indices, dtype=int)],
+            "stokes_q": _jsonable_1d(self.stokes_q, digits=6),
+            "stokes_u": _jsonable_1d(self.stokes_u, digits=6),
+            "sigma_q": _jsonable_1d(self.sigma_q, digits=6),
+            "sigma_u": _jsonable_1d(self.sigma_u, digits=6),
+            "integrated_stokes_i": _jsonable_1d(self.integrated_stokes_i, digits=6),
+            "integrated_stokes_q": _jsonable_1d(self.integrated_stokes_q, digits=6),
+            "integrated_stokes_u": _jsonable_1d(self.integrated_stokes_u, digits=6),
+            "integrated_stokes_v": _jsonable_1d(self.integrated_stokes_v, digits=6),
+            "linear_snr": _jsonable_1d(self.linear_snr, digits=4),
+            "channel_width_mhz": _float_or_none(self.channel_width_mhz),
+            "event_bins": [int(value) for value in self.event_bins],
+            "event_window_ms": [float(value) for value in self.event_window_ms],
+            "offpulse_regions": [[int(value) for value in region] for region in self.offpulse_regions],
+            "offpulse_windows_ms": [[float(value) for value in window] for window in self.offpulse_windows_ms],
+            "offpulse_block_count": int(self.offpulse_block_count),
+            "masked_channels": [int(value) for value in self.masked_channels],
+            "spectral_extent_channels": [int(value) for value in self.spectral_extent_channels],
+            "linear_fraction": _float_or_none(self.linear_fraction),
+            "circular_fraction": _float_or_none(self.circular_fraction),
+            "dm": float(self.dm),
+            "rm_synthesis": dict(self.rm_synthesis),
+            "settings": self.settings.to_dict(),
+            "warnings": list(self.warnings),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any] | None) -> PolarizationAnalysisResult | None:
+        if payload is None:
+            return None
+        return cls(
+            status=str(payload.get("status", "unknown")),
+            message=str(payload.get("message", "")),
+            calibration_status=str(payload.get("calibration_status", "unknown")),
+            normalization=str(payload.get("normalization", "")),
+            polarization_basis=str(payload.get("polarization_basis", "")),
+            polarization_basis_source=str(payload.get("polarization_basis_source", "")),
+            freqs_mhz=_array_1d(payload.get("freqs_mhz"), dtype=float),
+            channel_indices=_array_1d(payload.get("channel_indices"), dtype=int),
+            stokes_q=_array_1d(payload.get("stokes_q"), dtype=float),
+            stokes_u=_array_1d(payload.get("stokes_u"), dtype=float),
+            sigma_q=_array_1d(payload.get("sigma_q"), dtype=float),
+            sigma_u=_array_1d(payload.get("sigma_u"), dtype=float),
+            integrated_stokes_i=_array_1d(payload.get("integrated_stokes_i"), dtype=float),
+            integrated_stokes_q=_array_1d(payload.get("integrated_stokes_q"), dtype=float),
+            integrated_stokes_u=_array_1d(payload.get("integrated_stokes_u"), dtype=float),
+            integrated_stokes_v=_array_1d(payload.get("integrated_stokes_v"), dtype=float),
+            linear_snr=_array_1d(payload.get("linear_snr"), dtype=float),
+            channel_width_mhz=_float_or_none(payload.get("channel_width_mhz")),
+            event_bins=[int(value) for value in payload.get("event_bins", [])],
+            event_window_ms=[float(value) for value in payload.get("event_window_ms", [])],
+            offpulse_regions=[[int(value) for value in region] for region in payload.get("offpulse_regions", [])],
+            offpulse_windows_ms=[
+                [float(value) for value in window] for window in payload.get("offpulse_windows_ms", [])
+            ],
+            offpulse_block_count=int(payload.get("offpulse_block_count", 0)),
+            masked_channels=[int(value) for value in payload.get("masked_channels", [])],
+            spectral_extent_channels=[int(value) for value in payload.get("spectral_extent_channels", [])],
+            linear_fraction=_float_or_none(payload.get("linear_fraction")),
+            circular_fraction=_float_or_none(payload.get("circular_fraction")),
+            dm=float(payload.get("dm", 0.0)),
+            rm_synthesis=dict(payload.get("rm_synthesis") or {}),
+            settings=PolarizationSettings.from_dict(payload.get("settings")),
+            warnings=[str(value) for value in payload.get("warnings", [])],
+        )
+
+
+@dataclass(frozen=True)
 class AnalysisSessionSnapshot:
     schema_version: str
     source: SessionSourceRef
@@ -1730,6 +1921,9 @@ class AnalysisSessionSnapshot:
     dm_optimization: DmOptimizationResult | None
     spectral_analysis: SpectralAnalysisResult | None
     temporal_structure: TemporalStructureResult | None
+    polarization: PolarizationAnalysisResult | None = None
+    polarization_settings: PolarizationSettings = field(default_factory=PolarizationSettings)
+    polarization_basis: str | None = None
     source_ra_deg: float | None = None
     source_dec_deg: float | None = None
     time_scale: str | None = None
@@ -1771,6 +1965,9 @@ class AnalysisSessionSnapshot:
             "dm_optimization": None if self.dm_optimization is None else self.dm_optimization.to_dict(),
             "spectral_analysis": None if self.spectral_analysis is None else self.spectral_analysis.to_dict(),
             "temporal_structure": None if self.temporal_structure is None else self.temporal_structure.to_dict(),
+            "polarization": None if self.polarization is None else self.polarization.to_dict(),
+            "polarization_settings": self.polarization_settings.to_dict(),
+            "polarization_basis": self.polarization_basis,
             "source_ra_deg": _float_or_none(self.source_ra_deg),
             "source_dec_deg": _float_or_none(self.source_dec_deg),
             "time_scale": self.time_scale,
@@ -1822,6 +2019,11 @@ class AnalysisSessionSnapshot:
             ),
             spectral_analysis=SpectralAnalysisResult.from_dict(payload.get("spectral_analysis")),
             temporal_structure=TemporalStructureResult.from_dict(payload.get("temporal_structure")),
+            polarization=PolarizationAnalysisResult.from_dict(payload.get("polarization")),
+            polarization_settings=PolarizationSettings.from_dict(payload.get("polarization_settings")),
+            polarization_basis=(
+                None if payload.get("polarization_basis") is None else str(payload["polarization_basis"])
+            ),
             source_ra_deg=_float_or_none(payload.get("source_ra_deg")),
             source_dec_deg=_float_or_none(payload.get("source_dec_deg")),
             time_scale=None if payload.get("time_scale") is None else str(payload.get("time_scale")),

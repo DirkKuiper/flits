@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from flits.stokes import normalize_polarization_basis
+
 
 @dataclass(frozen=True)
 class AutoMaskProfile:
@@ -44,6 +46,11 @@ class TelescopePreset:
     latitude_deg: float | None = None
     height_m: float | None = None
     observatory_location_basis: str | None = None
+    # Which four products a four-polarization file from this instrument holds.
+    # Left unset where the instrument is not known to write full polarization,
+    # so a Stokes cube is only ever built from a basis someone has established.
+    polarization_basis: str | None = None
+    polarization_basis_source: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -63,6 +70,8 @@ class TelescopePreset:
             "latitude_deg": self.latitude_deg,
             "height_m": self.height_m,
             "observatory_location_basis": self.observatory_location_basis,
+            "polarization_basis": self.polarization_basis,
+            "polarization_basis_source": self.polarization_basis_source,
         }
 
 
@@ -105,6 +114,14 @@ PRESETS: dict[str, TelescopePreset] = {
         latitude_deg=47.37360170826312,
         height_m=190.94343144576627,
         observatory_location_basis="astropy_site_registry_nancay",
+        # NRT filterbanks carry AA, BB, CR, CI from the linear feed. SIGPROC has
+        # no field that records this, and `your` labels every four-IF filterbank
+        # "IQUV" regardless, so the preset is what establishes it. Confirmed
+        # against R147/FRB 20240114A bursts: this basis is the only one of the
+        # three that recovers a ~94% linearly polarized burst, and it gives
+        # RM = -373.5 +/- 0.6 rad/m^2, consistent with the published value.
+        polarization_basis="coherency_linear",
+        polarization_basis_source="nrt_linear_feed_coherency_products",
     ),
     "gbt": TelescopePreset(
         key="gbt",
@@ -345,6 +362,9 @@ class ObservationConfig:
     observatory_longitude_deg: float | None = None
     observatory_latitude_deg: float | None = None
     observatory_height_m: float | None = None
+    # An explicit operator override only. The telescope preset carries the
+    # instrument default; see `flits.io.psrfits.resolve_stokes_basis`.
+    polarization_basis: str | None = None
 
     @classmethod
     def from_preset(
@@ -367,9 +387,14 @@ class ObservationConfig:
         observatory_longitude_deg: float | None = None,
         observatory_latitude_deg: float | None = None,
         observatory_height_m: float | None = None,
+        polarization_basis: str | None = None,
     ) -> ObservationConfig:
         preset = get_preset(preset_key)
         mask_profile = get_auto_mask_profile(auto_mask_profile)
+        # Only an explicit request lands on the config. The preset's own basis
+        # stays on the preset, so a reader can tell an operator's statement
+        # apart from an instrument default when it records provenance.
+        resolved_basis = normalize_polarization_basis(polarization_basis)
 
         return cls(
             dm=float(dm),
@@ -395,6 +420,7 @@ class ObservationConfig:
             observatory_longitude_deg=(None if observatory_longitude_deg is None else float(observatory_longitude_deg)),
             observatory_latitude_deg=(None if observatory_latitude_deg is None else float(observatory_latitude_deg)),
             observatory_height_m=None if observatory_height_m is None else float(observatory_height_m),
+            polarization_basis=resolved_basis,
         )
 
     def read_start_for_file(self, filename: str) -> float:

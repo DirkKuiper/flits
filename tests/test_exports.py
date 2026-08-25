@@ -172,16 +172,25 @@ class ExportResultsTest(unittest.TestCase):
         self.assertIn("Dynamic Spectrum (PNG)", labels)
         self.assertIn("DM Curve (PNG)", labels)
         self.assertIn("Power Spectrum (PNG)", labels)
-        self.assertEqual(sum(1 for artifact in preview["artifacts"] if artifact["kind"] == "plot"), 6)
+        self.assertEqual(sum(1 for artifact in preview["artifacts"] if artifact["kind"] == "plot"), 7)
 
         plot_previews = {item["plot_key"]: item for item in preview["plot_previews"]}
         self.assertEqual(
             set(plot_previews),
-            {"dynamic_spectrum", "profile_diagnostics", "acf_panel", "power_spectrum", "dm_curve", "dm_residuals"},
+            {
+                "dynamic_spectrum",
+                "profile_diagnostics",
+                "acf_panel",
+                "faraday_spectrum",
+                "power_spectrum",
+                "dm_curve",
+                "dm_residuals",
+            },
         )
         self.assertTrue(plot_previews["dynamic_spectrum"]["svg"].lstrip().startswith("<svg"))
         self.assertEqual(plot_previews["dm_curve"]["status"], "ready")
         self.assertEqual(plot_previews["power_spectrum"]["status"], "omitted")
+        self.assertEqual(plot_previews["faraday_spectrum"]["status"], "omitted")
         self.assertFalse(session.export_snapshots)
 
     def test_preview_omissions_match_built_export_selection(self) -> None:
@@ -354,7 +363,7 @@ class ExportResultsTest(unittest.TestCase):
 
         manifest = payload["export_manifest"]
         self.assertIsNotNone(manifest)
-        self.assertEqual(manifest["schema_version"], "1.6")
+        self.assertEqual(manifest["schema_version"], "1.7")
         artifact_names = {artifact["name"] for artifact in manifest["artifacts"]}
         self.assertTrue(any(name.endswith("_science.json") for name in artifact_names))
         self.assertTrue(any(name.endswith("_catalog.csv") for name in artifact_names))
