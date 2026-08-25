@@ -4,6 +4,25 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.1.0](https://github.com/DirkKuiper/flits/compare/flits-v1.0.1...flits-v1.1.0) (2026-08-25)
+
+
+### Features
+
+* full-Stokes input and in-session polarimetry ([a2434b5](https://github.com/DirkKuiper/flits/commit/a2434b5366d6d3b05812509c21c076556e0093c1))
+* **io:** read full Stokes from files that carry four polarizations ([6de3425](https://github.com/DirkKuiper/flits/commit/6de342532465434ef07faf88eb040787a2d810c3)), closes [#92](https://github.com/DirkKuiper/flits/issues/92)
+* **session:** measure the rotation measure from the session's own selections ([a96c781](https://github.com/DirkKuiper/flits/commit/a96c78142531c6f7520c01a72f328b9b3be89a7a)), closes [#92](https://github.com/DirkKuiper/flits/issues/92)
+
+
+### Bug Fixes
+
+* **web:** let the last polarization run own the panel ([34ebc5b](https://github.com/DirkKuiper/flits/commit/34ebc5b0d79214ac3f99e35de12f648bced91491))
+
+
+### Documentation
+
+* describe full-Stokes input and in-session polarimetry ([af5b2c3](https://github.com/DirkKuiper/flits/commit/af5b2c3eb6dcda665c7d8c67d82381c06eafbf4b))
+
 ## [1.0.1](https://github.com/DirkKuiper/flits/compare/flits-v1.0.0...flits-v1.0.1) (2026-08-24)
 
 
