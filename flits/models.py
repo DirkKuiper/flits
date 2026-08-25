@@ -13,6 +13,9 @@ from typing import Any
 
 import numpy as np
 
+MAX_DRIFT_MONTE_CARLO_TRIALS = 512
+MAX_DRIFT_RANDOM_SEED = 2**64 - 1
+
 
 def _jsonable_1d(values: np.ndarray, digits: int = 4) -> list[float | None]:
     rounded = np.round(np.asarray(values, dtype=float), digits)
@@ -1135,14 +1138,62 @@ class DriftAnalysisSettings:
     # sweep would reproduce a different classification from the one recorded.
     dm_uncertainty_pc_cm3: float | None = None
 
+    def normalized(self) -> DriftAnalysisSettings:
+        """Return settings that are finite and safe to execute or replay.
+
+        These values can arrive through the actions API or an imported session
+        snapshot. Normalizing them in the shared model keeps the browser,
+        headless replay, and direct Python entry point on the same bounded
+        behaviour.
+        """
+        defaults = type(self)()
+
+        max_lag_fraction = float(self.max_lag_fraction)
+        if not np.isfinite(max_lag_fraction):
+            max_lag_fraction = defaults.max_lag_fraction
+        max_lag_fraction = float(np.clip(max_lag_fraction, 0.0, 1.0))
+
+        min_overlap_fraction = float(self.min_overlap_fraction)
+        if not np.isfinite(min_overlap_fraction):
+            min_overlap_fraction = defaults.min_overlap_fraction
+        min_overlap_fraction = float(np.clip(min_overlap_fraction, 0.0, 1.0))
+
+        try:
+            monte_carlo_trials = int(self.monte_carlo_trials)
+        except (OverflowError, TypeError, ValueError):
+            monte_carlo_trials = defaults.monte_carlo_trials
+        monte_carlo_trials = min(MAX_DRIFT_MONTE_CARLO_TRIALS, max(0, monte_carlo_trials))
+
+        try:
+            random_seed = int(self.random_seed)
+        except (OverflowError, TypeError, ValueError):
+            random_seed = defaults.random_seed
+        random_seed = min(MAX_DRIFT_RANDOM_SEED, max(0, random_seed))
+
+        dm_uncertainty = self.dm_uncertainty_pc_cm3
+        if dm_uncertainty is not None:
+            dm_uncertainty = abs(float(dm_uncertainty))
+            if not np.isfinite(dm_uncertainty):
+                dm_uncertainty = None
+
+        return type(self)(
+            max_lag_fraction=max_lag_fraction,
+            min_overlap_fraction=min_overlap_fraction,
+            monte_carlo_trials=monte_carlo_trials,
+            random_seed=random_seed,
+            exclude_zero_lag=bool(self.exclude_zero_lag),
+            dm_uncertainty_pc_cm3=dm_uncertainty,
+        )
+
     def to_dict(self) -> dict[str, Any]:
+        normalized = self.normalized()
         return {
-            "max_lag_fraction": float(self.max_lag_fraction),
-            "min_overlap_fraction": float(self.min_overlap_fraction),
-            "monte_carlo_trials": int(self.monte_carlo_trials),
-            "random_seed": int(self.random_seed),
-            "exclude_zero_lag": bool(self.exclude_zero_lag),
-            "dm_uncertainty_pc_cm3": _float_or_none(self.dm_uncertainty_pc_cm3),
+            "max_lag_fraction": normalized.max_lag_fraction,
+            "min_overlap_fraction": normalized.min_overlap_fraction,
+            "monte_carlo_trials": normalized.monte_carlo_trials,
+            "random_seed": normalized.random_seed,
+            "exclude_zero_lag": normalized.exclude_zero_lag,
+            "dm_uncertainty_pc_cm3": normalized.dm_uncertainty_pc_cm3,
         }
 
     @classmethod
@@ -1153,11 +1204,11 @@ class DriftAnalysisSettings:
         return cls(
             max_lag_fraction=float(payload.get("max_lag_fraction", defaults.max_lag_fraction)),
             min_overlap_fraction=float(payload.get("min_overlap_fraction", defaults.min_overlap_fraction)),
-            monte_carlo_trials=int(payload.get("monte_carlo_trials", defaults.monte_carlo_trials)),
-            random_seed=int(payload.get("random_seed", defaults.random_seed)),
+            monte_carlo_trials=payload.get("monte_carlo_trials", defaults.monte_carlo_trials),
+            random_seed=payload.get("random_seed", defaults.random_seed),
             exclude_zero_lag=bool(payload.get("exclude_zero_lag", defaults.exclude_zero_lag)),
             dm_uncertainty_pc_cm3=_float_or_none(payload.get("dm_uncertainty_pc_cm3")),
-        )
+        ).normalized()
 
 
 @dataclass(frozen=True)

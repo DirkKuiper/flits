@@ -43,7 +43,10 @@ The autocorrelation estimator is the primary result and populates
 3. A rotated two-dimensional Gaussian is fitted to the central peak, over the
    lags inside `max_lag_fraction` of the full range that survive
    `min_overlap_fraction` of their possible channel pairs. The zero-lag pixel is
-   excluded, because it carries the noise variance as a delta function.
+   excluded, because it carries the noise variance as a delta function. FLITS
+   refuses a fit whose width consumes 80% or more of either fitted lag span,
+   because that width is being set by the boundary rather than measured from
+   the peak; increase the lag fraction or improve the selections in that case.
 4. The drift rate is the **conditional-mean slope** of the fitted ellipse,
    \( \Sigma_{\nu t} / \Sigma_{tt} \) — the rate at which the centre frequency
    moves with time.
@@ -170,6 +173,12 @@ The blocking flags are `heavily_masked` (a quarter or more of the selected
 channels are gone), `low_acf_contrast`, `monte_carlo_unavailable`, and
 `implicit_offpulse` (no explicit off-pulse window, so the noise reference is a
 guess).
+
+Monte Carlo requests are bounded to 512 trials in the browser, API, and replay
+path so an imported snapshot cannot accidentally turn one measurement into an
+unbounded computation. Non-finite controls fall back to their recorded
+defaults, and random seeds are normalized to the non-negative range accepted
+by NumPy.
 
 The DM uncertainty comes from the DM sweep when the sweep still describes the
 applied DM; retune the DM by hand and FLITS drops it rather than reusing a

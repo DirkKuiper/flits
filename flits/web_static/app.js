@@ -3358,7 +3358,7 @@ function driftActionPayload() {
   const payload = { dm_uncertainty_pc_cm3: numericFieldValue(driftDmUncertaintyInput) }
   const trials = numericFieldValue(driftTrialsInput)
   if (trials !== null) {
-    payload.monte_carlo_trials = Math.max(0, Math.round(trials))
+    payload.monte_carlo_trials = Math.min(512, Math.max(0, Math.round(trials)))
   }
   const maxLag = numericFieldValue(driftMaxLagInput)
   if (maxLag !== null) {
@@ -3366,7 +3366,7 @@ function driftActionPayload() {
   }
   const seed = numericFieldValue(driftSeedInput)
   if (seed !== null) {
-    payload.random_seed = Math.round(seed)
+    payload.random_seed = Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.round(seed)))
   }
   return payload
 }
@@ -3594,7 +3594,7 @@ async function renderDriftAcfPlot(drift) {
       colorbar: { title: { text: "ACF" }, thickness: 14 },
     },
   ]
-  if (Number.isFinite(Number(drift.drift_rate_mhz_per_ms))) {
+  if (drift.drift_rate_mhz_per_ms !== null && drift.drift_rate_mhz_per_ms !== undefined && Number.isFinite(Number(drift.drift_rate_mhz_per_ms))) {
     const rate = Number(drift.drift_rate_mhz_per_ms)
     traces.push({
       x: timeLags,
@@ -3654,7 +3654,7 @@ async function renderDriftComponentPlot(drift) {
       hovertemplate: "%{text}<br>%{x:.4f} ms<br>%{y:.3f} MHz<extra></extra>",
     },
   ]
-  if (Number.isFinite(Number(drift.component_drift_rate_mhz_per_ms))) {
+  if (drift.component_drift_rate_mhz_per_ms !== null && drift.component_drift_rate_mhz_per_ms !== undefined && Number.isFinite(Number(drift.component_drift_rate_mhz_per_ms))) {
     const rate = Number(drift.component_drift_rate_mhz_per_ms)
     const meanTime = times.reduce((total, value) => total + Number(value), 0) / times.length
     const meanFreq = freqs.reduce((total, value) => total + Number(value), 0) / freqs.length

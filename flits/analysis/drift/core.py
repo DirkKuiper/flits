@@ -51,6 +51,10 @@ MAX_SERIALIZED_ACF_BINS = 129
 # Relative spread the time and frequency axes may show before FLITS refuses to
 # treat them as uniformly sampled.
 AXIS_UNIFORMITY_TOLERANCE = 1e-3
+# A fitted width that consumes almost the whole requested lag region is set by
+# that boundary rather than by the ACF peak. Require some room on both axes
+# before treating the ellipse parameters as measured.
+MAX_FIT_WIDTH_FRACTION = 0.8
 
 # Dispersion delay in milliseconds: t(nu) = DM_DELAY_MS_MHZ2 * DM * nu^-2.
 DM_DELAY_MS_MHZ2 = 1e3 * DM_CONSTANT_S_MHZ2
@@ -612,12 +616,15 @@ def run_drift_analysis(
     diagnostic. The result is publishable only when a DM uncertainty was
     supplied, because the DM systematic is usually the larger term.
     """
-    settings = DriftAnalysisSettings() if settings is None else settings
+    settings = (DriftAnalysisSettings() if settings is None else settings).normalized()
     waterfall = np.asarray(inputs.waterfall, dtype=float)
     time_axis_ms = np.asarray(inputs.time_axis_ms, dtype=float)
     freqs_mhz = np.asarray(inputs.freqs_mhz, dtype=float)
 
-    spec_lo, spec_hi = sorted((int(inputs.spec_lo), int(inputs.spec_hi)))
+    raw_spec_lo, raw_spec_hi = sorted((int(inputs.spec_lo), int(inputs.spec_hi)))
+    channel_count = int(waterfall.shape[0]) if waterfall.ndim == 2 else 0
+    spec_lo = max(0, min(raw_spec_lo, channel_count))
+    spec_hi = max(-1, min(raw_spec_hi, channel_count - 1))
     time_bins = int(min(waterfall.shape[1], time_axis_ms.size)) if waterfall.ndim == 2 else 0
     event_start = max(0, min(int(inputs.event_rel_start), time_bins))
     event_end = max(event_start, min(time_bins, int(inputs.event_rel_end)))
@@ -626,8 +633,8 @@ def run_drift_analysis(
     freq_step_mhz = _uniform_step(freqs_mhz)
     selected_freqs = freqs_mhz[spec_lo : spec_hi + 1] if freqs_mhz.size else freqs_mhz
     event_window_ms = (
-        (float(time_axis_ms[event_start]), float(time_axis_ms[event_end - 1]))
-        if time_axis_ms.size and event_end > event_start
+        (float(time_axis_ms[event_start]), float(time_axis_ms[event_end - 1] + tsamp_ms))
+        if time_axis_ms.ndim == 1 and time_axis_ms.size and event_end > event_start and np.isfinite(tsamp_ms)
         else (0.0, 0.0)
     )
     spectral_extent_mhz = (
@@ -647,6 +654,11 @@ def run_drift_analysis(
 
     if waterfall.ndim != 2 or waterfall.size == 0:
         return fail("insufficient_signal", "The selection does not contain a dynamic spectrum to correlate.")
+    if time_axis_ms.ndim != 1 or freqs_mhz.ndim != 1 or waterfall.shape != (freqs_mhz.size, time_axis_ms.size):
+        return fail(
+            "invalid_axes",
+            "The time and frequency axes must be one-dimensional and match the dynamic-spectrum shape exactly.",
+        )
     if not np.isfinite(tsamp_ms) or tsamp_ms <= 0 or not np.isfinite(freq_step_mhz) or freq_step_mhz == 0:
         return fail(
             "invalid_axes",
@@ -684,6 +696,11 @@ def run_drift_analysis(
         )
 
     field = np.where(valid, event_block, 0.0)
+    if not np.any(field):
+        return fail(
+            "insufficient_signal",
+            "No signal remains in the event window after subtracting the per-channel baseline.",
+        )
     n_freq, n_time = field.shape
     fft_shape = (2 * n_freq, 2 * n_time)
     observed_overlap, expected_overlap = _overlap_counts(valid, fft_shape)
@@ -731,11 +748,26 @@ def run_drift_analysis(
         return fail("fit_failed", "The rotated 2D Gaussian did not converge on the autocorrelation peak.")
 
     amplitude, log_a, rho_raw, log_c, offset = (float(value) for value in popt)
-    drift = _drift_from_params(log_a, rho_raw, log_c)
-    correlation = float(-np.tanh(rho_raw))
-    shape_factor = max(1.0 - correlation**2, 1e-12)
-    sigma_time_ms = float(0.5 / np.sqrt(np.exp(log_a) * shape_factor))
-    sigma_freq_mhz = float(0.5 / np.sqrt(np.exp(log_c) * shape_factor))
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        drift = _drift_from_params(log_a, rho_raw, log_c)
+        correlation = float(-np.tanh(rho_raw))
+        shape_factor = max(1.0 - correlation**2, 1e-12)
+        sigma_time_ms = float(0.5 / np.sqrt(np.exp(log_a) * shape_factor))
+        sigma_freq_mhz = float(0.5 / np.sqrt(np.exp(log_c) * shape_factor))
+    fit_span_time_ms = float(np.max(np.abs(region_time_lag)))
+    fit_span_freq_mhz = float(np.max(np.abs(region_freq_lag)))
+    if (
+        not all(np.isfinite(value) for value in (drift, correlation, sigma_time_ms, sigma_freq_mhz))
+        or sigma_time_ms <= 0
+        or sigma_freq_mhz <= 0
+        or sigma_time_ms >= MAX_FIT_WIDTH_FRACTION * fit_span_time_ms
+        or sigma_freq_mhz >= MAX_FIT_WIDTH_FRACTION * fit_span_freq_mhz
+    ):
+        return fail(
+            "fit_failed",
+            "The fitted autocorrelation peak is not constrained inside the selected lag region. Increase the "
+            "lag fraction or improve the event and off-pulse selections.",
+        )
 
     # Ellipse orientation in the conventional (ms, MHz) plane. The major-axis
     # slope is what frbgui reports; it is not the same number as the

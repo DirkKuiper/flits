@@ -598,7 +598,7 @@
                 </label>
                 <label class="field">
                   <span>Random seed <span class="tooltip-icon" data-tooltip="Seed for the Monte-Carlo trials. It is recorded in the session snapshot, so a headless replay reproduces the same error bar.">?</span></span>
-                  <input id="driftSeedInput" type="number" step="1" value="20240617">
+                  <input id="driftSeedInput" type="number" step="1" min="0" max="9007199254740991" value="20240617">
                 </label>
               </div>
               <div class="export-actions">

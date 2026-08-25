@@ -231,6 +231,51 @@ class DriftAcfEstimatorTest(unittest.TestCase):
         self.assertEqual(result.status, "insufficient_channels")
         self.assertIn("heavily_masked", result.warning_flags)
 
+    def test_a_baseline_only_event_is_reported_as_no_signal(self) -> None:
+        data = np.ones((N_CHAN, N_TIME), dtype=float)
+        time_axis_ms = np.arange(N_TIME, dtype=float) * TSAMP_MS
+        freqs_mhz = BASE_FREQ_MHZ + np.arange(N_CHAN, dtype=float) * FREQ_STEP_MHZ
+        result = run_drift_analysis(
+            _inputs(data, time_axis_ms, freqs_mhz),
+            DriftAnalysisSettings(monte_carlo_trials=0),
+        )
+        self.assertEqual(result.status, "insufficient_signal")
+        self.assertIsNone(result.drift_rate_mhz_per_ms)
+
+    def test_axes_must_match_the_dynamic_spectrum(self) -> None:
+        data, time_axis_ms, freqs_mhz = _drifting_burst(-10.0)
+        for short_times, short_freqs in (
+            (time_axis_ms[:-1], freqs_mhz),
+            (time_axis_ms, freqs_mhz[:-1]),
+        ):
+            with self.subTest(time_bins=short_times.size, channels=short_freqs.size):
+                result = run_drift_analysis(
+                    _inputs(data, short_times, short_freqs),
+                    DriftAnalysisSettings(monte_carlo_trials=0),
+                )
+                self.assertEqual(result.status, "invalid_axes")
+                self.assertIsNone(result.drift_rate_mhz_per_ms)
+
+    def test_event_window_uses_the_half_open_end_boundary(self) -> None:
+        data, time_axis_ms, freqs_mhz = _drifting_burst(-10.0)
+        result = run_drift_analysis(
+            _inputs(data, time_axis_ms, freqs_mhz),
+            DriftAnalysisSettings(monte_carlo_trials=0),
+        )
+        self.assertEqual(
+            result.event_window_ms,
+            [float(time_axis_ms[EVENT_START]), float(time_axis_ms[EVENT_END - 1] + TSAMP_MS)],
+        )
+
+    def test_an_acf_peak_broader_than_the_fit_region_is_rejected(self) -> None:
+        data, time_axis_ms, freqs_mhz = _drifting_burst(-5.0, sigma_t_ms=5.0, sigma_f_mhz=100.0)
+        result = run_drift_analysis(
+            _inputs(data, time_axis_ms, freqs_mhz),
+            DriftAnalysisSettings(max_lag_fraction=0.05, monte_carlo_trials=0),
+        )
+        self.assertEqual(result.status, "fit_failed")
+        self.assertIsNone(result.drift_rate_mhz_per_ms)
+
     def test_a_non_uniform_frequency_axis_is_refused_rather_than_averaged(self) -> None:
         """The lag axis is index counts times one channel width, so it must be uniform."""
         data, time_axis_ms, freqs_mhz = _drifting_burst(-10.0)
@@ -532,6 +577,21 @@ class DriftComponentCentroidTest(unittest.TestCase):
 
 
 class DriftResultSerializationTest(unittest.TestCase):
+    def test_settings_are_bounded_before_they_are_persisted(self) -> None:
+        settings = DriftAnalysisSettings(
+            max_lag_fraction=float("nan"),
+            min_overlap_fraction=float("inf"),
+            monte_carlo_trials=10_000,
+            random_seed=-1,
+            dm_uncertainty_pc_cm3=float("nan"),
+        ).normalized()
+        self.assertEqual(settings.max_lag_fraction, 0.5)
+        self.assertEqual(settings.min_overlap_fraction, 0.25)
+        self.assertEqual(settings.monte_carlo_trials, 512)
+        self.assertEqual(settings.random_seed, 0)
+        self.assertIsNone(settings.dm_uncertainty_pc_cm3)
+        self.assertEqual(DriftAnalysisSettings.from_dict(settings.to_dict()), settings)
+
     def test_result_survives_a_json_round_trip(self) -> None:
         data, time_axis_ms, freqs_mhz = _drifting_burst(-9.0, noise=0.3, seed=2)
         result = run_drift_analysis(

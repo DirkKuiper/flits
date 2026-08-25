@@ -2640,12 +2640,14 @@ class BurstSession:
             that fallback.
         """
         if settings is not None:
-            self.drift_settings = settings
+            self.drift_settings = settings.normalized()
+        else:
+            self.drift_settings = self.drift_settings.normalized()
         if dm_uncertainty_pc_cm3 is not None:
             self.drift_settings = replace(
                 self.drift_settings,
                 dm_uncertainty_pc_cm3=abs(float(dm_uncertainty_pc_cm3)),
-            )
+            ).normalized()
         grid, context = self._build_measurement_context_for_data()
         dm_uncertainty = self.drift_settings.dm_uncertainty_pc_cm3
         if dm_uncertainty is None:
