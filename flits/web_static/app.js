@@ -3379,8 +3379,9 @@ function driftTooltip(topic) {
   const tooltips = {
     summary: "Drift is dnu/dt in MHz per millisecond: negative for the downward 'sad trombone' drift seen in repeaters. It is measured from a rotated 2D Gaussian fitted to the autocorrelation of the selected event window.",
     driftRate: "Conditional-mean slope of the fitted autocorrelation ellipse, which is the rate the emission centroid moves in frequency as the burst proceeds.",
-    dmEquivalent: "The DM offset that would on its own produce the measured slope. If this is smaller than the DM uncertainty, the drift is not distinguishable from a dedispersion error.",
-    dmSensitivity: "How much the reported drift rate changes per pc cm^-3 of DM error, evaluated at the measured drift and the mean selected frequency.",
+    dmEquivalent: "The DM offset that would on its own produce the measured slope; adding it to the applied DM flattens the burst. If this is smaller than the DM uncertainty, the drift is not distinguishable from a dedispersion error.",
+    dmSensitivity: "How much the reported drift rate changes per pc cm^-3 of DM error, from the shear a dedispersion error applies to the fitted ellipse. It changes sign where the correlation squared passes one half.",
+    timeFrequencySlope: "Time-on-frequency slope of the fitted ellipse, rho * sigma_t / sigma_nu. This is the quantity a DM error moves linearly, which is why the equivalent DM is derived from it rather than from the reciprocal of the drift rate; the two agree only for a perfectly correlated ridge.",
     statistical: "Spread of the drift rate across seeded noise realisations of the same event window. It does not include the DM systematic.",
     dmSystematic: "The DM uncertainty propagated into the drift rate. Usually the larger of the two terms.",
     majorAxis: "Slope of the ellipse's major axis in the conventional (ms, MHz) plane, which is what frbgui reports. It is not the same number as the conditional-mean drift rate unless the ellipse is very elongated, and it depends on the choice of axis units.",
@@ -3487,6 +3488,7 @@ function renderDrift(view) {
       tooltip: driftTooltip("componentDrift"),
       detail: componentDetail,
     }),
+
     resultTile("Burst Extent", drift.acf_sigma_time_ms === null || drift.acf_sigma_time_ms === undefined ? "n/a" : `${fmt(drift.acf_sigma_time_ms, 3)} ms x ${fmt(drift.acf_sigma_freq_mhz, 2)} MHz`, "primary", driftTooltip("burstExtent")),
   ]
 
@@ -3499,12 +3501,14 @@ function renderDrift(view) {
     resultTile("Applied DM", `${fmt(drift.dm_pc_cm3, 4)} pc cm⁻³`, "secondary"),
     resultTile("DM Uncertainty", drift.dm_uncertainty_pc_cm3 === null || drift.dm_uncertainty_pc_cm3 === undefined ? "not supplied" : `${fmt(drift.dm_uncertainty_pc_cm3, 4)} pc cm⁻³`, "secondary"),
     resultTile("Reference Frequency", drift.reference_frequency_mhz === null || drift.reference_frequency_mhz === undefined ? "n/a" : `${fmt(drift.reference_frequency_mhz, 2)} MHz`, "secondary"),
+    resultTile("Time-Frequency Slope", drift.acf_slope_ms_per_mhz === null || drift.acf_slope_ms_per_mhz === undefined ? "n/a" : `${fmt(drift.acf_slope_ms_per_mhz, 6)} ms/MHz`, "secondary", driftTooltip("timeFrequencySlope")),
     resultTile("Major-Axis Slope", drift.acf_major_axis_slope_mhz_per_ms === null || drift.acf_major_axis_slope_mhz_per_ms === undefined ? "n/a" : `${fmt(drift.acf_major_axis_slope_mhz_per_ms, 4)} MHz/ms`, "secondary", driftTooltip("majorAxis")),
     resultTile("ACF Correlation", drift.acf_correlation === null || drift.acf_correlation === undefined ? "n/a" : fmt(drift.acf_correlation, 3), "secondary", driftTooltip("correlation")),
     resultTile("Monte-Carlo Trials", String(drift.monte_carlo_trials_used || 0), "secondary", driftTooltip("trials")),
     resultTile("Masked Fraction", `${fmt(100 * (drift.masked_channel_fraction || 0), 1)} %`, "secondary", driftTooltip("maskedFraction")),
     resultTile("Component Fit", componentDriftStatusLabel(drift.component_drift_status), "secondary", driftTooltip("componentDrift")),
     resultTile("Component R²", drift.component_drift_r_squared === null || drift.component_drift_r_squared === undefined ? "n/a" : fmt(drift.component_drift_r_squared, 4), "secondary", driftTooltip("componentFit")),
+    resultTile("Component Equivalent DM", drift.component_dm_equivalent_pc_cm3 === null || drift.component_dm_equivalent_pc_cm3 === undefined ? "n/a" : `${fmt(drift.component_dm_equivalent_pc_cm3, 4)} pc cm⁻³`, "secondary", driftTooltip("dmEquivalent")),
   ]
 
   driftContent.innerHTML = `

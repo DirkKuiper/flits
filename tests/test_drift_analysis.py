@@ -7,7 +7,13 @@ from tempfile import TemporaryDirectory
 import numpy as np
 
 from flits.analysis.drift import DriftAnalysisInputs, run_drift_analysis
-from flits.analysis.drift.core import DM_DELAY_MS_MHZ2, dm_equivalent_of_slope, drift_dm_sensitivity
+from flits.analysis.drift.core import (
+    DM_DELAY_MS_MHZ2,
+    dm_equivalent_of_slope,
+    dm_slope_sensitivity,
+    drift_dm_sensitivity,
+    time_frequency_slope,
+)
 from flits.models import (
     AnalysisSessionSnapshot,
     DriftAnalysisResult,
@@ -201,24 +207,75 @@ class DriftAcfEstimatorTest(unittest.TestCase):
 
 
 class DriftDmDegeneracyTest(unittest.TestCase):
+    @staticmethod
+    def _sheared(covariance: np.ndarray, dm: float, reference_mhz: float) -> np.ndarray:
+        """The burst covariance after a dedispersion error of ``dm``.
+
+        A DM error adds ``g (nu - nu_ref)`` to every arrival time, with
+        ``g = -2 k dm nu^-3``, which is a shear of the (time, frequency)
+        covariance.
+        """
+        shear = np.array([[1.0, -2.0 * DM_DELAY_MS_MHZ2 * dm / reference_mhz**3], [0.0, 1.0]])
+        return shear @ covariance @ shear.T
+
     def test_dm_equivalent_reproduces_the_measured_slope(self) -> None:
-        """The reported DM offset must actually generate the reported drift."""
+        """The reported DM offset must actually generate the measured tilt."""
         reference_mhz = 1500.0
-        drift = -12.0
-        dm_offset = dm_equivalent_of_slope(drift, reference_mhz)
-        # A DM offset shifts arrival time as t = k * DM * nu^-2; the local slope
-        # it introduces is dt/dnu = -2 k DM nu^-3, whose inverse is the drift.
-        induced_slope_ms_per_mhz = -2.0 * DM_DELAY_MS_MHZ2 * dm_offset / reference_mhz**3
-        self.assertAlmostEqual(1.0 / induced_slope_ms_per_mhz, drift, places=6)
+        slope_ms_per_mhz = -0.0082
+        dm_offset = dm_equivalent_of_slope(slope_ms_per_mhz, reference_mhz)
+        induced = -2.0 * DM_DELAY_MS_MHZ2 * dm_offset / reference_mhz**3
+        self.assertAlmostEqual(induced, slope_ms_per_mhz, places=9)
+        self.assertGreater(dm_offset, 0.0)
+
+    def test_dm_equivalent_is_the_offset_that_nulls_the_tilt(self) -> None:
+        """Adding the reported DM to the applied DM must flatten the burst."""
+        reference_mhz = 1500.0
+        sigma_t, sigma_f, correlation = 1.2, 80.0, -0.55
+        covariance = np.array(
+            [
+                [sigma_t**2, correlation * sigma_t * sigma_f],
+                [correlation * sigma_t * sigma_f, sigma_f**2],
+            ]
+        )
+        reported = dm_equivalent_of_slope(time_frequency_slope(sigma_t, sigma_f, correlation), reference_mhz)
+        nulled = self._sheared(covariance, -reported, reference_mhz)
+        self.assertAlmostEqual(nulled[0, 1] / nulled[1, 1], 0.0, places=9)
+
+    def test_the_slope_not_the_drift_rate_is_linear_in_dm(self) -> None:
+        """The reciprocal of the drift rate is not the DM-linear quantity."""
+        reference_mhz = 1500.0
+        covariance = np.array([[1.2**2, -0.55 * 1.2 * 80.0], [-0.55 * 1.2 * 80.0, 80.0**2]])
+        slopes = []
+        inverse_drifts = []
+        for dm in (-1.0, 0.0, 1.0):
+            sheared = self._sheared(covariance, dm, reference_mhz)
+            slopes.append(sheared[0, 1] / sheared[1, 1])
+            inverse_drifts.append(sheared[0, 0] / sheared[0, 1])
+        step = dm_slope_sensitivity(reference_mhz)
+        self.assertAlmostEqual(slopes[1] - slopes[0], step, places=12)
+        self.assertAlmostEqual(slopes[2] - slopes[1], step, places=12)
+        self.assertNotAlmostEqual(inverse_drifts[1] - inverse_drifts[0], step, places=6)
 
     def test_dm_sensitivity_matches_a_finite_difference(self) -> None:
         reference_mhz = 1500.0
-        drift = -12.0
-        step = 1e-4
-        slope = 1.0 / drift
-        shifted = slope - 2.0 * DM_DELAY_MS_MHZ2 * step / reference_mhz**3
-        numeric = (1.0 / shifted - drift) / step
-        self.assertAlmostEqual(drift_dm_sensitivity(drift, reference_mhz), numeric, places=3)
+        step = 1e-5
+        for correlation in (-0.9, -0.55, 0.0, 0.4):
+            with self.subTest(correlation=correlation):
+                sigma_t, sigma_f = 1.2, 80.0
+                covariance = np.array(
+                    [
+                        [sigma_t**2, correlation * sigma_t * sigma_f],
+                        [correlation * sigma_t * sigma_f, sigma_f**2],
+                    ]
+                )
+                before = covariance[0, 1] / covariance[0, 0]
+                shifted = self._sheared(covariance, step, reference_mhz)
+                numeric = (shifted[0, 1] / shifted[0, 0] - before) / step
+                self.assertAlmostEqual(
+                    drift_dm_sensitivity(sigma_t, sigma_f, correlation, reference_mhz),
+                    numeric,
+                    delta=abs(numeric) * 1e-3 + 1e-9,
+                )
 
     def test_without_a_dm_uncertainty_the_drift_is_not_publishable(self) -> None:
         data, time_axis_ms, freqs_mhz = _drifting_burst(-10.0, noise=0.3, seed=5)
@@ -293,7 +350,51 @@ class DriftDmDegeneracyTest(unittest.TestCase):
         assert result.drift_rate_mhz_per_ms is not None
         assert result.dm_equivalent_pc_cm3 is not None
         self.assertLess(result.drift_rate_mhz_per_ms, 0.0)
-        self.assertAlmostEqual(result.dm_equivalent_pc_cm3, dm_error, delta=2.5)
+        self.assertAlmostEqual(result.dm_equivalent_pc_cm3, dm_error, delta=0.1 * dm_error)
+
+    def test_a_dedispersion_error_shifts_the_reported_dm_equivalent_by_that_amount(self) -> None:
+        """The degeneracy is additive: intrinsic drift plus a DM error read as their sum."""
+        data, time_axis_ms, freqs_mhz = _drifting_burst(-6.0, sigma_t_ms=0.6, sigma_f_mhz=60.0)
+        reference_mhz = float(np.mean(freqs_mhz))
+        dm_error = 6.0
+        smeared = np.zeros_like(data)
+        for channel, frequency in enumerate(freqs_mhz):
+            delay_ms = DM_DELAY_MS_MHZ2 * dm_error * (frequency**-2.0 - reference_mhz**-2.0)
+            smeared[channel] = np.interp(
+                time_axis_ms - delay_ms,
+                time_axis_ms,
+                data[channel],
+                left=0.0,
+                right=0.0,
+            )
+
+        settings = DriftAnalysisSettings(monte_carlo_trials=0)
+        intrinsic = run_drift_analysis(_inputs(data, time_axis_ms, freqs_mhz), settings)
+        shifted = run_drift_analysis(_inputs(smeared, time_axis_ms, freqs_mhz), settings)
+        assert intrinsic.dm_equivalent_pc_cm3 is not None
+        assert shifted.dm_equivalent_pc_cm3 is not None
+        self.assertAlmostEqual(
+            shifted.dm_equivalent_pc_cm3 - intrinsic.dm_equivalent_pc_cm3,
+            dm_error,
+            delta=0.1 * dm_error,
+        )
+
+    def test_the_reported_slope_and_drift_rate_describe_the_same_ellipse(self) -> None:
+        data, time_axis_ms, freqs_mhz = _drifting_burst(-9.0)
+        result = run_drift_analysis(
+            _inputs(data, time_axis_ms, freqs_mhz),
+            DriftAnalysisSettings(monte_carlo_trials=0),
+        )
+        assert result.acf_slope_ms_per_mhz is not None
+        assert result.acf_correlation is not None
+        assert result.drift_rate_mhz_per_ms is not None
+        # drift = rho * sigma_nu / sigma_t and slope = rho * sigma_t / sigma_nu,
+        # so their product is rho^2 -- not 1.
+        self.assertAlmostEqual(
+            result.acf_slope_ms_per_mhz * result.drift_rate_mhz_per_ms,
+            result.acf_correlation**2,
+            places=6,
+        )
 
 
 class DriftComponentCentroidTest(unittest.TestCase):
@@ -329,6 +430,8 @@ class DriftComponentCentroidTest(unittest.TestCase):
         assert result.component_drift_r_squared is not None
         self.assertAlmostEqual(result.component_drift_rate_mhz_per_ms, -10.0, delta=1.0)
         self.assertGreater(result.component_drift_r_squared, 0.98)
+        assert result.component_dm_equivalent_pc_cm3 is not None
+        self.assertGreater(result.component_dm_equivalent_pc_cm3, 0.0)
         self.assertEqual(result.component_labels, ["Component 1", "Component 2", "Component 3"])
         self.assertTrue(np.all(np.diff(result.component_times_ms) > 0))
         self.assertIn("component_drift_rate_mhz_per_ms", result.uncertainty_details)

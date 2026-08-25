@@ -74,6 +74,39 @@ Optional scattering and multi-component fits are delegated to `fitburst`.
 - CHIME/FRB Collaboration, *fitburst: A Python package for modelling fast radio
   burst dynamic spectra*. <https://github.com/CHIMEFRB/fitburst>
 
+## Sub-burst drift
+
+The drift rate is measured from the two-dimensional autocorrelation of the
+dynamic spectrum, the approach established for FRB 121102 and packaged by
+`frbgui`. FLITS fits the autocorrelation ellipse for a covariance rather than a
+rotation angle and reports the conditional-mean slope, which is well defined
+independently of how the time and frequency axes are scaled against each other;
+the major-axis slope is reported alongside it for comparison with the angle
+convention. Drift and dispersion measure are degenerate, and FLITS reports the
+DM offset that would account for the measured slope rather than choosing between
+them.
+
+- Hessels, J. W. T. et al. (2019), *FRB 121102 Bursts Show Complex Single-pulse
+  Structures Consistent with Strong Propagation Effects*, ApJL 876, L23.
+  [doi:10.3847/2041-8213/ab13ae](https://doi.org/10.3847/2041-8213/ab13ae)
+- Josephy, A. et al. (2019), *CHIME/FRB Detection of the Original Repeating Fast
+  Radio Burst Source FRB 121102*, ApJL 882, L18.
+  [doi:10.3847/2041-8213/ab2c00](https://doi.org/10.3847/2041-8213/ab2c00)
+- Chamma, M. A., Rajabi, F., Wyenberg, C. M., Mathews, A. & Houde, M. (2021),
+  *Evidence of a shared spectro-temporal law between sources of repeating fast
+  radio bursts*, MNRAS 507, 246.
+  [doi:10.1093/mnras/stab2070](https://doi.org/10.1093/mnras/stab2070)
+- Chamma, M. A., Rajabi, F., Kumar, A. & Houde, M. (2023), *A broad survey of
+  spectro-temporal properties from FRB 20121102A*, MNRAS 522, 3036.
+  [doi:10.1093/mnras/stad1108](https://doi.org/10.1093/mnras/stad1108)
+- Chamma, M. A., *FRBGui: a graphical interface for measuring the
+  spectro-temporal properties of fast radio bursts*.
+  <https://github.com/mef51/frbgui> — cite Chamma et al. (2023) above, which
+  the project names as its reference.
+
+See [Sub-Burst Drift](analysis/drift.md) for the degeneracy and how FLITS
+classifies the result.
+
 ## Multiscale temporal structure
 
 Excess power as a function of timescale is measured with a Haar wavelet

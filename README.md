@@ -79,6 +79,7 @@ pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3
 - Calibrated fluence and peak-flux outputs when an SEFD is available.
 - DM optimization using integrated-event S/N and DMphase.
 - Temporal-structure, PSD, ACF, and optional selected-event model fitting.
+- Sub-burst drift rate in MHz/ms from the mask-corrected 2D autocorrelation, cross-checked against a component-centroid regression, with the drift/DM degeneracy reported as the DM offset that would account for the measured slope.
 - Weighted Q/U RM synthesis with optional RM-CLEAN, significance and quality diagnostics, and JSON/CSV products — measured in-session from a full-Stokes burst file, or from an externally prepared Q/U spectrum.
 - Export bundles and JSON session snapshots for reproducible analysis.
 
@@ -93,7 +94,7 @@ pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3
 
 The docs cover Python installs, Docker, Apptainer, remote/HPC use, interactive
 workflow guidance, measurements, DM optimization, temporal/spectral analysis,
-exports, and release procedures.
+sub-burst drift, exports, and release procedures.
 
 ## Release Channels
 

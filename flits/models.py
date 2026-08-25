@@ -1183,6 +1183,7 @@ class DriftAnalysisResult:
     drift_rate_dm_systematic_mhz_per_ms: float | None = None
     dm_sensitivity_mhz_per_ms_per_pc_cm3: float | None = None
     dm_equivalent_pc_cm3: float | None = None
+    acf_slope_ms_per_mhz: float | None = None
     acf_amplitude: float | None = None
     acf_offset: float | None = None
     acf_sigma_time_ms: float | None = None
@@ -1204,6 +1205,7 @@ class DriftAnalysisResult:
     component_drift_uncertainty_mhz_per_ms: float | None = None
     component_drift_status: str = "unavailable"
     component_drift_r_squared: float | None = None
+    component_dm_equivalent_pc_cm3: float | None = None
     warning_flags: list[str] = field(default_factory=list)
     uncertainty_details: dict[str, UncertaintyDetail] = field(default_factory=dict)
     settings: DriftAnalysisSettings | None = None
@@ -1228,6 +1230,7 @@ class DriftAnalysisResult:
             "drift_rate_dm_systematic_mhz_per_ms": _float_or_none(self.drift_rate_dm_systematic_mhz_per_ms),
             "dm_sensitivity_mhz_per_ms_per_pc_cm3": _float_or_none(self.dm_sensitivity_mhz_per_ms_per_pc_cm3),
             "dm_equivalent_pc_cm3": _float_or_none(self.dm_equivalent_pc_cm3),
+            "acf_slope_ms_per_mhz": _float_or_none(self.acf_slope_ms_per_mhz),
             "acf_amplitude": _float_or_none(self.acf_amplitude),
             "acf_offset": _float_or_none(self.acf_offset),
             "acf_sigma_time_ms": _float_or_none(self.acf_sigma_time_ms),
@@ -1249,6 +1252,7 @@ class DriftAnalysisResult:
             "component_drift_uncertainty_mhz_per_ms": _float_or_none(self.component_drift_uncertainty_mhz_per_ms),
             "component_drift_status": self.component_drift_status,
             "component_drift_r_squared": _float_or_none(self.component_drift_r_squared),
+            "component_dm_equivalent_pc_cm3": _float_or_none(self.component_dm_equivalent_pc_cm3),
             "warning_flags": [str(flag) for flag in self.warning_flags],
             "uncertainty_details": _uncertainty_detail_map_to_dict(self.uncertainty_details),
             "settings": None if self.settings is None else self.settings.to_dict(),
@@ -1277,6 +1281,7 @@ class DriftAnalysisResult:
             drift_rate_dm_systematic_mhz_per_ms=_float_or_none(payload.get("drift_rate_dm_systematic_mhz_per_ms")),
             dm_sensitivity_mhz_per_ms_per_pc_cm3=_float_or_none(payload.get("dm_sensitivity_mhz_per_ms_per_pc_cm3")),
             dm_equivalent_pc_cm3=_float_or_none(payload.get("dm_equivalent_pc_cm3")),
+            acf_slope_ms_per_mhz=_float_or_none(payload.get("acf_slope_ms_per_mhz")),
             acf_amplitude=_float_or_none(payload.get("acf_amplitude")),
             acf_offset=_float_or_none(payload.get("acf_offset")),
             acf_sigma_time_ms=_float_or_none(payload.get("acf_sigma_time_ms")),
@@ -1300,6 +1305,7 @@ class DriftAnalysisResult:
             ),
             component_drift_status=str(payload.get("component_drift_status", "unavailable")),
             component_drift_r_squared=_float_or_none(payload.get("component_drift_r_squared")),
+            component_dm_equivalent_pc_cm3=_float_or_none(payload.get("component_dm_equivalent_pc_cm3")),
             warning_flags=[str(flag) for flag in payload.get("warning_flags", [])],
             uncertainty_details=_uncertainty_detail_map_from_dict(payload.get("uncertainty_details")),
             settings=DriftAnalysisSettings.from_dict(payload.get("settings")),

@@ -1128,6 +1128,7 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         "drift_dm_uncertainty_pc_cm3": drift.get("dm_uncertainty_pc_cm3", ""),
         "drift_dm_sensitivity_mhz_per_ms_per_pc_cm3": drift.get("dm_sensitivity_mhz_per_ms_per_pc_cm3", ""),
         "drift_dm_equivalent_pc_cm3": drift.get("dm_equivalent_pc_cm3", ""),
+        "drift_acf_slope_ms_per_mhz": drift.get("acf_slope_ms_per_mhz", ""),
         "drift_reference_frequency_mhz": drift.get("reference_frequency_mhz", ""),
         "drift_acf_sigma_time_ms": drift.get("acf_sigma_time_ms", ""),
         "drift_acf_sigma_freq_mhz": drift.get("acf_sigma_freq_mhz", ""),
@@ -1136,6 +1137,7 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         "drift_component_uncertainty_mhz_per_ms": drift.get("component_drift_uncertainty_mhz_per_ms", ""),
         "drift_component_status": drift.get("component_drift_status", ""),
         "drift_component_r_squared": drift.get("component_drift_r_squared", ""),
+        "drift_component_dm_equivalent_pc_cm3": drift.get("component_dm_equivalent_pc_cm3", ""),
         "drift_warning_flags": _join_list(drift.get("warning_flags", [])),
         "event_window_start_ms": snapshot.state.get("event_ms", ["", ""])[0],
         "event_window_end_ms": snapshot.state.get("event_ms", ["", ""])[1],
@@ -1360,8 +1362,10 @@ def _build_diagnostics_npz(snapshot: ExportSnapshotData) -> bytes:
             "acf_sigma_freq_mhz",
             "acf_correlation",
             "acf_major_axis_slope_mhz_per_ms",
+            "acf_slope_ms_per_mhz",
             "component_drift_rate_mhz_per_ms",
             "component_drift_uncertainty_mhz_per_ms",
+            "component_dm_equivalent_pc_cm3",
         ):
             value = drift.get(key)
             name = key if key.startswith("drift_") else f"drift_{key}"

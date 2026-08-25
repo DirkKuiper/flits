@@ -93,6 +93,7 @@ pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3
 - [DM Optimization](analysis/dm-optimization.md)
 - [Temporal and Spectral Analysis](analysis/temporal-spectral.md)
 - [Multiscale Temporal Power](analysis/temporal-multiscale.md)
+- [Sub-Burst Drift](analysis/drift.md)
 - [Rotation-Measure Synthesis](analysis/rm-synthesis.md)
 - [Model Fitting](analysis/model-fitting.md)
 

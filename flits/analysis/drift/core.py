@@ -97,32 +97,76 @@ class DriftAnalysisInputs:
     dm_uncertainty_pc_cm3: float | None = None
 
 
-def drift_dm_sensitivity(drift_mhz_per_ms: float, reference_frequency_mhz: float) -> float:
+def dm_slope_sensitivity(reference_frequency_mhz: float) -> float:
+    """Return ``d(dt/dnu)/d(DM)`` in ms/MHz per pc cm^-3.
+
+    Differentiating the dispersion delay ``t(nu) = k DM nu^-2`` gives
+    ``-2 k nu^-3``. This is the one quantity a DM error moves linearly: a
+    dedispersion error adds ``g (nu - nu_ref)`` to every arrival time, which
+    shifts the time-on-frequency regression slope by exactly ``g`` and leaves
+    the frequency spread untouched.
+    """
+    nu = float(reference_frequency_mhz)
+    if not np.isfinite(nu) or nu <= 0:
+        return float("nan")
+    return float(-2.0 * DM_DELAY_MS_MHZ2 / nu**3)
+
+
+def time_frequency_slope(sigma_time_ms: float, sigma_freq_mhz: float, correlation: float) -> float:
+    """Return the time-on-frequency regression slope ``dt/dnu`` in ms/MHz.
+
+    This is ``rho sigma_t / sigma_nu``, not the reciprocal of the drift rate.
+    The two agree only for a perfectly correlated ridge, and it is this one --
+    not the drift rate -- that a DM error displaces linearly.
+    """
+    sigma_t = float(sigma_time_ms)
+    sigma_nu = float(sigma_freq_mhz)
+    rho = float(correlation)
+    if not np.isfinite(sigma_t) or not np.isfinite(sigma_nu) or not np.isfinite(rho) or sigma_nu <= 0:
+        return float("nan")
+    return float(rho * sigma_t / sigma_nu)
+
+
+def drift_dm_sensitivity(
+    sigma_time_ms: float,
+    sigma_freq_mhz: float,
+    correlation: float,
+    reference_frequency_mhz: float,
+) -> float:
     """Return ``d(drift)/d(DM)`` in MHz/ms per pc cm^-3.
 
-    A DM error changes the time-frequency slope of a burst. Differentiating the
-    dispersion delay gives ``d(dt/dnu)/d(DM) = -2 k nu^-3``; converting that to
-    the drift rate ``d = (dt/dnu)^-1`` picks up a factor ``-d^2``.
+    A DM error shears the burst covariance, ``Sigma_{t,nu} -> Sigma_{t,nu} + g
+    Sigma_{nu,nu}`` and ``Sigma_{t,t} -> Sigma_{t,t} + 2 g Sigma_{t,nu} + g^2
+    Sigma_{nu,nu}``. Differentiating ``drift = Sigma_{t,nu} / Sigma_{t,t}``
+    through that shear leaves ``(sigma_nu / sigma_t)^2 (1 - 2 rho^2)`` times the
+    slope sensitivity. The factor ``(1 - 2 rho^2)`` is why the naive
+    ``d(1/drift)/d(DM)`` answer is wrong for anything short of a perfectly
+    correlated ridge: it changes sign at ``rho^2 = 1/2``, where the drift rate is
+    momentarily insensitive to the DM.
     """
-    drift = float(drift_mhz_per_ms)
-    nu = float(reference_frequency_mhz)
-    if not np.isfinite(drift) or not np.isfinite(nu) or nu <= 0:
+    sigma_t = float(sigma_time_ms)
+    sigma_nu = float(sigma_freq_mhz)
+    rho = float(correlation)
+    slope_sensitivity = dm_slope_sensitivity(reference_frequency_mhz)
+    if not np.isfinite(slope_sensitivity) or not np.isfinite(rho) or sigma_t <= 0 or not np.isfinite(sigma_nu):
         return float("nan")
-    return float(2.0 * DM_DELAY_MS_MHZ2 * drift**2 / nu**3)
+    return float(slope_sensitivity * (sigma_nu / sigma_t) ** 2 * (1.0 - 2.0 * rho**2))
 
 
-def dm_equivalent_of_slope(drift_mhz_per_ms: float, reference_frequency_mhz: float) -> float:
-    """Return the DM error that would on its own produce ``drift_mhz_per_ms``.
+def dm_equivalent_of_slope(slope_ms_per_mhz: float, reference_frequency_mhz: float) -> float:
+    """Return the DM error that would on its own produce this ``dt/dnu``.
 
     This is the honest statement of the drift/DM degeneracy: if this number is
     smaller than the DM uncertainty, the measured drift is not distinguishable
-    from a dedispersion error.
+    from a dedispersion error. It is positive when the burst is tilted the way
+    an under-dedispersed burst is, so adding it to the applied DM is what
+    removes the tilt.
     """
-    drift = float(drift_mhz_per_ms)
-    nu = float(reference_frequency_mhz)
-    if not np.isfinite(drift) or drift == 0.0 or not np.isfinite(nu) or nu <= 0:
+    slope = float(slope_ms_per_mhz)
+    slope_sensitivity = dm_slope_sensitivity(reference_frequency_mhz)
+    if not np.isfinite(slope) or not np.isfinite(slope_sensitivity) or slope_sensitivity == 0.0:
         return float("nan")
-    return float(-(nu**3) / (2.0 * DM_DELAY_MS_MHZ2 * drift))
+    return float(slope / slope_sensitivity)
 
 
 def _failure(
@@ -472,14 +516,20 @@ def _drift_uncertainty_detail(
 
 def _combine_with_dm(
     statistical: float | None,
-    drift: float | None,
+    shape: tuple[float, float, float] | None,
     reference_frequency_mhz: float | None,
     dm_uncertainty: float | None,
 ) -> tuple[float | None, float | None, float | None]:
-    """Return ``(dm_sensitivity, dm_systematic, combined_uncertainty)``."""
-    if drift is None or reference_frequency_mhz is None or not np.isfinite(reference_frequency_mhz):
+    """Return ``(dm_sensitivity, dm_systematic, combined_uncertainty)``.
+
+    ``shape`` is the ``(sigma_t, sigma_nu, rho)`` of whatever produced the drift
+    rate -- the fitted autocorrelation ellipse, or the scatter of the component
+    centroids -- because the sensitivity depends on the shape, not only on the
+    drift rate itself.
+    """
+    if shape is None or reference_frequency_mhz is None or not np.isfinite(reference_frequency_mhz):
         return None, None, statistical
-    sensitivity = drift_dm_sensitivity(drift, reference_frequency_mhz)
+    sensitivity = drift_dm_sensitivity(shape[0], shape[1], shape[2], reference_frequency_mhz)
     if not np.isfinite(sensitivity):
         return None, None, statistical
     if dm_uncertainty is None or not np.isfinite(dm_uncertainty) or dm_uncertainty < 0:
@@ -488,6 +538,26 @@ def _combine_with_dm(
     if statistical is None or not np.isfinite(statistical):
         return float(sensitivity), systematic, systematic
     return float(sensitivity), systematic, float(np.hypot(statistical, systematic))
+
+
+def _dm_equivalent(slope_ms_per_mhz: float, reference_frequency_mhz: float | None) -> float | None:
+    """The residual DM a time-frequency slope corresponds to, or None."""
+    if reference_frequency_mhz is None:
+        return None
+    value = dm_equivalent_of_slope(slope_ms_per_mhz, reference_frequency_mhz)
+    return None if not np.isfinite(value) else float(value)
+
+
+def _centroid_shape(times_ms: np.ndarray, freqs_mhz: np.ndarray) -> tuple[float, float, float] | None:
+    """``(sigma_t, sigma_nu, rho)`` of a set of component centroids."""
+    if times_ms.size < 2 or times_ms.size != freqs_mhz.size:
+        return None
+    sigma_t = float(np.std(times_ms))
+    sigma_nu = float(np.std(freqs_mhz))
+    if sigma_t <= 0 or sigma_nu <= 0:
+        return None
+    covariance = float(np.mean((times_ms - times_ms.mean()) * (freqs_mhz - freqs_mhz.mean())))
+    return sigma_t, sigma_nu, float(np.clip(covariance / (sigma_t * sigma_nu), -1.0, 1.0))
 
 
 def run_drift_analysis(
@@ -679,13 +749,12 @@ def run_drift_analysis(
 
     reference_frequency_mhz = float(np.mean(selected_freqs[active_channels])) if active_count else None
     dm_uncertainty = None if inputs.dm_uncertainty_pc_cm3 is None else abs(float(inputs.dm_uncertainty_pc_cm3))
+    acf_shape = (sigma_time_ms, sigma_freq_mhz, correlation)
     sensitivity, dm_systematic, combined_error = _combine_with_dm(
-        statistical_error, drift, reference_frequency_mhz, dm_uncertainty
+        statistical_error, acf_shape, reference_frequency_mhz, dm_uncertainty
     )
-    raw_dm_equivalent = (
-        dm_equivalent_of_slope(drift, reference_frequency_mhz) if reference_frequency_mhz is not None else float("nan")
-    )
-    dm_equivalent = None if not np.isfinite(raw_dm_equivalent) else float(raw_dm_equivalent)
+    slope_ms_per_mhz = time_frequency_slope(sigma_time_ms, sigma_freq_mhz, correlation)
+    dm_equivalent = _dm_equivalent(slope_ms_per_mhz, reference_frequency_mhz)
     if dm_uncertainty is not None and dm_equivalent is not None and abs(dm_equivalent) <= dm_uncertainty:
         warning_flags.append("drift_consistent_with_dm_error")
     if dm_uncertainty is None:
@@ -720,10 +789,13 @@ def run_drift_analysis(
             component_freq_errors,
         )
     component_combined_error = component_drift_error
-    if component_drift is not None:
+    component_dm_equivalent = None
+    component_shape = _centroid_shape(component_times, component_freqs) if component_drift is not None else None
+    if component_shape is not None:
         _, _, component_combined_error = _combine_with_dm(
-            component_drift_error, component_drift, reference_frequency_mhz, dm_uncertainty
+            component_drift_error, component_shape, reference_frequency_mhz, dm_uncertainty
         )
+        component_dm_equivalent = _dm_equivalent(time_frequency_slope(*component_shape), reference_frequency_mhz)
 
     freq_indices, _ = _decimate_for_transport(region_freq_lag, MAX_SERIALIZED_ACF_BINS)
     time_indices, _ = _decimate_for_transport(region_time_lag, MAX_SERIALIZED_ACF_BINS)
@@ -769,6 +841,7 @@ def run_drift_analysis(
         drift_rate_dm_systematic_mhz_per_ms=dm_systematic,
         dm_sensitivity_mhz_per_ms_per_pc_cm3=sensitivity,
         dm_equivalent_pc_cm3=dm_equivalent,
+        acf_slope_ms_per_mhz=(None if not np.isfinite(slope_ms_per_mhz) else float(slope_ms_per_mhz)),
         acf_amplitude=float(amplitude),
         acf_offset=float(offset),
         acf_sigma_time_ms=sigma_time_ms,
@@ -790,6 +863,7 @@ def run_drift_analysis(
         component_drift_uncertainty_mhz_per_ms=component_combined_error,
         component_drift_status=component_status,
         component_drift_r_squared=component_r_squared,
+        component_dm_equivalent_pc_cm3=component_dm_equivalent,
         warning_flags=sorted(set(warning_flags)),
         uncertainty_details=uncertainty_details,
         settings=settings,

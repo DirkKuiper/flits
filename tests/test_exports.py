@@ -599,6 +599,7 @@ class DriftExportTest(unittest.TestCase):
             "drift_rate_mhz_per_ms",
             "drift_rate_uncertainty_mhz_per_ms",
             "drift_dm_equivalent_pc_cm3",
+            "drift_acf_slope_ms_per_mhz",
             "drift_rate_mhz_per_ms_uncertainty_class",
             "drift_warning_flags",
         ):
@@ -618,6 +619,8 @@ class DriftExportTest(unittest.TestCase):
         )
         self.assertEqual(str(arrays["drift_status"][0]), "ok")
         self.assertTrue(np.isfinite(arrays["drift_rate_mhz_per_ms"][0]))
+        self.assertTrue(np.isfinite(arrays["drift_acf_slope_ms_per_mhz"][0]))
+        self.assertTrue(np.isfinite(arrays["drift_dm_equivalent_pc_cm3"][0]))
 
     def test_drift_plot_is_ready_once_the_drift_rate_is_measured(self) -> None:
         session_id, _ = self._measured_session()

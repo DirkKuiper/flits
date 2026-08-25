@@ -59,6 +59,16 @@ The temporal workflow uses the same current session state as the other analysis
 tabs. Segment length matters: longer segments improve frequency resolution in
 the averaged PSD but reduce the number of independent averages.
 
+## Drift tab
+
+The drift workflow measures the sub-burst drift rate from the two-dimensional
+autocorrelation of the selected event window, and cross-checks it against the
+component centroids when two or more component regions are marked. Read the
+equivalent DM error before the drift rate: a dedispersion error tilts a burst
+the same way intrinsic drift does, and the drift rate is only marked publishable
+once a DM uncertainty has been folded in. See
+[Sub-Burst Drift](../analysis/drift.md).
+
 ## Export tab
 
 Build exports only after the session state is where you want it. The export
