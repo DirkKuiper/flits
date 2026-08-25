@@ -2,12 +2,13 @@
 
 The analysis package groups the main higher-level routines used by the session
 layer: width/morphology measurements, DM optimization, averaged spectral
-analysis, and temporal-structure analysis.
+analysis, temporal-structure analysis, and sub-burst drift-rate measurement.
 """
 
 from __future__ import annotations
 
 from flits.analysis.dm_optimization import optimize_dm_trials
+from flits.analysis.drift import DriftAnalysisInputs, run_drift_analysis
 from flits.analysis.morphology import compute_width_analysis
 from flits.analysis.polarization import extract_normalized_linear_spectrum, run_rm_synthesis
 
@@ -21,6 +22,7 @@ from flits.analysis.temporal.multiscale import (
 )
 
 __all__ = [
+    "DriftAnalysisInputs",
     "HaarExcessPowerResult",
     "compute_width_analysis",
     "default_segment_bins",
@@ -29,6 +31,7 @@ __all__ = [
     "haar_excess_power",
     "optimize_dm_trials",
     "run_averaged_spectral_analysis",
+    "run_drift_analysis",
     "run_rm_synthesis",
     "run_temporal_structure_analysis",
 ]

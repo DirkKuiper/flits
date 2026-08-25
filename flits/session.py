@@ -19,6 +19,7 @@ from typing import Any
 import numpy as np
 
 from flits.analysis.dm_optimization import DMMetricInput, available_dm_metrics, optimize_dm_trials
+from flits.analysis.drift import DriftAnalysisInputs, run_drift_analysis
 from flits.analysis.fitting import fit_model_selected_band
 from flits.analysis.fitting.fitburst_adapter import ModelFitRequestConfig
 from flits.analysis.localization import BurstLocalization, localize_burst
@@ -44,6 +45,8 @@ from flits.models import (
     DmComponentOptimizationResult,
     DmOptimizationProvenance,
     DmOptimizationResult,
+    DriftAnalysisResult,
+    DriftAnalysisSettings,
     ExportArtifact,
     ExportManifest,
     ExportPreview,
@@ -366,6 +369,8 @@ class BurstSession:
     dm_optimization: DmOptimizationResult | None = None
     spectral_analysis: SpectralAnalysisResult | None = None
     temporal_structure: TemporalStructureResult | None = None
+    drift_settings: DriftAnalysisSettings = field(default_factory=DriftAnalysisSettings)
+    drift_analysis: DriftAnalysisResult | None = None
     polarization_settings: PolarizationSettings = field(default_factory=PolarizationSettings)
     polarization: PolarizationAnalysisResult | None = None
     export_snapshots: dict[str, StoredExportSnapshot] = field(default_factory=dict)
@@ -532,6 +537,7 @@ class BurstSession:
         session.last_auto_mask = snapshot.last_auto_mask
         session.noise_settings = snapshot.noise_settings
         session.width_settings = snapshot.width_settings
+        session.drift_settings = snapshot.drift_settings
         session.polarization_settings = snapshot.polarization_settings
         session.notes = snapshot.notes
         if snapshot.schema_version != "1.0":
@@ -540,6 +546,7 @@ class BurstSession:
             session.dm_optimization = snapshot.dm_optimization
             session.spectral_analysis = snapshot.spectral_analysis
             session.temporal_structure = snapshot.temporal_structure
+            session.drift_analysis = snapshot.drift_analysis
             session.polarization = snapshot.polarization
             if session.results is not None:
                 session._apply_width_analysis_to_results()
@@ -704,6 +711,10 @@ class BurstSession:
         """Discard the cached temporal-structure analysis."""
         self.temporal_structure = None
 
+    def clear_drift_analysis(self) -> None:
+        """Discard the cached sub-burst drift measurement."""
+        self.drift_analysis = None
+
     def clear_polarization(self) -> None:
         """Discard the cached polarization analysis.
 
@@ -720,6 +731,7 @@ class BurstSession:
         self.clear_dm_optimization()
         self.clear_spectral_analysis()
         self.clear_temporal_structure()
+        self.clear_drift_analysis()
         self.clear_polarization()
 
     def bin_to_ms(self, time_bin: int | float) -> float:
@@ -1660,6 +1672,8 @@ class BurstSession:
             "dm_optimization": self.dm_optimization.to_dict() if self.dm_optimization is not None else None,
             "spectral_analysis": (None if self.spectral_analysis is None else self.spectral_analysis.to_dict()),
             "temporal_structure": (None if self.temporal_structure is None else self.temporal_structure.to_dict()),
+            "drift_analysis": (None if self.drift_analysis is None else self.drift_analysis.to_dict()),
+            "drift_settings": self.drift_settings.to_dict(),
             "polarization": (None if self.polarization is None else self.polarization.to_dict()),
             "polarization_settings": self.polarization_settings.to_dict(),
             "polarization_capability": self.polarization_capability(),
@@ -2559,6 +2573,83 @@ class BurstSession:
         return self.spectral_analysis
 
     # ------------------------------------------------------------------
+    # Sub-burst drift
+    # ------------------------------------------------------------------
+
+    def _drift_component_windows(self, grid: ReducedAnalysisGrid) -> list[tuple[str, tuple[int, int]]]:
+        """Component windows for the centroid estimator, as reduced-grid bins."""
+        windows: list[tuple[str, tuple[int, int]]] = []
+        for label, (start_abs, end_abs) in self._dm_component_windows():
+            mapped = self._reduce_interval(
+                start_abs,
+                end_abs,
+                base=self.crop_start,
+                factor=self.time_factor,
+                max_bins=int(grid.masked.shape[1]),
+            )
+            if mapped is not None and mapped[1] - mapped[0] >= 2:
+                windows.append((label, mapped))
+        return windows
+
+    def _drift_dm_uncertainty(self) -> float | None:
+        """The DM uncertainty to fold into drift, when the sweep still describes the applied DM.
+
+        A sweep result only bounds the DM the session is dedispersed at while
+        the two still agree; after the operator retunes the DM by hand, the old
+        uncertainty describes a different number and is dropped rather than
+        silently reused.
+        """
+        optimization = self.dm_optimization
+        if optimization is None or optimization.best_dm_uncertainty is None:
+            return None
+        uncertainty = float(optimization.best_dm_uncertainty)
+        if not np.isfinite(uncertainty) or uncertainty <= 0:
+            return None
+        if abs(float(optimization.best_dm) - float(self.dm)) > uncertainty:
+            return None
+        return uncertainty
+
+    def run_drift_analysis(
+        self,
+        *,
+        settings: DriftAnalysisSettings | None = None,
+        dm_uncertainty_pc_cm3: float | None = None,
+    ) -> DriftAnalysisResult:
+        """Measure the sub-burst drift rate of the current selection.
+
+        Parameters
+        ----------
+        settings
+            Fit-region and Monte-Carlo controls. When omitted the session's
+            stored `drift_settings` are used; when supplied they replace them.
+        dm_uncertainty_pc_cm3
+            1-sigma DM uncertainty to fold into the drift uncertainty. Defaults
+            to the DM sweep's own uncertainty when the sweep still describes the
+            applied DM.
+        """
+        if settings is not None:
+            self.drift_settings = settings
+        grid, context = self._build_measurement_context_for_data()
+        dm_uncertainty = self._drift_dm_uncertainty() if dm_uncertainty_pc_cm3 is None else float(dm_uncertainty_pc_cm3)
+        self.drift_analysis = run_drift_analysis(
+            DriftAnalysisInputs(
+                waterfall=np.asarray(grid.masked, dtype=float),
+                time_axis_ms=np.asarray(context.time_axis_ms, dtype=float),
+                freqs_mhz=np.asarray(grid.freqs_mhz, dtype=float),
+                event_rel_start=int(context.event_rel_start),
+                event_rel_end=int(context.event_rel_end),
+                spec_lo=int(context.spec_lo),
+                spec_hi=int(context.spec_hi),
+                offpulse_bins=np.asarray(context.offpulse_bins, dtype=int),
+                dm_pc_cm3=float(self.dm),
+                component_windows=self._drift_component_windows(grid),
+                dm_uncertainty_pc_cm3=dm_uncertainty,
+            ),
+            self.drift_settings,
+        )
+        return self.drift_analysis
+
+    # ------------------------------------------------------------------
     # Polarization
     # ------------------------------------------------------------------
 
@@ -2877,6 +2968,8 @@ class BurstSession:
             dm_optimization=self.dm_optimization,
             spectral_analysis=self.spectral_analysis,
             temporal_structure=self.temporal_structure,
+            drift_analysis=self.drift_analysis,
+            drift_settings=self.drift_settings,
             polarization=self.polarization,
             polarization_settings=self.polarization_settings,
             polarization_basis=self.config.polarization_basis,
