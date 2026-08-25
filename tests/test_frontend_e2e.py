@@ -231,4 +231,11 @@ def test_measuring_the_rotation_measure_from_the_session(full_stokes_waterfall, 
     expect(content).to_contain_text("calibration is unconfirmed")
     expect(page.locator("#rmPlot")).to_be_visible()
 
+    # The session result owns the panel: leaving the tab and coming back must
+    # not replace it with the (empty) imported-spectrum view.
+    page.click("#analysisPrepareTab")
+    page.click("#analysisPolarizationTab")
+    expect(content).to_contain_text("Measured from the session")
+    expect(content).to_contain_text("Peak Faraday Depth")
+
     assert page.errors == [], f"page raised JavaScript errors: {page.errors}"

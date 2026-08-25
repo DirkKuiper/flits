@@ -120,3 +120,36 @@ def test_reading_the_products_in_the_wrong_basis_destroys_the_signal(nrt_session
     )
     assert circular.linear_fraction < linear.linear_fraction
     assert circular.rm_synthesis["reduced_chi_square"] > linear.rm_synthesis["reduced_chi_square"]
+
+
+def test_a_real_polarization_analysis_survives_an_export_bundle(nrt_session: BurstSession) -> None:
+    """The science JSON forbids NaN, so real arrays are the test that matters."""
+    import io
+    import json
+
+    from flits.exports import create_export_snapshot
+
+    nrt_session.run_polarization_analysis({"min_linear_snr": 3.0})
+    bundle = create_export_snapshot(
+        nrt_session,
+        session_id="nrt-polarization",
+        include=["json", "csv", "npz", "plots"],
+        plot_formats=["png"],
+    )
+    contents = bundle.contents
+    names = {artifact.name: artifact for artifact in bundle.manifest.artifacts}
+
+    science = json.loads(next(value for name, value in contents.items() if name.endswith("science.json")))
+    assert science["polarization"]["polarization_basis"] == "coherency_linear"
+    assert science["polarization"]["rm_synthesis"]["peak_rm_rad_m2"] == pytest.approx(EXPECTED_RM_RAD_M2, abs=3.0)
+
+    csv_text = next(value for name, value in contents.items() if name.endswith("catalog.csv")).decode("utf-8")
+    header, row = (line.split(",") for line in csv_text.splitlines()[:2])
+    assert float(dict(zip(header, row, strict=True))["rm_rad_m2"]) == pytest.approx(EXPECTED_RM_RAD_M2, abs=3.0)
+
+    with np.load(io.BytesIO(next(v for n, v in contents.items() if n.endswith("diagnostics.npz")))) as arrays:
+        assert arrays["rm_phi_rad_m2"].size > 0
+        assert np.all(np.isfinite(arrays["rm_polarized_amplitude"]))
+
+    faraday = next(item for name, item in names.items() if "faraday_spectrum" in name)
+    assert faraday.status == "ready"

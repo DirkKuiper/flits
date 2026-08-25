@@ -28,6 +28,11 @@ const state = {
   sessionDirty: false,
   notesDraftDirty: false,
   rmResult: null,
+  // Which of the two routes produced the Faraday spectrum on screen: the
+  // session's own measurement, or a Q/U spectrum imported from a file. The
+  // last one the user ran owns the panel, so a routine view refresh cannot
+  // replace one with the other.
+  rmSource: null,
   rmInputData: null,
   rmInputName: "",
 }
@@ -1037,6 +1042,9 @@ async function importSessionSnapshot(event) {
     state.activeSnapshot = null
     state.sessionDirty = false
     state.notesDraftDirty = false
+    // A new burst owns the polarization panel: an imported spectrum from the
+    // previous session must not keep the new session's own result off screen.
+    state.rmSource = null
     state.exportManifest = null
     resetExportSelection()
     applyView(payload.view, { preserveNotesDraft: false })
@@ -1137,6 +1145,7 @@ async function openStoredSession(snapshotId) {
     state.activeSnapshot = payload.snapshot || null
     state.sessionDirty = false
     state.notesDraftDirty = false
+    state.rmSource = null
     state.selectedSnapshotDirectory = snapshotDirectoryForSnapshot(state.activeSnapshot)
     state.selectedSnapshotId = state.activeSnapshot?.id || snapshotId
     state.exportManifest = null
@@ -1537,6 +1546,9 @@ async function loadSession(options = {}) {
     state.activeSnapshot = null
     state.sessionDirty = false
     state.notesDraftDirty = false
+    // A new burst owns the polarization panel: an imported spectrum from the
+    // previous session must not keep the new session's own result off screen.
+    state.rmSource = null
     state.exportManifest = null
     resetExportSelection()
     applyView(payload.view, { preserveNotesDraft: false })
@@ -5268,7 +5280,9 @@ function setAnalysisTab(tab, options = {}) {
     syncSpectralPlot()
   } else if (normalizedTab === "polarization") {
     renderSessionPolarization(state.view)
-    renderRmSynthesis(state.rmResult)
+    if (state.rmSource !== "session") {
+      renderRmSynthesis(state.rmResult)
+    }
   } else if (normalizedTab === "export" && state.sessionId && exportSelectionCount() > 0 && (state.exportPreviewStale || !state.exportPreview)) {
     scheduleExportPreview({ immediate: true })
   }
@@ -5459,6 +5473,9 @@ async function importRmSpectrum() {
     state.rmInputData = payload
     state.rmInputName = file.name
     state.rmResult = null
+    // Importing a spectrum hands the panel to the imported route, so a session
+    // result already on screen is not restored over it by the next view refresh.
+    state.rmSource = "import"
     rmCalibrationConfirmedInput.checked = payload.calibration_status === "calibrated"
     if (payload.phi_min_rad_m2 !== undefined) rmPhiMinInput.value = payload.phi_min_rad_m2
     if (payload.phi_max_rad_m2 !== undefined) rmPhiMaxInput.value = payload.phi_max_rad_m2
@@ -5586,7 +5603,8 @@ function renderSessionPolarization(view) {
     sessionPolRunButton.disabled = reason !== "unknown_basis"
   }
 
-  if (view.polarization) {
+  if (view.polarization && state.rmSource !== "import") {
+    state.rmSource = "session"
     renderSessionPolarizationResult(view.polarization)
   }
 }
@@ -5634,6 +5652,7 @@ async function runSessionPolarization() {
     if (value !== undefined) payload[field] = value
   }
   state.activeAnalysisTab = "polarization"
+  state.rmSource = "session"
   await postAction("run_polarization_analysis", payload)
 }
 
@@ -5654,6 +5673,7 @@ async function runRmSynthesis() {
     }
     if (result.status !== "ok") throw new Error(result.message || "RM synthesis failed.")
     state.rmResult = result
+    state.rmSource = "import"
     renderRmSynthesis(result)
     rmDownloadJsonButton.disabled = false
     rmDownloadCsvButton.disabled = false
