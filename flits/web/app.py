@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from flits.analysis.polarization import run_rm_synthesis
 from flits.io import inspect_filterbank, list_readers
 from flits.io.errors import PolarizationUnavailableError
+from flits.models import DriftAnalysisSettings
 from flits.session import BurstSession
 from flits.settings import available_auto_mask_profiles, available_presets, get_preset
 
@@ -464,6 +465,7 @@ def _snapshot_summary(path: Path, payload: dict[str, Any] | None = None) -> dict
         "has_results": snapshot.get("results") is not None,
         "has_dm_optimization": snapshot.get("dm_optimization") is not None,
         "has_temporal_structure": snapshot.get("temporal_structure") is not None,
+        "has_drift_analysis": snapshot.get("drift_analysis") is not None,
     }
 
 
@@ -811,6 +813,15 @@ def session_export_artifact(session_id: str, export_id: str, artifact_name: str)
     )
 
 
+def _drift_settings_from_payload(session: BurstSession, payload: dict[str, Any]) -> DriftAnalysisSettings:
+    """Merge drift settings from a request onto the ones the session already holds."""
+    merged = session.drift_settings.to_dict()
+    for key in merged:
+        if key in payload and payload[key] is not None:
+            merged[key] = payload[key]
+    return DriftAnalysisSettings.from_dict(merged)
+
+
 @app.post("/api/sessions/{session_id}/actions")
 def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
     session = get_session(session_id)
@@ -885,6 +896,15 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
         elif action == "run_spectral_analysis":
             session.run_spectral_analysis(
                 segment_length_ms=float(payload["segment_length_ms"]),
+            )
+        elif action == "run_drift_analysis":
+            session.run_drift_analysis(
+                settings=_drift_settings_from_payload(session, payload),
+                dm_uncertainty_pc_cm3=(
+                    None
+                    if payload.get("dm_uncertainty_pc_cm3") in (None, "")
+                    else float(payload["dm_uncertainty_pc_cm3"])
+                ),
             )
         elif action == "set_polarization_settings":
             session.set_polarization_settings(payload)

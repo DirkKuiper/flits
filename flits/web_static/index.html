@@ -361,6 +361,7 @@
                 <button class="analysis-tab" id="analysisDmTab" type="button" role="tab" aria-selected="false" aria-controls="analysisDmPanel" tabindex="-1" data-analysis-tab="dm">DM</button>
                 <button class="analysis-tab" id="analysisFittingTab" type="button" role="tab" aria-selected="false" aria-controls="analysisFittingPanel" tabindex="-1" data-analysis-tab="fitting">Fitting</button>
                 <button class="analysis-tab" id="analysisTemporalTab" type="button" role="tab" aria-selected="false" aria-controls="analysisTemporalPanel" tabindex="-1" data-analysis-tab="temporal">Temporal</button>
+                <button class="analysis-tab" id="analysisDriftTab" type="button" role="tab" aria-selected="false" aria-controls="analysisDriftPanel" tabindex="-1" data-analysis-tab="drift">Drift</button>
                 <button class="analysis-tab" id="analysisPolarizationTab" type="button" role="tab" aria-selected="false" aria-controls="analysisPolarizationPanel" tabindex="-1" data-analysis-tab="polarization">Polarization</button>
                 <button class="analysis-tab" id="analysisExportTab" type="button" role="tab" aria-selected="false" aria-controls="analysisExportPanel" tabindex="-1" data-analysis-tab="export">Export</button>
               </div>
@@ -571,6 +572,43 @@
               <div class="plot acf-plot temporal-acf-plot is-empty" id="acfPlot"></div>
               <div class="plot dm-optimization-plot temporal-scale-plot is-empty" id="temporalScalePlot"></div>
               <div class="plot dm-optimization-plot temporal-psd-plot is-empty" id="spectralPlot"></div>
+            </section>
+
+            <section class="analysis-panel" id="analysisDriftPanel" data-tab-panel="drift" role="tabpanel" aria-labelledby="analysisDriftTab" hidden>
+              <div class="analysis-panel-head">
+                <h4>Sub-Burst Drift</h4>
+                <p>Measure how fast the emission moves in frequency as the burst proceeds, from the two-dimensional autocorrelation of the selected event window, and cross-check it against the component centroids when the burst has more than one component.</p>
+              </div>
+              <div class="dm-fit-note" data-tone="warning">
+                <strong>Drift and DM are degenerate</strong>
+                <span>A dedispersion error tilts a burst in the time-frequency plane exactly the way intrinsic drift does. FLITS reports the DM offset that would on its own produce the measured slope, and only marks the drift rate publishable once a DM uncertainty has been folded into it.</span>
+              </div>
+              <div class="field-row">
+                <label class="field">
+                  <span>DM uncertainty <span class="tooltip-icon" data-tooltip="1-sigma DM uncertainty in pc cm^-3, combined in quadrature with the statistical error. Leave blank to use the DM sweep's own uncertainty when it still describes the applied DM.">?</span></span>
+                  <input id="driftDmUncertaintyInput" type="number" step="0.001" min="0" placeholder="from DM sweep">
+                </label>
+                <label class="field">
+                  <span>Monte-Carlo trials <span class="tooltip-icon" data-tooltip="Seeded noise realisations used to estimate the statistical uncertainty. More trials give a steadier error bar and take proportionally longer. Set 0 to skip and report no statistical term.">?</span></span>
+                  <input id="driftTrialsInput" type="number" step="1" min="0" max="512" value="64">
+                </label>
+                <label class="field">
+                  <span>Max lag fraction <span class="tooltip-icon" data-tooltip="Fraction of the full autocorrelation lag range fitted around the central peak. Smaller values concentrate the fit on the peak; larger values use more of the surface.">?</span></span>
+                  <input id="driftMaxLagInput" type="number" step="0.05" min="0.1" max="1" value="0.5">
+                </label>
+                <label class="field">
+                  <span>Random seed <span class="tooltip-icon" data-tooltip="Seed for the Monte-Carlo trials. It is recorded in the session snapshot, so a headless replay reproduces the same error bar.">?</span></span>
+                  <input id="driftSeedInput" type="number" step="1" value="20240617">
+                </label>
+              </div>
+              <div class="export-actions">
+                <button class="primary-button" id="runDriftButton">Measure Drift Rate</button>
+              </div>
+              <div id="driftContent" class="results-content">
+                <div class="empty-state">No drift measurement yet. This tab uses the current crop, event/off-pulse windows, mask, spectral window, component regions, and applied DM.</div>
+              </div>
+              <div class="plot dm-optimization-plot drift-acf-plot is-empty" id="driftAcfPlot"></div>
+              <div class="plot dm-optimization-plot drift-component-plot is-empty" id="driftComponentPlot"></div>
             </section>
 
             <section class="analysis-panel" id="analysisPolarizationPanel" data-tab-panel="polarization" role="tabpanel" aria-labelledby="analysisPolarizationTab" hidden>

@@ -125,6 +125,7 @@ def test_analysis_tabs_switch_panels(page, synthetic_waterfall) -> None:
     for tab, panel in (
         ("#analysisDmTab", "#analysisDmPanel"),
         ("#analysisTemporalTab", "#analysisTemporalPanel"),
+        ("#analysisDriftTab", "#analysisDriftPanel"),
         ("#analysisExportTab", "#analysisExportPanel"),
         ("#analysisPrepareTab", "#analysisPreparePanel"),
     ):
@@ -182,6 +183,54 @@ def _apply_exact_selection(page, mode: str, start_ms: float, end_ms: float) -> N
     page.fill("#exactEndInput", str(end_ms))
     page.click("#applyExactSelectionButton")
     page.wait_for_timeout(500)
+
+
+def test_measuring_the_sub_burst_drift_rate(drifting_waterfall, page) -> None:
+    """The whole point of #94: a drifting burst in, MHz/ms out, with the DM caveat.
+
+    `drifting_waterfall` is requested before `page` so the file exists in the
+    served directory before the interface fetches its listing.
+    """
+    _load_session(page, drifting_waterfall)
+
+    centre_ms = drifting_waterfall.centre_time_ms
+    span_ms = drifting_waterfall.ntime * drifting_waterfall.tsamp_s * 1e3
+    _apply_exact_selection(page, "event", centre_ms - 12.0, centre_ms + 12.0)
+    _apply_exact_selection(page, "offpulse", 2.0, centre_ms - 25.0)
+    _apply_exact_selection(page, "offpulse", centre_ms + 25.0, span_ms - 2.0)
+
+    page.click("#analysisDriftTab")
+    expect(page.locator("#analysisDriftPanel")).to_be_visible()
+
+    page.fill("#driftTrialsInput", "8")
+    page.click("#runDriftButton")
+
+    content = page.locator("#driftContent")
+    expect(content).to_contain_text("Drift Rate", timeout=90_000)
+    expect(content).to_contain_text("MHz/ms")
+    # No DM uncertainty was supplied, so the bar must stay statistical-only.
+    expect(content).to_contain_text("Statistical only")
+    expect(content).to_contain_text("Missing DM uncertainty")
+    expect(content).to_contain_text("Equivalent DM Error")
+    expect(page.locator("#driftAcfPlot")).to_be_visible()
+
+    tile = page.locator('.result-tile:has(.results-label:text-matches("^Drift Rate")) strong').first
+    measured = float(tile.inner_text().split()[0])
+    assert measured == pytest.approx(drifting_waterfall.drift_mhz_per_ms, rel=0.25), measured
+
+    # Supplying a DM uncertainty is what promotes the measurement.
+    page.fill("#driftDmUncertaintyInput", "0.05")
+    page.click("#runDriftButton")
+    expect(content).to_contain_text("Formal 1σ", timeout=90_000)
+    expect(content).not_to_contain_text("Missing DM uncertainty")
+
+    # The result must survive leaving the tab and coming back.
+    page.click("#analysisPrepareTab")
+    page.click("#analysisDriftTab")
+    expect(content).to_contain_text("Drift Rate")
+    expect(page.locator("#driftAcfPlot")).to_be_visible()
+
+    assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
 
 
 def test_polarization_panel_explains_a_stokes_i_only_burst(page, synthetic_waterfall) -> None:

@@ -584,6 +584,11 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("replaceState", app_js)
         self.assertIn("run_temporal_structure_analysis", app_js)
         self.assertIn("run_spectral_analysis", app_js)
+        self.assertIn("run_drift_analysis", app_js)
+        self.assertIn("function renderDrift(view)", app_js)
+        self.assertIn("function renderDriftAcfPlot(drift)", app_js)
+        self.assertIn("function renderDriftComponentPlot(drift)", app_js)
+        self.assertIn("dm_equivalent_pc_cm3", app_js)
         self.assertNotIn("time_downsample_factor", app_js)
 
     def test_preview_export_action_returns_preview_payload(self) -> None:
@@ -1255,6 +1260,49 @@ class WebApiTest(unittest.TestCase):
         self.assertIn('negative_recovery_wing: "Negative recovery"', source)
         self.assertIn('negative_event_tail: "Negative event tail"', source)
         self.assertIn("detail.warning_flags.map((flag) => formatMeasurementFlag(flag))", source)
+
+    def test_session_action_run_drift_analysis_merges_settings_and_serializes(self) -> None:
+        from flits.models import DriftAnalysisSettings
+
+        session_id = "synthetic-drift-dispatch"
+        session = _synthetic_session()
+        SESSIONS[session_id] = session
+        try:
+            payload = session_action(
+                session_id,
+                ActionRequest(
+                    type="run_drift_analysis",
+                    payload={"monte_carlo_trials": 0, "random_seed": 77, "dm_uncertainty_pc_cm3": 0.25},
+                ),
+            )
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        drift = payload["view"]["drift_analysis"]
+        self.assertIsNotNone(drift)
+        self.assertEqual(drift["settings"]["random_seed"], 77)
+        self.assertEqual(drift["settings"]["monte_carlo_trials"], 0)
+        # Unnamed settings keep the session's values rather than being reset.
+        self.assertEqual(drift["settings"]["max_lag_fraction"], DriftAnalysisSettings().max_lag_fraction)
+        self.assertEqual(drift["dm_uncertainty_pc_cm3"], 0.25)
+        self.assertEqual(payload["view"]["drift_settings"]["random_seed"], 77)
+
+    def test_session_action_run_drift_analysis_defaults_to_session_settings(self) -> None:
+        from flits.models import DriftAnalysisSettings
+
+        session_id = "synthetic-drift-defaults"
+        session = _synthetic_session()
+        session.drift_settings = DriftAnalysisSettings(monte_carlo_trials=0, random_seed=404)
+        SESSIONS[session_id] = session
+        try:
+            payload = session_action(session_id, ActionRequest(type="run_drift_analysis", payload={}))
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        drift = payload["view"]["drift_analysis"]
+        self.assertEqual(drift["settings"]["random_seed"], 404)
+        self.assertEqual(drift["settings"]["monte_carlo_trials"], 0)
+        self.assertIsNone(drift["dm_uncertainty_pc_cm3"])
 
     def test_delete_session_removes_session(self) -> None:
         session_id = "synthetic-delete"

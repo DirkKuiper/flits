@@ -47,6 +47,47 @@ def test_replay_json_report_carries_the_measurements(snapshot_path: Path, capsys
     assert report["measurements"] is not None
 
 
+@pytest.fixture
+def drift_snapshot_path(tmp_path: Path, synthetic_waterfall) -> Path:
+    """A snapshot whose session had already measured a drift rate."""
+    from flits.models import DriftAnalysisSettings
+
+    session = BurstSession.from_file(str(synthetic_waterfall.path), dm=0.0, sefd_jy=10.0)
+    session.set_event_ms(100.0, 160.0)
+    session.add_offpulse_ms(0.0, 50.0)
+    session.compute_properties()
+    session.run_drift_analysis(settings=DriftAnalysisSettings(monte_carlo_trials=8, random_seed=31))
+
+    path = tmp_path / "drift_flits_session.json"
+    path.write_text(json.dumps(session.snapshot_dict(), indent=2), encoding="utf-8")
+    return path
+
+
+def test_replay_recomputes_the_drift_rate_it_finds_in_a_snapshot(drift_snapshot_path: Path, capsys) -> None:
+    stored = json.loads(drift_snapshot_path.read_text(encoding="utf-8"))["drift_analysis"]
+    assert replay([str(drift_snapshot_path), "--json"]) == 0
+
+    report = json.loads(capsys.readouterr().out)
+    assert "drift_analysis" in report["recomputed"]
+    assert report["drift"] is not None
+    # The Monte Carlo is seeded from the snapshot, so replay must land on the
+    # same number rather than merely a similar one.
+    assert report["drift"]["drift_rate_mhz_per_ms"] == pytest.approx(
+        stored["drift_rate_mhz_per_ms"], rel=1e-9, abs=1e-9
+    )
+    assert report["drift"]["drift_rate_uncertainty_mhz_per_ms"] == pytest.approx(
+        stored["drift_rate_uncertainty_mhz_per_ms"], rel=1e-9, abs=1e-9
+    )
+
+
+def test_replay_skips_the_drift_rate_when_the_snapshot_has_none(snapshot_path: Path, capsys) -> None:
+    assert replay([str(snapshot_path), "--json"]) == 0
+
+    report = json.loads(capsys.readouterr().out)
+    assert "drift_analysis" not in report["recomputed"]
+    assert report["drift"] is None
+
+
 def test_replay_check_passes_on_an_unmodified_snapshot(snapshot_path: Path, capsys) -> None:
     """Recomputing a snapshot must reproduce the numbers it was saved with."""
     assert replay([str(snapshot_path), "--check"]) == 0

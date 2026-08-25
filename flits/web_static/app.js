@@ -143,6 +143,14 @@ const temporalScalePlot = document.getElementById("temporalScalePlot")
 const spectralPlot = document.getElementById("spectralPlot")
 const spectralSegmentInput = document.getElementById("spectralSegmentInput")
 const runSpectralButton = document.getElementById("runSpectralButton")
+const driftContent = document.getElementById("driftContent")
+const driftAcfPlot = document.getElementById("driftAcfPlot")
+const driftComponentPlot = document.getElementById("driftComponentPlot")
+const driftDmUncertaintyInput = document.getElementById("driftDmUncertaintyInput")
+const driftTrialsInput = document.getElementById("driftTrialsInput")
+const driftMaxLagInput = document.getElementById("driftMaxLagInput")
+const driftSeedInput = document.getElementById("driftSeedInput")
+const runDriftButton = document.getElementById("runDriftButton")
 const rmImportButton = document.getElementById("rmImportButton")
 const rmInput = document.getElementById("rmInput")
 const rmContent = document.getElementById("rmContent")
@@ -326,6 +334,7 @@ const sessionControls = [
   fitExportSolutionButton,
   fitModelButton,
   runSpectralButton,
+  runDriftButton,
   buildExportButton,
   exportIncludeJson,
   exportIncludeCsv,
@@ -390,6 +399,10 @@ const busyLockControls = [
   fitSeedPreviousInput,
   fitScintillationInput,
   spectralSegmentInput,
+  driftDmUncertaintyInput,
+  driftTrialsInput,
+  driftMaxLagInput,
+  driftSeedInput,
   fitComponentsInput,
   fitDetectThresholdInput,
   fitDetectDistanceInput,
@@ -429,7 +442,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 function initialAnalysisTab() {
   const fromHash = window.location.hash.replace(/^#/, "").trim().toLowerCase()
-  const valid = new Set(["prepare", "dm", "fitting", "temporal", "polarization", "export"])
+  const valid = new Set(["prepare", "dm", "fitting", "temporal", "drift", "polarization", "export"])
   return valid.has(fromHash) ? fromHash : state.activeAnalysisTab
 }
 
@@ -618,6 +631,7 @@ function bindControls() {
       segment_length_ms: Number(spectralSegmentInput.value),
     })
   })
+  runDriftButton.addEventListener("click", () => postAction("run_drift_analysis", driftActionPayload()))
   rmImportButton.addEventListener("click", () => rmInput.click())
   rmInput.addEventListener("change", () => importRmSpectrum())
   rmCalibrationConfirmedInput.addEventListener("change", () => {
@@ -1613,6 +1627,8 @@ async function postAction(type, payload = {}) {
       state.activeAnalysisTab = "fitting"
     } else if (type === "run_temporal_structure_analysis" || type === "run_spectral_analysis") {
       state.activeAnalysisTab = "temporal"
+    } else if (type === "run_drift_analysis") {
+      state.activeAnalysisTab = "drift"
     } else if (type === "export_results") {
       state.activeAnalysisTab = "export"
     }
@@ -1683,6 +1699,7 @@ function applyView(view, options = {}) {
   notesInput.value = preserveNotesDraft ? notesDraft : (view.state.notes || "")
   state.notesDraftDirty = preserveNotesDraft
   syncSpectralSegmentInput(view)
+  syncDriftSettingsInputs(view)
   resolutionLabel.textContent = resolutionLabelText(view)
   appliedDmLabel.textContent = `Applied DM ${fmt(view.meta.dm, 3)} pc cm⁻³`
   burstTitle.textContent = view.meta.burst_name
@@ -1696,6 +1713,7 @@ function applyView(view, options = {}) {
   renderDmOptimization(view)
   renderFitting(view)
   renderSpectral(view)
+  renderDrift(view)
   renderSessionPolarization(view)
   renderExportPlanner()
   renderExportManifest()
@@ -3323,6 +3341,327 @@ function renderSpectral(view) {
     Plotly.purge(spectralPlot)
     spectralPlot.replaceChildren()
   }
+}
+
+function driftActionPayload() {
+  const payload = {}
+  const dmUncertainty = driftDmUncertaintyInput.value.trim()
+  if (dmUncertainty !== "" && Number.isFinite(Number(dmUncertainty))) {
+    payload.dm_uncertainty_pc_cm3 = Number(dmUncertainty)
+  }
+  if (Number.isFinite(Number(driftTrialsInput.value))) {
+    payload.monte_carlo_trials = Math.max(0, Math.round(Number(driftTrialsInput.value)))
+  }
+  if (Number.isFinite(Number(driftMaxLagInput.value))) {
+    payload.max_lag_fraction = Number(driftMaxLagInput.value)
+  }
+  if (Number.isFinite(Number(driftSeedInput.value))) {
+    payload.random_seed = Math.round(Number(driftSeedInput.value))
+  }
+  return payload
+}
+
+function syncDriftSettingsInputs(view) {
+  const settings = view?.drift_settings
+  if (!settings) {
+    return
+  }
+  driftTrialsInput.value = String(settings.monte_carlo_trials)
+  driftMaxLagInput.value = String(settings.max_lag_fraction)
+  driftSeedInput.value = String(settings.random_seed)
+  const measuredDmUncertainty = view?.drift_analysis?.dm_uncertainty_pc_cm3
+  if (measuredDmUncertainty !== null && measuredDmUncertainty !== undefined && driftDmUncertaintyInput.value.trim() === "") {
+    driftDmUncertaintyInput.placeholder = `${fmt(measuredDmUncertainty, 4)} from DM sweep`
+  }
+}
+
+function driftTooltip(topic) {
+  const tooltips = {
+    summary: "Drift is dnu/dt in MHz per millisecond: negative for the downward 'sad trombone' drift seen in repeaters. It is measured from a rotated 2D Gaussian fitted to the autocorrelation of the selected event window.",
+    driftRate: "Conditional-mean slope of the fitted autocorrelation ellipse, which is the rate the emission centroid moves in frequency as the burst proceeds.",
+    dmEquivalent: "The DM offset that would on its own produce the measured slope. If this is smaller than the DM uncertainty, the drift is not distinguishable from a dedispersion error.",
+    dmSensitivity: "How much the reported drift rate changes per pc cm^-3 of DM error, evaluated at the measured drift and the mean selected frequency.",
+    statistical: "Spread of the drift rate across seeded noise realisations of the same event window. It does not include the DM systematic.",
+    dmSystematic: "The DM uncertainty propagated into the drift rate. Usually the larger of the two terms.",
+    majorAxis: "Slope of the ellipse's major axis in the conventional (ms, MHz) plane, which is what frbgui reports. It is not the same number as the conditional-mean drift rate unless the ellipse is very elongated, and it depends on the choice of axis units.",
+    burstExtent: "Burst extent recovered from the fitted autocorrelation widths, after dividing out the factor sqrt(2) between a Gaussian and its autocorrelation.",
+    correlation: "Correlation coefficient of the fitted ellipse. Its sign is the sign of the drift; a magnitude near 1 means the burst is a narrow diagonal ridge.",
+    componentDrift: "Weighted regression of each component's spectral centroid against its arrival time. This measures the step between sub-bursts rather than the slope within one, and needs at least two component regions.",
+    componentFit: "Coefficient of determination of the component regression. It is undefined with exactly two components, where the fit is exact.",
+    trials: "Number of seeded noise realisations that converged and contributed to the statistical uncertainty.",
+    maskedFraction: "Fraction of selected channels with no finite samples inside the event window. The autocorrelation is corrected for the mask, but a heavily masked band still weakens the fit.",
+  }
+  return tooltips[topic] || ""
+}
+
+function driftStatusLabel(status) {
+  const labels = {
+    ok: "Ready",
+    insufficient_time_bins: "Event too short",
+    insufficient_channels: "Too few channels",
+    insufficient_signal: "Insufficient signal",
+    invalid_axes: "Non-uniform axes",
+    fit_failed: "Fit did not converge",
+    unavailable: "Not measured",
+  }
+  return labels[status] || status || "Unknown"
+}
+
+function driftRateStatusLabel(status) {
+  const labels = {
+    ok: "Constrained",
+    unconstrained: "Consistent with zero",
+    unavailable: "Not measured",
+  }
+  return labels[status] || status || "Unknown"
+}
+
+function componentDriftStatusLabel(status) {
+  const labels = {
+    ok: "Regression ready",
+    exactly_two_components: "Exact two-point fit",
+    insufficient_components: "Needs two components",
+    degenerate_arrival_times: "Components share an arrival time",
+    singular_regression: "Regression singular",
+    unavailable: "Not measured",
+  }
+  return labels[status] || status || "Unknown"
+}
+
+function formatDriftFlag(flag) {
+  const labels = {
+    heavily_masked: "Heavily masked",
+    implicit_offpulse: "Implicit off-pulse",
+    low_acf_contrast: "Low ACF contrast",
+    monte_carlo_unavailable: "No Monte Carlo",
+    missing_dm_uncertainty: "Missing DM uncertainty",
+    drift_consistent_with_dm_error: "Within DM uncertainty",
+  }
+  return labels[flag] || formatMeasurementFlag(flag)
+}
+
+function formatDriftRate(value, detail) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return "n/a"
+  }
+  return `${formatValueWithDetail(value, detail, { valueDigits: 4, uncertaintyDigits: 3 })} MHz/ms`
+}
+
+function renderDrift(view) {
+  const drift = view?.drift_analysis
+  if (!drift) {
+    driftContent.innerHTML = '<div class="empty-state">No drift measurement yet. This tab uses the current crop, event/off-pulse windows, mask, spectral window, component regions, and applied DM.</div>'
+    syncDriftPlots()
+    return
+  }
+
+  const details = drift.uncertainty_details || {}
+  const driftDetail = uncertaintyDetail(details, "drift_rate_mhz_per_ms")
+  const componentDetail = uncertaintyDetail(details, "component_drift_rate_mhz_per_ms")
+  const flags = Array.isArray(drift.warning_flags) ? drift.warning_flags : []
+  const flagChips = flags.length
+    ? `<div class="measurement-flags">${flags.map((flag) => infoChip("Flag", formatDriftFlag(flag), flagTone(flag))).join("")}</div>`
+    : ""
+
+  if (drift.status !== "ok") {
+    driftContent.innerHTML = `
+      <div class="results-section">
+        <div class="results-secondary">
+          ${resultTile("Status", driftStatusLabel(drift.status), "secondary")}
+          ${resultTile("Applied DM", `${fmt(drift.dm_pc_cm3, 4)} pc cm⁻³`, "secondary")}
+        </div>
+        ${drift.message ? `<div class="empty-state">${escapeHtml(drift.message)}</div>` : ""}
+      </div>
+    `
+    syncDriftPlots()
+    return
+  }
+
+  const summaryTiles = [
+    resultTile("Drift Rate", formatDriftRate(drift.drift_rate_mhz_per_ms, driftDetail), "primary", {
+      tooltip: driftTooltip("driftRate"),
+      detail: driftDetail,
+    }),
+    resultTile("Equivalent DM Error", drift.dm_equivalent_pc_cm3 === null || drift.dm_equivalent_pc_cm3 === undefined ? "n/a" : `${fmt(drift.dm_equivalent_pc_cm3, 4)} pc cm⁻³`, "primary", driftTooltip("dmEquivalent")),
+    resultTile("Component Drift", formatDriftRate(drift.component_drift_rate_mhz_per_ms, componentDetail), "primary", {
+      tooltip: driftTooltip("componentDrift"),
+      detail: componentDetail,
+    }),
+    resultTile("Burst Extent", drift.acf_sigma_time_ms === null || drift.acf_sigma_time_ms === undefined ? "n/a" : `${fmt(drift.acf_sigma_time_ms, 3)} ms x ${fmt(drift.acf_sigma_freq_mhz, 2)} MHz`, "primary", driftTooltip("burstExtent")),
+  ]
+
+  const detailTiles = [
+    resultTile("Status", driftStatusLabel(drift.status), "secondary"),
+    resultTile("Significance", driftRateStatusLabel(drift.drift_rate_status), "secondary"),
+    resultTile("Statistical Term", drift.drift_rate_statistical_mhz_per_ms === null || drift.drift_rate_statistical_mhz_per_ms === undefined ? "n/a" : `${fmt(drift.drift_rate_statistical_mhz_per_ms, 4)} MHz/ms`, "secondary", driftTooltip("statistical")),
+    resultTile("DM Systematic", drift.drift_rate_dm_systematic_mhz_per_ms === null || drift.drift_rate_dm_systematic_mhz_per_ms === undefined ? "n/a" : `${fmt(drift.drift_rate_dm_systematic_mhz_per_ms, 4)} MHz/ms`, "secondary", driftTooltip("dmSystematic")),
+    resultTile("DM Sensitivity", drift.dm_sensitivity_mhz_per_ms_per_pc_cm3 === null || drift.dm_sensitivity_mhz_per_ms_per_pc_cm3 === undefined ? "n/a" : `${fmt(drift.dm_sensitivity_mhz_per_ms_per_pc_cm3, 4)} per pc cm⁻³`, "secondary", driftTooltip("dmSensitivity")),
+    resultTile("Applied DM", `${fmt(drift.dm_pc_cm3, 4)} pc cm⁻³`, "secondary"),
+    resultTile("DM Uncertainty", drift.dm_uncertainty_pc_cm3 === null || drift.dm_uncertainty_pc_cm3 === undefined ? "not supplied" : `${fmt(drift.dm_uncertainty_pc_cm3, 4)} pc cm⁻³`, "secondary"),
+    resultTile("Reference Frequency", drift.reference_frequency_mhz === null || drift.reference_frequency_mhz === undefined ? "n/a" : `${fmt(drift.reference_frequency_mhz, 2)} MHz`, "secondary"),
+    resultTile("Major-Axis Slope", drift.acf_major_axis_slope_mhz_per_ms === null || drift.acf_major_axis_slope_mhz_per_ms === undefined ? "n/a" : `${fmt(drift.acf_major_axis_slope_mhz_per_ms, 4)} MHz/ms`, "secondary", driftTooltip("majorAxis")),
+    resultTile("ACF Correlation", drift.acf_correlation === null || drift.acf_correlation === undefined ? "n/a" : fmt(drift.acf_correlation, 3), "secondary", driftTooltip("correlation")),
+    resultTile("Monte-Carlo Trials", String(drift.monte_carlo_trials_used || 0), "secondary", driftTooltip("trials")),
+    resultTile("Masked Fraction", `${fmt(100 * (drift.masked_channel_fraction || 0), 1)} %`, "secondary", driftTooltip("maskedFraction")),
+    resultTile("Component Fit", componentDriftStatusLabel(drift.component_drift_status), "secondary", driftTooltip("componentDrift")),
+    resultTile("Component R²", drift.component_drift_r_squared === null || drift.component_drift_r_squared === undefined ? "n/a" : fmt(drift.component_drift_r_squared, 4), "secondary", driftTooltip("componentFit")),
+  ]
+
+  driftContent.innerHTML = `
+    <div class="results-section">
+      <div class="analysis-panel-head compact">
+        <h5>Sub-Burst Drift Summary <span class="tooltip-icon" data-tooltip="${escapeHtml(driftTooltip("summary"))}">?</span></h5>
+        <p>The drift rate comes from the autocorrelation of the selected event window. The component drift is an independent cross-check and needs at least two component regions.</p>
+      </div>
+      <div class="results-primary">
+        ${summaryTiles.join("")}
+      </div>
+      <div class="results-secondary">
+        ${detailTiles.join("")}
+      </div>
+      ${flagChips}
+      <div class="dm-fit-note" data-tone="neutral" style="margin-top: 1rem;">
+        <strong>Reading The Two Estimators</strong>
+        <span>The autocorrelation slope is the sub-burst slope: it works on a single unresolved component and describes how the emission moves within it. The component regression is the classic inter-component drift and needs the components marked. They agree for a burst that drifts uniformly and disagree when it does not; neither is wrong when they differ.</span>
+      </div>
+      <div class="dm-fit-note" data-tone="neutral" style="margin-top: 1rem;">
+        <strong>Drift Against DM</strong>
+        <span>The equivalent DM error is the whole degeneracy in one number. Compare it against the DM uncertainty before reporting a drift rate: if it is the smaller of the two, the burst is equally well described as unresolved drift at a slightly different DM.</span>
+      </div>
+    </div>
+    ${drift.message ? `<div class="empty-state">${escapeHtml(drift.message)}</div>` : ""}
+  `
+  syncDriftPlots()
+}
+
+function syncDriftPlots() {
+  const drift = state.view?.drift_analysis
+  if (!drift || drift.status !== "ok" || state.activeAnalysisTab !== "drift") {
+    driftAcfPlot.classList.add("is-empty")
+    Plotly.purge(driftAcfPlot)
+    driftAcfPlot.replaceChildren()
+    driftComponentPlot.classList.add("is-empty")
+    Plotly.purge(driftComponentPlot)
+    driftComponentPlot.replaceChildren()
+    return
+  }
+  renderDriftAcfPlot(drift)
+  renderDriftComponentPlot(drift)
+}
+
+async function renderDriftAcfPlot(drift) {
+  const timeLags = Array.isArray(drift.acf_lag_time_ms) ? drift.acf_lag_time_ms : []
+  const freqLags = Array.isArray(drift.acf_lag_freq_mhz) ? drift.acf_lag_freq_mhz : []
+  const surface = Array.isArray(drift.acf) ? drift.acf : []
+  if (!timeLags.length || !freqLags.length || !surface.length) {
+    driftAcfPlot.classList.add("is-empty")
+    Plotly.purge(driftAcfPlot)
+    driftAcfPlot.replaceChildren()
+    return
+  }
+
+  driftAcfPlot.classList.remove("is-empty")
+  const traces = [
+    {
+      x: timeLags,
+      y: freqLags,
+      z: surface,
+      type: "heatmap",
+      colorscale: plotTheme.heatmapScale,
+      hovertemplate: "Time lag %{x:.4f} ms<br>Frequency lag %{y:.3f} MHz<br>ACF %{z:.4g}<extra></extra>",
+      colorbar: { title: { text: "ACF" }, thickness: 14 },
+    },
+  ]
+  if (Number.isFinite(Number(drift.drift_rate_mhz_per_ms))) {
+    const rate = Number(drift.drift_rate_mhz_per_ms)
+    traces.push({
+      x: timeLags,
+      y: timeLags.map((lag) => rate * Number(lag)),
+      mode: "lines",
+      type: "scattergl",
+      line: { color: "#e2a144", width: 2.4 },
+      name: `Drift ${fmt(rate, 4)} MHz/ms`,
+      hovertemplate: "Fitted slope<extra></extra>",
+    })
+  }
+
+  await Plotly.react(
+    "driftAcfPlot",
+    traces,
+    {
+      margin: { l: 84, r: 28, t: 34, b: 60 },
+      paper_bgcolor: plotTheme.paperBg,
+      plot_bgcolor: plotTheme.plotBg,
+      showlegend: true,
+      legend: { orientation: "h", yanchor: "bottom", y: 1.0, xanchor: "left", x: 0, bgcolor: "rgba(255,255,255,0.7)" },
+      title: { text: "Event-Window Autocorrelation", font: { size: 13, color: plotTheme.ink }, x: 0, xanchor: "left" },
+      xaxis: { title: "Time lag (ms)", gridcolor: plotTheme.grid, zeroline: false },
+      yaxis: {
+        title: "Frequency lag (MHz)",
+        gridcolor: plotTheme.grid,
+        zeroline: false,
+        range: [Math.min(...freqLags), Math.max(...freqLags)],
+      },
+    },
+    { displayModeBar: false, responsive: true },
+  )
+}
+
+async function renderDriftComponentPlot(drift) {
+  const times = Array.isArray(drift.component_times_ms) ? drift.component_times_ms : []
+  const freqs = Array.isArray(drift.component_freqs_mhz) ? drift.component_freqs_mhz : []
+  if (times.length < 2 || freqs.length !== times.length) {
+    driftComponentPlot.classList.add("is-empty")
+    Plotly.purge(driftComponentPlot)
+    driftComponentPlot.replaceChildren()
+    return
+  }
+
+  driftComponentPlot.classList.remove("is-empty")
+  const errors = Array.isArray(drift.component_freq_uncertainty_mhz) ? drift.component_freq_uncertainty_mhz : []
+  const traces = [
+    {
+      x: times,
+      y: freqs,
+      error_y: errors.length === times.length ? { type: "data", array: errors, visible: true, color: plotTheme.accentAltStrong } : undefined,
+      mode: "markers",
+      type: "scattergl",
+      name: "Component centroid",
+      marker: { color: plotTheme.accent, size: 10 },
+      text: Array.isArray(drift.component_labels) ? drift.component_labels : [],
+      hovertemplate: "%{text}<br>%{x:.4f} ms<br>%{y:.3f} MHz<extra></extra>",
+    },
+  ]
+  if (Number.isFinite(Number(drift.component_drift_rate_mhz_per_ms))) {
+    const rate = Number(drift.component_drift_rate_mhz_per_ms)
+    const meanTime = times.reduce((total, value) => total + Number(value), 0) / times.length
+    const meanFreq = freqs.reduce((total, value) => total + Number(value), 0) / freqs.length
+    traces.push({
+      x: times,
+      y: times.map((value) => meanFreq + rate * (Number(value) - meanTime)),
+      mode: "lines",
+      type: "scattergl",
+      line: { color: "#e2a144", width: 2.2, dash: "dash" },
+      name: `Regression ${fmt(rate, 4)} MHz/ms`,
+      hovertemplate: "Fitted regression<extra></extra>",
+    })
+  }
+
+  await Plotly.react(
+    "driftComponentPlot",
+    traces,
+    {
+      margin: { l: 84, r: 28, t: 34, b: 60 },
+      paper_bgcolor: plotTheme.paperBg,
+      plot_bgcolor: plotTheme.plotBg,
+      showlegend: true,
+      legend: { orientation: "h", yanchor: "bottom", y: 1.0, xanchor: "left", x: 0, bgcolor: "rgba(255,255,255,0.7)" },
+      title: { text: "Component Centroids", font: { size: 13, color: plotTheme.ink }, x: 0, xanchor: "left" },
+      xaxis: { title: "Arrival time (ms)", gridcolor: plotTheme.grid, zeroline: false },
+      yaxis: { title: "Centroid frequency (MHz)", gridcolor: plotTheme.grid, zeroline: false },
+    },
+    { displayModeBar: false, responsive: true },
+  )
 }
 
 function renderAcfDiagnosticsSection(results) {
@@ -5256,7 +5595,7 @@ function setMode(mode) {
 
 function setAnalysisTab(tab, options = {}) {
   const { updateHash = true } = options
-  const normalizedTab = ["prepare", "dm", "fitting", "temporal", "polarization", "export"].includes(tab) ? tab : "prepare"
+  const normalizedTab = ["prepare", "dm", "fitting", "temporal", "drift", "polarization", "export"].includes(tab) ? tab : "prepare"
   state.activeAnalysisTab = normalizedTab
   analysisTabButtons.forEach((button) => {
     const isActive = button.dataset.analysisTab === normalizedTab
@@ -5278,6 +5617,8 @@ function setAnalysisTab(tab, options = {}) {
     syncFittingPlot()
   } else if (normalizedTab === "temporal") {
     syncSpectralPlot()
+  } else if (normalizedTab === "drift") {
+    syncDriftPlots()
   } else if (normalizedTab === "polarization") {
     renderSessionPolarization(state.view)
     if (state.rmSource !== "session") {
@@ -6183,6 +6524,7 @@ function busyButtonForAction(action) {
   if (action === "fit_model") return fitModelButton
   if (action === "run_temporal_structure_analysis") return runSpectralButton
   if (action === "run_spectral_analysis") return runSpectralButton
+  if (action === "run_drift_analysis") return runDriftButton
   if (action === "export_results") return buildExportButton
   if (action === "set_notes") return saveNotesButton
   if (action === "set_timing_metadata") return updateTimingButton
@@ -6206,6 +6548,7 @@ function busyButtonText(action) {
   if (action === "fit_model") return "Fitting..."
   if (action === "run_temporal_structure_analysis") return "Running..."
   if (action === "run_spectral_analysis") return "Running..."
+  if (action === "run_drift_analysis") return "Measuring..."
   if (action === "export_results") return "Building..."
   if (action === "set_notes") return "Saving..."
   if (action === "set_timing_metadata") return "Applying..."
@@ -6240,6 +6583,7 @@ function actionBusyText(action) {
     fit_model: "Running model fit",
     run_temporal_structure_analysis: "Running temporal structure",
     run_spectral_analysis: "Running power spectrum",
+    run_drift_analysis: "Measuring drift rate",
     run_polarization_analysis: "Measuring rotation measure",
     set_polarization_settings: "Updating polarization settings",
     export_results: "Building export bundle",
@@ -6266,6 +6610,7 @@ function actionSuccessText(action) {
     fit_model: "Model fit completed",
     run_temporal_structure_analysis: "Temporal structure updated",
     run_spectral_analysis: "Power spectrum updated",
+    run_drift_analysis: "Drift rate measured",
     export_results: "Export bundle built",
     set_notes: "Notes saved",
     set_timing_metadata: "Timing metadata applied",
