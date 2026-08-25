@@ -115,11 +115,15 @@ def test_a_real_polarization_analysis_replays_from_its_snapshot(nrt_session: Bur
 
 def test_reading_the_products_in_the_wrong_basis_destroys_the_signal(nrt_session: BurstSession) -> None:
     linear = nrt_session.run_polarization_analysis({"min_linear_snr": 3.0})
-    circular = nrt_session.run_polarization_analysis(
-        {"min_linear_snr": 3.0, "polarization_basis": "coherency_circular"},
-    )
-    assert circular.linear_fraction < linear.linear_fraction
-    assert circular.rm_synthesis["reduced_chi_square"] > linear.rm_synthesis["reduced_chi_square"]
+    try:
+        circular = nrt_session.run_polarization_analysis(
+            {"min_linear_snr": 3.0, "polarization_basis": "coherency_circular"},
+        )
+        assert circular.linear_fraction < linear.linear_fraction
+        assert circular.rm_synthesis["reduced_chi_square"] > linear.rm_synthesis["reduced_chi_square"]
+    finally:
+        # The session is module-scoped: hand it back on the basis it declares.
+        nrt_session.set_polarization_settings({"polarization_basis": None})
 
 
 def test_a_real_polarization_analysis_survives_an_export_bundle(nrt_session: BurstSession) -> None:
