@@ -17,6 +17,9 @@ cached result rather than showing a stale one.
 | `acf_2d` | The **sub-burst slope**: how the emission centroid moves in frequency as one component proceeds. | A single event window with enough time bins and channels. |
 | `component_centroid` | The **inter-component drift**: the step in centre frequency from one sub-burst to the next. | At least two component regions (or two manual peaks). |
 
+Editing the component regions or the manual peaks discards a cached drift
+result, because the second estimator is built from them.
+
 They are not the same number, and neither is wrong when they disagree. A burst
 whose components each drift by the same amount as the gaps between them will
 give one answer; a burst of separately drifting sub-bursts stacked at a
@@ -157,6 +160,12 @@ FLITS classifies this measurement the way it classifies every other one.
   result is `formal_1sigma` and publishable, unless one of the blocking flags
   is raised.
 
+`drift_rate_status` reports significance against the bar FLITS would actually
+quote, not against the statistical term alone: `ok` when the drift rate exceeds
+its combined uncertainty, `unconstrained` when it does not, and `unquantified`
+when there is no uncertainty at all — which is what running with the Monte Carlo
+disabled and no DM uncertainty gives you.
+
 The blocking flags are `heavily_masked` (a quarter or more of the selected
 channels are gone), `low_acf_contrast`, `monte_carlo_unavailable`, and
 `implicit_offpulse` (no explicit off-pulse window, so the noise reference is a
@@ -165,6 +174,10 @@ guess).
 The DM uncertainty comes from the DM sweep when the sweep still describes the
 applied DM; retune the DM by hand and FLITS drops it rather than reusing a
 number that now describes something else. Supply one explicitly to override.
+
+An operator-supplied value is stored in the drift settings and travels in the
+session snapshot, so `flits replay` reproduces the same classification and not
+just the same number. Clear the field to go back to the sweep's own value.
 
 ## The component estimator
 

@@ -813,12 +813,20 @@ def session_export_artifact(session_id: str, export_id: str, artifact_name: str)
     )
 
 
+# Settings a request may clear by sending an explicit null, rather than only
+# overwrite. Everything else keeps its stored value when the key is absent.
+_NULLABLE_DRIFT_SETTINGS = frozenset({"dm_uncertainty_pc_cm3"})
+
+
 def _drift_settings_from_payload(session: BurstSession, payload: dict[str, Any]) -> DriftAnalysisSettings:
     """Merge drift settings from a request onto the ones the session already holds."""
     merged = session.drift_settings.to_dict()
     for key in merged:
-        if key in payload and payload[key] is not None:
-            merged[key] = payload[key]
+        if key not in payload:
+            continue
+        if payload[key] is None and key not in _NULLABLE_DRIFT_SETTINGS:
+            continue
+        merged[key] = payload[key]
     return DriftAnalysisSettings.from_dict(merged)
 
 
@@ -898,14 +906,7 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
                 segment_length_ms=float(payload["segment_length_ms"]),
             )
         elif action == "run_drift_analysis":
-            session.run_drift_analysis(
-                settings=_drift_settings_from_payload(session, payload),
-                dm_uncertainty_pc_cm3=(
-                    None
-                    if payload.get("dm_uncertainty_pc_cm3") in (None, "")
-                    else float(payload["dm_uncertainty_pc_cm3"])
-                ),
-            )
+            session.run_drift_analysis(settings=_drift_settings_from_payload(session, payload))
         elif action == "set_polarization_settings":
             session.set_polarization_settings(payload)
         elif action == "run_polarization_analysis":

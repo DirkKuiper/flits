@@ -712,7 +712,12 @@ class BurstSession:
         self.temporal_structure = None
 
     def clear_drift_analysis(self) -> None:
-        """Discard the cached sub-burst drift measurement."""
+        """Discard the cached sub-burst drift measurement.
+
+        Component regions and manual peaks feed the centroid estimator, so
+        editing them invalidates a cached drift result even though they leave
+        the other measurements alone.
+        """
         self.drift_analysis = None
 
     def clear_polarization(self) -> None:
@@ -1759,11 +1764,13 @@ class BurstSession:
         if end - start >= 2:
             self.burst_regions.append((start, end))
             self.invalidate_results()
+            self.clear_drift_analysis()
 
     def clear_regions(self) -> None:
         """Remove every burst sub-region."""
         self.burst_regions = []
         self.invalidate_results()
+        self.clear_drift_analysis()
 
     def add_offpulse_ms(self, start_ms: float, end_ms: float) -> None:
         """Add an off-pulse region, used as the noise reference."""
@@ -1788,6 +1795,7 @@ class BurstSession:
             self.peak_positions.append(peak)
             self.peak_positions.sort()
             self.invalidate_results()
+            self.clear_drift_analysis()
 
     def remove_peak_ms(self, time_ms: float, tolerance_bins: int = 40) -> None:
         """Remove the manually marked peak nearest the given time."""
@@ -1800,6 +1808,7 @@ class BurstSession:
             self.peak_positions.pop(index)
             self.manual_peaks = bool(self.peak_positions)
             self.invalidate_results()
+            self.clear_drift_analysis()
 
     def _mask_batch(self, channels: list[int]) -> None:
         added: list[int] = []
@@ -2623,14 +2632,24 @@ class BurstSession:
             Fit-region and Monte-Carlo controls. When omitted the session's
             stored `drift_settings` are used; when supplied they replace them.
         dm_uncertainty_pc_cm3
-            1-sigma DM uncertainty to fold into the drift uncertainty. Defaults
-            to the DM sweep's own uncertainty when the sweep still describes the
-            applied DM.
+            1-sigma DM uncertainty to fold into the drift uncertainty. It is
+            stored in `drift_settings` so a snapshot replay reproduces the same
+            classification. When neither this nor the stored value is set, the
+            DM sweep's own uncertainty is used if it still describes the applied
+            DM; pass `settings` with `dm_uncertainty_pc_cm3=None` to go back to
+            that fallback.
         """
         if settings is not None:
             self.drift_settings = settings
+        if dm_uncertainty_pc_cm3 is not None:
+            self.drift_settings = replace(
+                self.drift_settings,
+                dm_uncertainty_pc_cm3=abs(float(dm_uncertainty_pc_cm3)),
+            )
         grid, context = self._build_measurement_context_for_data()
-        dm_uncertainty = self._drift_dm_uncertainty() if dm_uncertainty_pc_cm3 is None else float(dm_uncertainty_pc_cm3)
+        dm_uncertainty = self.drift_settings.dm_uncertainty_pc_cm3
+        if dm_uncertainty is None:
+            dm_uncertainty = self._drift_dm_uncertainty()
         self.drift_analysis = run_drift_analysis(
             DriftAnalysisInputs(
                 waterfall=np.asarray(grid.masked, dtype=float),

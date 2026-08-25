@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -178,6 +179,30 @@ class DriftAcfEstimatorTest(unittest.TestCase):
                 deviation = abs(result.drift_rate_mhz_per_ms + 10.0)
                 self.assertLess(deviation, 5.0 * result.drift_rate_statistical_mhz_per_ms)
 
+    def test_an_out_of_range_lag_fraction_is_clamped_rather_than_crashing(self) -> None:
+        """The fraction arrives from the actions API, so it cannot be trusted."""
+        data, time_axis_ms, freqs_mhz = _drifting_burst(-10.0)
+        clamped = run_drift_analysis(
+            _inputs(data, time_axis_ms, freqs_mhz),
+            DriftAnalysisSettings(monte_carlo_trials=0, max_lag_fraction=4.0, min_overlap_fraction=-2.0),
+        )
+        whole_surface = run_drift_analysis(
+            _inputs(data, time_axis_ms, freqs_mhz),
+            DriftAnalysisSettings(monte_carlo_trials=0, max_lag_fraction=1.0, min_overlap_fraction=0.0),
+        )
+        self.assertEqual(clamped.status, "ok")
+        self.assertEqual(clamped.drift_rate_mhz_per_ms, whole_surface.drift_rate_mhz_per_ms)
+
+    def test_a_result_without_an_error_bar_is_not_called_constrained(self) -> None:
+        data, time_axis_ms, freqs_mhz = _drifting_burst(-10.0)
+        result = run_drift_analysis(
+            _inputs(data, time_axis_ms, freqs_mhz),
+            DriftAnalysisSettings(monte_carlo_trials=0),
+        )
+        self.assertEqual(result.status, "ok")
+        self.assertIsNone(result.drift_rate_uncertainty_mhz_per_ms)
+        self.assertEqual(result.drift_rate_status, "unquantified")
+
     def test_short_event_window_is_reported_rather_than_fitted(self) -> None:
         data, time_axis_ms, freqs_mhz = _drifting_burst(-10.0)
         result = run_drift_analysis(
@@ -218,13 +243,15 @@ class DriftAcfEstimatorTest(unittest.TestCase):
         self.assertEqual(result.status, "invalid_axes")
         self.assertIsNone(result.drift_rate_mhz_per_ms)
 
-    def test_a_tiny_float_jitter_on_the_axes_is_tolerated(self) -> None:
-        data, time_axis_ms, freqs_mhz = _drifting_burst(-10.0)
-        jittered = freqs_mhz + np.linspace(-1e-6, 1e-6, freqs_mhz.size)
+    def test_a_float32_frequency_table_is_tolerated(self) -> None:
+        """PSRFITS stores DAT_FREQ as float32; a regular axis still arrives jittered."""
+        data, time_axis_ms, _ = _drifting_burst(-10.0)
+        narrow = np.float64(np.float32(1400.0 + np.arange(N_CHAN, dtype=np.float64) * 0.05))
         result = run_drift_analysis(
-            _inputs(data, time_axis_ms, jittered),
+            _inputs(data, time_axis_ms, narrow),
             DriftAnalysisSettings(monte_carlo_trials=0),
         )
+        self.assertGreater(float(np.max(np.abs(np.diff(narrow) - 0.05))), 0.0)
         self.assertEqual(result.status, "ok")
 
 
@@ -642,6 +669,66 @@ class DriftSessionIntegrationTest(unittest.TestCase):
 
         session.dm_optimization = _dm_optimization_stub(best_dm=session.dm + 5.0, uncertainty=0.4)
         self.assertIsNone(session._drift_dm_uncertainty())
+
+    def test_an_operator_dm_uncertainty_is_stored_so_a_replay_reproduces_it(self) -> None:
+        """The DM uncertainty decides publishability, so it has to survive a snapshot."""
+        session = _drift_session()
+        first = session.run_drift_analysis(
+            settings=DriftAnalysisSettings(monte_carlo_trials=8),
+            dm_uncertainty_pc_cm3=0.05,
+        )
+        self.assertEqual(session.drift_settings.dm_uncertainty_pc_cm3, 0.05)
+
+        restored = BurstSession(
+            config=session.config,
+            metadata=session.metadata,
+            data=session.data,
+            crop_start=session.crop_start,
+            crop_end=session.crop_end,
+            event_start=session.event_start,
+            event_end=session.event_end,
+            spec_ex_lo=session.spec_ex_lo,
+            spec_ex_hi=session.spec_ex_hi,
+            channel_mask=session.channel_mask.copy(),
+        )
+        restored.offpulse_regions = list(session.offpulse_regions)
+        restored.drift_settings = DriftAnalysisSettings.from_dict(session.drift_settings.to_dict())
+        second = restored.run_drift_analysis()
+
+        self.assertEqual(second.dm_uncertainty_pc_cm3, 0.05)
+        self.assertEqual(
+            second.drift_rate_uncertainty_mhz_per_ms,
+            first.drift_rate_uncertainty_mhz_per_ms,
+        )
+        self.assertEqual(
+            second.uncertainty_details["drift_rate_mhz_per_ms"].classification,
+            "formal_1sigma",
+        )
+
+    def test_clearing_the_stored_dm_uncertainty_returns_to_the_sweep(self) -> None:
+        session = _drift_session()
+        session.dm_optimization = _dm_optimization_stub(best_dm=session.dm, uncertainty=0.4)
+        session.run_drift_analysis(
+            settings=DriftAnalysisSettings(monte_carlo_trials=0),
+            dm_uncertainty_pc_cm3=0.05,
+        )
+        cleared = session.run_drift_analysis(settings=replace(session.drift_settings, dm_uncertainty_pc_cm3=None))
+        self.assertEqual(cleared.dm_uncertainty_pc_cm3, 0.4)
+
+    def test_editing_component_regions_discards_a_stale_drift_result(self) -> None:
+        """The component estimator is built from those regions, so it cannot stand."""
+        session = _drift_session()
+        for edit in (
+            lambda: session.add_region_ms(session.bin_to_ms(EVENT_START), session.bin_to_ms(120)),
+            session.clear_regions,
+            lambda: session.add_peak_ms(session.bin_to_ms(128)),
+            lambda: session.remove_peak_ms(session.bin_to_ms(128)),
+        ):
+            with self.subTest(edit=edit):
+                session.run_drift_analysis(settings=DriftAnalysisSettings(monte_carlo_trials=0))
+                self.assertIsNotNone(session.drift_analysis)
+                edit()
+                self.assertIsNone(session.drift_analysis)
 
     def test_explicit_dm_uncertainty_overrides_the_sweep(self) -> None:
         session = _drift_session()

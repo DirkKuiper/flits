@@ -217,7 +217,13 @@ def _uniform_step(values: np.ndarray) -> float:
     step = float(np.mean(steps))
     if step == 0.0:
         return float("nan")
-    if float(np.max(np.abs(steps - step))) > AXIS_UNIFORMITY_TOLERANCE * abs(step):
+    # PSRFITS stores its frequency table as float32, so a perfectly regular axis
+    # still arrives with jitter proportional to the channel frequency rather
+    # than to the channel width. Allow for that before allowing for anything
+    # else, or narrow channels at L band are rejected for being float32.
+    storage_jitter = 4.0 * float(np.finfo(np.float32).eps) * float(np.max(np.abs(axis)))
+    tolerance = max(AXIS_UNIFORMITY_TOLERANCE * abs(step), storage_jitter)
+    if float(np.max(np.abs(steps - step))) > tolerance:
         return float("nan")
     return step
 
@@ -685,8 +691,12 @@ def run_drift_analysis(
         overlap_ratio = np.where(expected_overlap > 0, observed_overlap / expected_overlap, 0.0)
 
     freq_lag_axis, time_lag_axis = _lag_axes(n_freq, n_time, freq_step_mhz, tsamp_ms)
-    max_freq_lag = max(1, int(round(settings.max_lag_fraction * (n_freq - 1))))
-    max_time_lag = max(1, int(round(settings.max_lag_fraction * (n_time - 1))))
+    # Clamped rather than trusted: these arrive from the actions API, and a
+    # fraction above one would index outside the lag surface.
+    lag_fraction = float(np.clip(settings.max_lag_fraction, 0.0, 1.0))
+    overlap_fraction = float(np.clip(settings.min_overlap_fraction, 0.0, 1.0))
+    max_freq_lag = min(n_freq - 1, max(1, int(round(lag_fraction * (n_freq - 1)))))
+    max_time_lag = min(n_time - 1, max(1, int(round(lag_fraction * (n_time - 1)))))
     freq_slice = slice(n_freq - 1 - max_freq_lag, n_freq + max_freq_lag)
     time_slice = slice(n_time - 1 - max_time_lag, n_time + max_time_lag)
 
@@ -695,7 +705,7 @@ def run_drift_analysis(
     region_ratio = overlap_ratio[freq_slice, time_slice]
     freq_grid, time_grid = np.meshgrid(region_freq_lag, region_time_lag, indexing="ij")
 
-    usable = region_ratio >= float(settings.min_overlap_fraction)
+    usable = region_ratio >= overlap_fraction
     if settings.exclude_zero_lag:
         usable[max_freq_lag, max_time_lag] = False
     if int(usable.sum()) < MIN_FIT_PIXELS:
@@ -826,10 +836,13 @@ def run_drift_analysis(
 
     # Significance is judged against the bar FLITS would report, so a drift
     # rate that only survives by ignoring the DM systematic is not called
-    # constrained.
-    drift_status = "ok"
-    if combined_error is not None and np.isfinite(combined_error) and abs(drift) < abs(combined_error):
+    # constrained -- and one with no bar at all is not called anything.
+    if combined_error is None or not np.isfinite(combined_error):
+        drift_status = "unquantified"
+    elif abs(drift) < abs(combined_error):
         drift_status = "unconstrained"
+    else:
+        drift_status = "ok"
 
     uncertainty_details = _build_uncertainty_details(
         statistical_error=statistical_error,

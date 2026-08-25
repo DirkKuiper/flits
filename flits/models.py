@@ -1129,6 +1129,11 @@ class DriftAnalysisSettings:
     monte_carlo_trials: int = 64
     random_seed: int = 20240617
     exclude_zero_lag: bool = True
+    # An operator-supplied 1-sigma DM uncertainty, in pc cm^-3. It lives in the
+    # settings rather than in the call because it is what decides whether the
+    # drift rate is publishable, and a replay that quietly fell back to the DM
+    # sweep would reproduce a different classification from the one recorded.
+    dm_uncertainty_pc_cm3: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1137,6 +1142,7 @@ class DriftAnalysisSettings:
             "monte_carlo_trials": int(self.monte_carlo_trials),
             "random_seed": int(self.random_seed),
             "exclude_zero_lag": bool(self.exclude_zero_lag),
+            "dm_uncertainty_pc_cm3": _float_or_none(self.dm_uncertainty_pc_cm3),
         }
 
     @classmethod
@@ -1150,6 +1156,7 @@ class DriftAnalysisSettings:
             monte_carlo_trials=int(payload.get("monte_carlo_trials", defaults.monte_carlo_trials)),
             random_seed=int(payload.get("random_seed", defaults.random_seed)),
             exclude_zero_lag=bool(payload.get("exclude_zero_lag", defaults.exclude_zero_lag)),
+            dm_uncertainty_pc_cm3=_float_or_none(payload.get("dm_uncertainty_pc_cm3")),
         )
 
 

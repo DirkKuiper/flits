@@ -3343,20 +3343,30 @@ function renderSpectral(view) {
   }
 }
 
+function numericFieldValue(input) {
+  // Number("") is 0 and Number.isFinite(0) is true, so a cleared field would
+  // otherwise be sent as a deliberate zero.
+  const raw = input.value.trim()
+  if (raw === "") return null
+  const value = Number(raw)
+  return Number.isFinite(value) ? value : null
+}
+
 function driftActionPayload() {
-  const payload = {}
-  const dmUncertainty = driftDmUncertaintyInput.value.trim()
-  if (dmUncertainty !== "" && Number.isFinite(Number(dmUncertainty))) {
-    payload.dm_uncertainty_pc_cm3 = Number(dmUncertainty)
+  // The DM uncertainty is always sent: clearing the field is how an operator
+  // goes back to the DM sweep's own uncertainty, so null has to travel.
+  const payload = { dm_uncertainty_pc_cm3: numericFieldValue(driftDmUncertaintyInput) }
+  const trials = numericFieldValue(driftTrialsInput)
+  if (trials !== null) {
+    payload.monte_carlo_trials = Math.max(0, Math.round(trials))
   }
-  if (Number.isFinite(Number(driftTrialsInput.value))) {
-    payload.monte_carlo_trials = Math.max(0, Math.round(Number(driftTrialsInput.value)))
+  const maxLag = numericFieldValue(driftMaxLagInput)
+  if (maxLag !== null) {
+    payload.max_lag_fraction = Math.min(1, Math.max(0.05, maxLag))
   }
-  if (Number.isFinite(Number(driftMaxLagInput.value))) {
-    payload.max_lag_fraction = Number(driftMaxLagInput.value)
-  }
-  if (Number.isFinite(Number(driftSeedInput.value))) {
-    payload.random_seed = Math.round(Number(driftSeedInput.value))
+  const seed = numericFieldValue(driftSeedInput)
+  if (seed !== null) {
+    payload.random_seed = Math.round(seed)
   }
   return payload
 }
@@ -3369,10 +3379,17 @@ function syncDriftSettingsInputs(view) {
   driftTrialsInput.value = String(settings.monte_carlo_trials)
   driftMaxLagInput.value = String(settings.max_lag_fraction)
   driftSeedInput.value = String(settings.random_seed)
-  const measuredDmUncertainty = view?.drift_analysis?.dm_uncertainty_pc_cm3
-  if (measuredDmUncertainty !== null && measuredDmUncertainty !== undefined && driftDmUncertaintyInput.value.trim() === "") {
-    driftDmUncertaintyInput.placeholder = `${fmt(measuredDmUncertainty, 4)} from DM sweep`
-  }
+  driftDmUncertaintyInput.value = (
+    settings.dm_uncertainty_pc_cm3 === null || settings.dm_uncertainty_pc_cm3 === undefined
+      ? ""
+      : String(settings.dm_uncertainty_pc_cm3)
+  )
+  const sweepDmUncertainty = view?.drift_analysis?.dm_uncertainty_pc_cm3
+  driftDmUncertaintyInput.placeholder = (
+    sweepDmUncertainty !== null && sweepDmUncertainty !== undefined && driftDmUncertaintyInput.value === ""
+      ? `${fmt(sweepDmUncertainty, 4)} from DM sweep`
+      : "from DM sweep"
+  )
 }
 
 function driftTooltip(topic) {
@@ -3412,6 +3429,7 @@ function driftRateStatusLabel(status) {
   const labels = {
     ok: "Constrained",
     unconstrained: "Consistent with zero",
+    unquantified: "No uncertainty available",
     unavailable: "Not measured",
   }
   return labels[status] || status || "Unknown"

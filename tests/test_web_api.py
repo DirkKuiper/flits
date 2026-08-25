@@ -1286,6 +1286,50 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual(drift["settings"]["max_lag_fraction"], DriftAnalysisSettings().max_lag_fraction)
         self.assertEqual(drift["dm_uncertainty_pc_cm3"], 0.25)
         self.assertEqual(payload["view"]["drift_settings"]["random_seed"], 77)
+        self.assertEqual(payload["view"]["drift_settings"]["dm_uncertainty_pc_cm3"], 0.25)
+
+    def test_session_action_run_drift_analysis_clears_the_dm_uncertainty_on_an_explicit_null(self) -> None:
+        session_id = "synthetic-drift-clear"
+        session = _synthetic_session()
+        SESSIONS[session_id] = session
+        try:
+            session_action(
+                session_id,
+                ActionRequest(
+                    type="run_drift_analysis",
+                    payload={"monte_carlo_trials": 0, "dm_uncertainty_pc_cm3": 0.5},
+                ),
+            )
+            self.assertEqual(session.drift_settings.dm_uncertainty_pc_cm3, 0.5)
+            payload = session_action(
+                session_id,
+                ActionRequest(
+                    type="run_drift_analysis",
+                    payload={"monte_carlo_trials": 0, "dm_uncertainty_pc_cm3": None},
+                ),
+            )
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        self.assertIsNone(session.drift_settings.dm_uncertainty_pc_cm3)
+        self.assertIsNone(payload["view"]["drift_analysis"]["dm_uncertainty_pc_cm3"])
+
+    def test_session_action_run_drift_analysis_survives_an_out_of_range_lag_fraction(self) -> None:
+        session_id = "synthetic-drift-bad-input"
+        session = _synthetic_session()
+        SESSIONS[session_id] = session
+        try:
+            payload = session_action(
+                session_id,
+                ActionRequest(
+                    type="run_drift_analysis",
+                    payload={"monte_carlo_trials": 0, "max_lag_fraction": 9.0},
+                ),
+            )
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        self.assertEqual(payload["view"]["drift_analysis"]["status"], "ok")
 
     def test_session_action_run_drift_analysis_defaults_to_session_settings(self) -> None:
         from flits.models import DriftAnalysisSettings

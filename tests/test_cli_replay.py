@@ -56,7 +56,10 @@ def drift_snapshot_path(tmp_path: Path, synthetic_waterfall) -> Path:
     session.set_event_ms(100.0, 160.0)
     session.add_offpulse_ms(0.0, 50.0)
     session.compute_properties()
-    session.run_drift_analysis(settings=DriftAnalysisSettings(monte_carlo_trials=8, random_seed=31))
+    session.run_drift_analysis(
+        settings=DriftAnalysisSettings(monte_carlo_trials=8, random_seed=31),
+        dm_uncertainty_pc_cm3=0.05,
+    )
 
     path = tmp_path / "drift_flits_session.json"
     path.write_text(json.dumps(session.snapshot_dict(), indent=2), encoding="utf-8")
@@ -78,6 +81,11 @@ def test_replay_recomputes_the_drift_rate_it_finds_in_a_snapshot(drift_snapshot_
     assert report["drift"]["drift_rate_uncertainty_mhz_per_ms"] == pytest.approx(
         stored["drift_rate_uncertainty_mhz_per_ms"], rel=1e-9, abs=1e-9
     )
+    # The DM uncertainty is what makes the bar publishable, so a replay that
+    # silently fell back to the DM sweep would reproduce a different claim.
+    assert stored["dm_uncertainty_pc_cm3"] == 0.05
+    assert stored["uncertainty_details"]["drift_rate_mhz_per_ms"]["classification"] == "formal_1sigma"
+    assert report["drift"]["drift_rate_status"] == stored["drift_rate_status"]
 
 
 def test_replay_skips_the_drift_rate_when_the_snapshot_has_none(snapshot_path: Path, capsys) -> None:
