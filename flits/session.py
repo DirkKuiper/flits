@@ -81,7 +81,7 @@ except Exception as exc:  # pragma: no cover - optional dependency
     jess = SimpleNamespace(channel_masks=SimpleNamespace(channel_masker=None))
 
 
-SESSION_SNAPSHOT_SCHEMA_VERSION = "1.5"
+SESSION_SNAPSHOT_SCHEMA_VERSION = "1.6"
 SOURCE_HASH_ALGORITHM = "sha256"
 SOURCE_HASH_CHUNK_BYTES = 1024 * 1024
 JESS_MASK_DTYPE = np.float32

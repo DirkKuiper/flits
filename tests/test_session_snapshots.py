@@ -234,7 +234,7 @@ class SessionSnapshotTest(unittest.TestCase):
             )
 
             snapshot = session.to_snapshot()
-            self.assertEqual(snapshot.schema_version, "1.5")
+            self.assertEqual(snapshot.schema_version, "1.6")
             self.assertEqual(snapshot.source.file_name, "snapshot_source.fil")
             self.assertEqual(snapshot.source.content_hash_algorithm, "sha256")
             self.assertIsNotNone(snapshot.source.content_hash_sha256)

@@ -172,7 +172,7 @@ class ExportResultsTest(unittest.TestCase):
         self.assertIn("Dynamic Spectrum (PNG)", labels)
         self.assertIn("DM Curve (PNG)", labels)
         self.assertIn("Power Spectrum (PNG)", labels)
-        self.assertEqual(sum(1 for artifact in preview["artifacts"] if artifact["kind"] == "plot"), 7)
+        self.assertEqual(sum(1 for artifact in preview["artifacts"] if artifact["kind"] == "plot"), 8)
 
         plot_previews = {item["plot_key"]: item for item in preview["plot_previews"]}
         self.assertEqual(
@@ -182,6 +182,7 @@ class ExportResultsTest(unittest.TestCase):
                 "profile_diagnostics",
                 "acf_panel",
                 "faraday_spectrum",
+                "drift_acf",
                 "power_spectrum",
                 "dm_curve",
                 "dm_residuals",
@@ -191,6 +192,7 @@ class ExportResultsTest(unittest.TestCase):
         self.assertEqual(plot_previews["dm_curve"]["status"], "ready")
         self.assertEqual(plot_previews["power_spectrum"]["status"], "omitted")
         self.assertEqual(plot_previews["faraday_spectrum"]["status"], "omitted")
+        self.assertEqual(plot_previews["drift_acf"]["status"], "omitted")
         self.assertFalse(session.export_snapshots)
 
     def test_preview_omissions_match_built_export_selection(self) -> None:
@@ -207,6 +209,7 @@ class ExportResultsTest(unittest.TestCase):
         self.assertEqual(preview_artifacts["DM Curve (PNG)"]["reason"], "dm_optimization_unavailable")
         self.assertEqual(preview_artifacts["DM Residuals (PNG)"]["reason"], "dm_optimization_unavailable")
         self.assertEqual(preview_artifacts["Power Spectrum (PNG)"]["reason"], "temporal_structure_unavailable")
+        self.assertEqual(preview_artifacts["Drift ACF (PNG)"]["reason"], "drift_analysis_unavailable")
 
         manifest = session_action(
             session_id,
@@ -363,7 +366,7 @@ class ExportResultsTest(unittest.TestCase):
 
         manifest = payload["export_manifest"]
         self.assertIsNotNone(manifest)
-        self.assertEqual(manifest["schema_version"], "1.7")
+        self.assertEqual(manifest["schema_version"], "1.8")
         artifact_names = {artifact["name"] for artifact in manifest["artifacts"]}
         self.assertTrue(any(name.endswith("_science.json") for name in artifact_names))
         self.assertTrue(any(name.endswith("_catalog.csv") for name in artifact_names))
@@ -551,6 +554,91 @@ class ExportResultsTest(unittest.TestCase):
 
         newest_manifest = session_export_manifest(session_id, export_ids[-1])
         self.assertEqual(newest_manifest["export_id"], export_ids[-1])
+
+
+class DriftExportTest(unittest.TestCase):
+    def setUp(self) -> None:
+        SESSIONS.clear()
+
+    def tearDown(self) -> None:
+        SESSIONS.clear()
+
+    def _measured_session(self) -> tuple[str, BurstSession]:
+        from flits.models import DriftAnalysisSettings
+
+        session_id = "synthetic-export-drift"
+        session = _synthetic_export_session(num_channels=64)
+        session.set_dm(50.0)
+        session.compute_properties()
+        session.run_drift_analysis(settings=DriftAnalysisSettings(monte_carlo_trials=0))
+        SESSIONS[session_id] = session
+        return session_id, session
+
+    def test_science_json_and_catalog_csv_carry_the_drift_rate(self) -> None:
+        session_id, session = self._measured_session()
+        assert session.drift_analysis is not None
+        self.assertEqual(session.drift_analysis.status, "ok")
+
+        manifest = session_action(
+            session_id,
+            ActionRequest(type="export_results", payload={"include": ["json", "csv", "npz"]}),
+        )["export_manifest"]
+        names = {artifact["name"] for artifact in manifest["artifacts"]}
+
+        json_name = next(name for name in names if name.endswith("_science.json"))
+        science = json.loads(session_export_artifact(session_id, manifest["export_id"], json_name).body.decode("utf-8"))
+        self.assertIsNotNone(science["drift_analysis"])
+        self.assertEqual(science["drift_analysis"]["status"], "ok")
+        self.assertIn("dm_equivalent_pc_cm3", science["drift_analysis"])
+        self.assertIn("uncertainty_details", science["drift_analysis"])
+
+        csv_name = next(name for name in names if name.endswith("_catalog.csv"))
+        csv_text = session_export_artifact(session_id, manifest["export_id"], csv_name).body.decode("utf-8")
+        header, values = csv_text.splitlines()[0].split(","), csv_text.splitlines()[1]
+        for column in (
+            "drift_rate_mhz_per_ms",
+            "drift_rate_uncertainty_mhz_per_ms",
+            "drift_dm_equivalent_pc_cm3",
+            "drift_rate_mhz_per_ms_uncertainty_class",
+            "drift_warning_flags",
+        ):
+            self.assertIn(column, header)
+        drift_index = header.index("drift_rate_mhz_per_ms")
+        self.assertNotEqual(values.split(",")[drift_index], "")
+
+        npz_name = next(name for name in names if name.endswith("_diagnostics.npz"))
+        arrays = np.load(
+            io.BytesIO(session_export_artifact(session_id, manifest["export_id"], npz_name).body),
+            allow_pickle=False,
+        )
+        self.assertEqual(arrays["drift_acf"].ndim, 2)
+        self.assertEqual(
+            arrays["drift_acf"].shape,
+            (arrays["drift_acf_lag_freq_mhz"].size, arrays["drift_acf_lag_time_ms"].size),
+        )
+        self.assertEqual(str(arrays["drift_status"][0]), "ok")
+        self.assertTrue(np.isfinite(arrays["drift_rate_mhz_per_ms"][0]))
+
+    def test_drift_plot_is_ready_once_the_drift_rate_is_measured(self) -> None:
+        session_id, _ = self._measured_session()
+        preview = session_action(
+            session_id,
+            ActionRequest(type="preview_export_results", payload={"include": ["plots"], "plot_formats": ["svg"]}),
+        )["export_preview"]
+        previews = {item["plot_key"]: item for item in preview["plot_previews"]}
+        self.assertEqual(previews["drift_acf"]["status"], "ready")
+        self.assertTrue(previews["drift_acf"]["svg"].lstrip().startswith("<svg"))
+
+    def test_drift_plot_is_omitted_when_no_drift_rate_was_measured(self) -> None:
+        session_id = "synthetic-export-drift-missing"
+        SESSIONS[session_id] = _synthetic_export_session()
+        preview = session_action(
+            session_id,
+            ActionRequest(type="preview_export_results", payload={"include": ["plots"], "plot_formats": ["svg"]}),
+        )["export_preview"]
+        previews = {item["plot_key"]: item for item in preview["plot_previews"]}
+        self.assertEqual(previews["drift_acf"]["status"], "omitted")
+        self.assertEqual(previews["drift_acf"]["reason"], "drift_analysis_unavailable")
 
 
 if __name__ == "__main__":

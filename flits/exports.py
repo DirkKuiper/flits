@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from flits.session import BurstSession
 
 
-EXPORT_SCHEMA_VERSION = "1.7"
+EXPORT_SCHEMA_VERSION = "1.8"
 DEFAULT_EXPORT_INCLUDE = ("json", "csv", "npz", "plots")
 DEFAULT_PLOT_FORMATS = ("png", "svg")
 DEFAULT_WINDOW_FORMATS = ("npz",)
@@ -90,6 +90,7 @@ class ExportSnapshotData:
     width_analysis: dict[str, Any] | None
     dm_optimization: dict[str, Any] | None
     temporal_structure: dict[str, Any] | None
+    drift_analysis: dict[str, Any] | None
     polarization: dict[str, Any] | None
     dynamic_spectrum: np.ndarray
     time_axis_ms: np.ndarray
@@ -370,6 +371,7 @@ def _build_snapshot_data(session: BurstSession) -> ExportSnapshotData:
         width_analysis=session.width_analysis.to_dict() if session.width_analysis is not None else None,
         dm_optimization=session.dm_optimization.to_dict() if session.dm_optimization is not None else None,
         temporal_structure=(session.temporal_structure.to_dict() if session.temporal_structure is not None else None),
+        drift_analysis=(session.drift_analysis.to_dict() if session.drift_analysis is not None else None),
         polarization=(session.polarization.to_dict() if session.polarization is not None else None),
         dynamic_spectrum=np.asarray(grid.masked, dtype=float),
         time_axis_ms=np.asarray(context.time_axis_ms, dtype=float),
@@ -783,6 +785,19 @@ def _plot_plan(snapshot: ExportSnapshotData) -> list[PlotPlan]:
             )
         )
 
+    drift = snapshot.drift_analysis or {}
+    if drift.get("status") == "ok" and len(drift.get("acf", []) or []) > 0:
+        plots.append(PlotPlan(key="drift_acf", title="Drift ACF", status="ready", reason=None))
+    else:
+        plots.append(
+            PlotPlan(
+                key="drift_acf",
+                title="Drift ACF",
+                status="omitted",
+                reason="drift_analysis_unavailable",
+            )
+        )
+
     temporal = snapshot.temporal_structure or {}
     if (
         snapshot.temporal_structure is not None
@@ -1029,6 +1044,7 @@ def _build_science_json(snapshot: ExportSnapshotData, manifest: ExportManifest) 
         "width_analysis": snapshot.width_analysis,
         "dm_optimization": snapshot.dm_optimization,
         "temporal_structure": snapshot.temporal_structure,
+        "drift_analysis": snapshot.drift_analysis,
         "polarization": snapshot.polarization,
         "artifacts": manifest.to_dict()["artifacts"],
     }
@@ -1041,9 +1057,11 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
     accepted_width = width_analysis.get("accepted_width") or results.get("accepted_width") or {}
     dm = snapshot.dm_optimization or {}
     temporal = snapshot.temporal_structure or {}
+    drift = snapshot.drift_analysis or {}
     result_uncertainty_details = results.get("uncertainty_details") or {}
     dm_uncertainty_details = dm.get("uncertainty_details") or {}
     temporal_uncertainty_details = temporal.get("uncertainty_details") or {}
+    drift_uncertainty_details = drift.get("uncertainty_details") or {}
     polarization = snapshot.polarization or {}
     rm_synthesis = polarization.get("rm_synthesis") or {}
 
@@ -1099,6 +1117,26 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         "psd_crossover_frequency_hz_3sigma_low": temporal.get("crossover_frequency_hz_3sigma_low", ""),
         "psd_crossover_frequency_hz_3sigma_high": temporal.get("crossover_frequency_hz_3sigma_high", ""),
         "noise_psd_segment_count": temporal.get("noise_psd_segment_count", ""),
+        "drift_status": drift.get("status", ""),
+        "drift_method": drift.get("method", ""),
+        "drift_rate_mhz_per_ms": drift.get("drift_rate_mhz_per_ms", ""),
+        "drift_rate_uncertainty_mhz_per_ms": drift.get("drift_rate_uncertainty_mhz_per_ms", ""),
+        "drift_rate_status": drift.get("drift_rate_status", ""),
+        "drift_rate_statistical_mhz_per_ms": drift.get("drift_rate_statistical_mhz_per_ms", ""),
+        "drift_rate_dm_systematic_mhz_per_ms": drift.get("drift_rate_dm_systematic_mhz_per_ms", ""),
+        "drift_dm_pc_cm3": drift.get("dm_pc_cm3", ""),
+        "drift_dm_uncertainty_pc_cm3": drift.get("dm_uncertainty_pc_cm3", ""),
+        "drift_dm_sensitivity_mhz_per_ms_per_pc_cm3": drift.get("dm_sensitivity_mhz_per_ms_per_pc_cm3", ""),
+        "drift_dm_equivalent_pc_cm3": drift.get("dm_equivalent_pc_cm3", ""),
+        "drift_reference_frequency_mhz": drift.get("reference_frequency_mhz", ""),
+        "drift_acf_sigma_time_ms": drift.get("acf_sigma_time_ms", ""),
+        "drift_acf_sigma_freq_mhz": drift.get("acf_sigma_freq_mhz", ""),
+        "drift_acf_major_axis_slope_mhz_per_ms": drift.get("acf_major_axis_slope_mhz_per_ms", ""),
+        "drift_component_rate_mhz_per_ms": drift.get("component_drift_rate_mhz_per_ms", ""),
+        "drift_component_uncertainty_mhz_per_ms": drift.get("component_drift_uncertainty_mhz_per_ms", ""),
+        "drift_component_status": drift.get("component_drift_status", ""),
+        "drift_component_r_squared": drift.get("component_drift_r_squared", ""),
+        "drift_warning_flags": _join_list(drift.get("warning_flags", [])),
         "event_window_start_ms": snapshot.state.get("event_ms", ["", ""])[0],
         "event_window_end_ms": snapshot.state.get("event_ms", ["", ""])[1],
         "spectral_extent_start_mhz": snapshot.state.get("spectral_extent_mhz", ["", ""])[0],
@@ -1167,6 +1205,13 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
     row.update(uncertainty_columns("psd_alpha", temporal_uncertainty_details.get("power_law_alpha")))
     row.update(
         uncertainty_columns("psd_crossover_frequency_hz", temporal_uncertainty_details.get("crossover_frequency_hz"))
+    )
+    row.update(uncertainty_columns("drift_rate_mhz_per_ms", drift_uncertainty_details.get("drift_rate_mhz_per_ms")))
+    row.update(
+        uncertainty_columns(
+            "drift_component_rate_mhz_per_ms",
+            drift_uncertainty_details.get("component_drift_rate_mhz_per_ms"),
+        )
     )
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=list(row))
@@ -1289,6 +1334,44 @@ def _build_diagnostics_npz(snapshot: ExportSnapshotData) -> bytes:
             dtype=str,
         )
 
+    if snapshot.drift_analysis is not None:
+        drift = snapshot.drift_analysis
+        payload["drift_acf"] = np.asarray(drift.get("acf", []), dtype=float)
+        payload["drift_acf_model"] = np.asarray(drift.get("acf_model", []), dtype=float)
+        for key in (
+            "acf_lag_time_ms",
+            "acf_lag_freq_mhz",
+            "component_times_ms",
+            "component_freqs_mhz",
+            "component_freq_uncertainty_mhz",
+        ):
+            payload[f"drift_{key}"] = np.asarray(drift.get(key, []), dtype=float)
+        for key in (
+            "drift_rate_mhz_per_ms",
+            "drift_rate_uncertainty_mhz_per_ms",
+            "drift_rate_statistical_mhz_per_ms",
+            "drift_rate_dm_systematic_mhz_per_ms",
+            "dm_sensitivity_mhz_per_ms_per_pc_cm3",
+            "dm_equivalent_pc_cm3",
+            "dm_pc_cm3",
+            "dm_uncertainty_pc_cm3",
+            "reference_frequency_mhz",
+            "acf_sigma_time_ms",
+            "acf_sigma_freq_mhz",
+            "acf_correlation",
+            "acf_major_axis_slope_mhz_per_ms",
+            "component_drift_rate_mhz_per_ms",
+            "component_drift_uncertainty_mhz_per_ms",
+        ):
+            value = drift.get(key)
+            name = key if key.startswith("drift_") else f"drift_{key}"
+            payload[name] = np.asarray([np.nan if value is None else value], dtype=float)
+        payload["drift_status"] = np.asarray([drift.get("status", "unavailable")], dtype=str)
+        payload["drift_rate_status"] = np.asarray([drift.get("drift_rate_status", "unavailable")], dtype=str)
+        payload["drift_component_status"] = np.asarray([drift.get("component_drift_status", "unavailable")], dtype=str)
+        payload["drift_component_labels"] = np.asarray(drift.get("component_labels", []), dtype=str)
+        payload["drift_warning_flags"] = np.asarray(drift.get("warning_flags", []), dtype=str)
+
     buffer = io.BytesIO()
     np.savez_compressed(buffer, **payload)
     return buffer.getvalue()
@@ -1366,6 +1449,8 @@ def _plot_figure(snapshot: ExportSnapshotData, plot_key: str) -> plt.Figure:
         return _dm_residuals_figure(snapshot)
     if plot_key == "faraday_spectrum":
         return _faraday_spectrum_figure(snapshot)
+    if plot_key == "drift_acf":
+        return _drift_acf_figure(snapshot)
     raise ValueError(f"Unsupported export plot: {plot_key}")
 
 
@@ -1674,6 +1759,62 @@ def _faraday_spectrum_figure(snapshot: ExportSnapshotData) -> plt.Figure:
     bottom.legend(frameon=False, loc="best")
     _style_export_axis(bottom)
     return fig
+
+
+def _drift_acf_figure(snapshot: ExportSnapshotData) -> plt.Figure:
+    """The 2D autocorrelation with the fitted ellipse axis drawn over it."""
+    drift = snapshot.drift_analysis or {}
+    acf = np.asarray(drift.get("acf", []), dtype=float)
+    time_lags = np.asarray(drift.get("acf_lag_time_ms", []), dtype=float)
+    freq_lags = np.asarray(drift.get("acf_lag_freq_mhz", []), dtype=float)
+
+    fig, ax = plt.subplots(figsize=(8.0, 5.6), constrained_layout=True)
+    if acf.ndim == 2 and acf.size and time_lags.size and freq_lags.size:
+        order = np.argsort(freq_lags)
+        low, high = _robust_limits(acf)
+        image = ax.imshow(
+            acf[order, :],
+            aspect="auto",
+            origin="lower",
+            interpolation="nearest",
+            cmap=ASTROFLASH_HEATMAP_CMAP,
+            vmin=low,
+            vmax=high,
+            extent=(
+                float(time_lags[0]),
+                float(time_lags[-1]),
+                float(freq_lags[order][0]),
+                float(freq_lags[order][-1]),
+            ),
+        )
+        colorbar = fig.colorbar(image, ax=ax, pad=0.01, label="Autocorrelation (arb.)")
+        _style_colorbar(colorbar)
+
+        drift_rate = drift.get("drift_rate_mhz_per_ms")
+        if drift_rate is not None and np.isfinite(float(drift_rate)):
+            ax.plot(
+                time_lags,
+                float(drift_rate) * time_lags,
+                color=ASTROFLASH_COLORS["crossover"],
+                linewidth=1.6,
+                label=_drift_legend_label(drift),
+            )
+            ax.set_ylim(float(freq_lags[order][0]), float(freq_lags[order][-1]))
+            ax.legend(frameon=False, loc="upper right")
+
+    ax.set_title("Drift ACF")
+    ax.set_xlabel("Time lag (ms)")
+    ax.set_ylabel("Frequency lag (MHz)")
+    _style_export_axis(ax, grid=False)
+    return fig
+
+
+def _drift_legend_label(drift: dict[str, Any]) -> str:
+    rate = float(drift.get("drift_rate_mhz_per_ms", np.nan))
+    uncertainty = drift.get("drift_rate_uncertainty_mhz_per_ms")
+    if uncertainty is None or not np.isfinite(float(uncertainty)):
+        return f"Drift {rate:+.3g} MHz/ms"
+    return f"Drift {rate:+.3g} ± {float(uncertainty):.2g} MHz/ms"
 
 
 def _sorted_frequency_data(freq_axis_mhz: np.ndarray, data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
