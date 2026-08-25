@@ -167,3 +167,68 @@ def test_export_panel_can_build_a_bundle(page, synthetic_waterfall) -> None:
 
     expect(page.locator("#exportManifestContent")).not_to_be_empty()
     assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
+
+
+def _apply_exact_selection(page, mode: str, start_ms: float, end_ms: float) -> None:
+    """Set a selection through the keyboard-accessible controls.
+
+    Clicking coordinates in the plot is what a user does, but it makes the
+    selection depend on the rendered geometry. These tests need an exact,
+    repeatable event window and off-pulse span, so they use the numeric path.
+    """
+    page.evaluate("document.querySelector('#exactSelectionDetails').open = true")
+    page.select_option("#exactSelectionMode", mode)
+    page.fill("#exactStartInput", str(start_ms))
+    page.fill("#exactEndInput", str(end_ms))
+    page.click("#applyExactSelectionButton")
+    page.wait_for_timeout(500)
+
+
+def test_polarization_panel_explains_a_stokes_i_only_burst(page, synthetic_waterfall) -> None:
+    _load_session(page, synthetic_waterfall)
+
+    page.click("#analysisPolarizationTab")
+    expect(page.locator("#analysisPolarizationPanel")).to_be_visible()
+
+    status = page.locator("#sessionPolarizationStatus")
+    expect(status).to_contain_text("fewer than four polarization products", timeout=30_000)
+    expect(page.locator("#sessionPolRunButton")).to_be_disabled()
+
+    assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
+
+
+def test_measuring_the_rotation_measure_from_the_session(full_stokes_waterfall, page) -> None:
+    """The whole point of #92: file in, Faraday depth out, without leaving FLITS.
+
+    `full_stokes_waterfall` is requested before `page` so the file exists in the
+    served directory before the interface fetches its listing.
+    """
+    page.select_option("#fileSelect", label=full_stokes_waterfall.path.name)
+    # Preset detection is asynchronous, and the NRT preset is what establishes
+    # the polarization basis for a filterbank. Let it land before loading.
+    expect(page.locator("#telescopeInput")).to_have_value("nrt", timeout=30_000)
+    _load_session(page, full_stokes_waterfall)
+
+    burst_ms = full_stokes_waterfall.burst_time_idx * full_stokes_waterfall.tsamp_s * 1e3
+    span_ms = full_stokes_waterfall.ntime * full_stokes_waterfall.tsamp_s * 1e3
+    _apply_exact_selection(page, "event", burst_ms - 10.0, burst_ms + 10.0)
+    _apply_exact_selection(page, "offpulse", 10.0, burst_ms - 60.0)
+    _apply_exact_selection(page, "offpulse", burst_ms + 60.0, span_ms - 10.0)
+
+    page.click("#analysisPolarizationTab")
+    expect(page.locator("#analysisPolarizationPanel")).to_be_visible()
+
+    status = page.locator("#sessionPolarizationStatus")
+    expect(status).to_contain_text("4 polarization products", timeout=30_000)
+    expect(status).to_contain_text("coherency linear")
+
+    page.fill("#sessionPolMinSnrInput", "3")
+    page.click("#sessionPolRunButton")
+
+    content = page.locator("#rmContent")
+    expect(content).to_contain_text("Peak Faraday Depth", timeout=60_000)
+    expect(content).to_contain_text("Measured from the session")
+    expect(content).to_contain_text("calibration is unconfirmed")
+    expect(page.locator("#rmPlot")).to_be_visible()
+
+    assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
