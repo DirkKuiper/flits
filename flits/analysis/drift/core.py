@@ -48,6 +48,9 @@ MIN_COMPONENTS = 2
 HEAVILY_MASKED_FRACTION = 0.25
 LOW_CONTRAST_RATIO = 3.0
 MAX_SERIALIZED_ACF_BINS = 129
+# Relative spread the time and frequency axes may show before FLITS refuses to
+# treat them as uniformly sampled.
+AXIS_UNIFORMITY_TOLERANCE = 1e-3
 
 # Dispersion delay in milliseconds: t(nu) = DM_DELAY_MS_MHZ2 * DM * nu^-2.
 DM_DELAY_MS_MHZ2 = 1e3 * DM_CONSTANT_S_MHZ2
@@ -199,15 +202,24 @@ def _failure(
 
 
 def _uniform_step(values: np.ndarray) -> float:
-    """Signed spacing of a monotonic axis, or NaN when it is not usable."""
+    """Signed spacing of a uniform axis, or NaN when the axis is not usable.
+
+    The lag axes of the autocorrelation are index counts multiplied by this
+    spacing, so a non-uniform axis would silently mislabel every lag. Rather
+    than average over it, report it as unusable.
+    """
     axis = np.asarray(values, dtype=float)
     if axis.size < 2:
         return float("nan")
     steps = np.diff(axis)
-    finite = steps[np.isfinite(steps)]
-    if finite.size == 0:
+    if not np.all(np.isfinite(steps)):
         return float("nan")
-    return float(np.mean(finite))
+    step = float(np.mean(steps))
+    if step == 0.0:
+        return float("nan")
+    if float(np.max(np.abs(steps - step))) > AXIS_UNIFORMITY_TOLERANCE * abs(step):
+        return float("nan")
+    return step
 
 
 def _channel_statistics(
@@ -600,8 +612,9 @@ def run_drift_analysis(
     freqs_mhz = np.asarray(inputs.freqs_mhz, dtype=float)
 
     spec_lo, spec_hi = sorted((int(inputs.spec_lo), int(inputs.spec_hi)))
-    event_start = max(0, int(inputs.event_rel_start))
-    event_end = min(waterfall.shape[1] if waterfall.ndim == 2 else 0, int(inputs.event_rel_end))
+    time_bins = int(min(waterfall.shape[1], time_axis_ms.size)) if waterfall.ndim == 2 else 0
+    event_start = max(0, min(int(inputs.event_rel_start), time_bins))
+    event_end = max(event_start, min(time_bins, int(inputs.event_rel_end)))
 
     tsamp_ms = _uniform_step(time_axis_ms)
     freq_step_mhz = _uniform_step(freqs_mhz)
@@ -629,18 +642,25 @@ def run_drift_analysis(
     if waterfall.ndim != 2 or waterfall.size == 0:
         return fail("insufficient_signal", "The selection does not contain a dynamic spectrum to correlate.")
     if not np.isfinite(tsamp_ms) or tsamp_ms <= 0 or not np.isfinite(freq_step_mhz) or freq_step_mhz == 0:
-        return fail("invalid_axes", "The time and frequency axes must both be uniform and non-degenerate.")
+        return fail(
+            "invalid_axes",
+            "The time and frequency axes must both be uniformly sampled and non-degenerate. The autocorrelation "
+            "lag axes are index counts scaled by one sample, so an irregular axis would mislabel every lag.",
+        )
     if event_end - event_start < MIN_TIME_BINS:
         return fail(
             "insufficient_time_bins",
-            f"The event window spans fewer than {MIN_TIME_BINS} time bins, which cannot constrain a 2D fit.",
+            f"The event window spans {event_end - event_start} time bins at the current time decimation, "
+            f"and a 2D fit needs at least {MIN_TIME_BINS}. Reduce the time decimation or widen the event window.",
         )
 
     selected = np.asarray(waterfall[spec_lo : spec_hi + 1, :], dtype=float)
     if selected.shape[0] < MIN_ACTIVE_CHANNELS:
         return fail(
             "insufficient_channels",
-            f"The spectral selection spans fewer than {MIN_ACTIVE_CHANNELS} channels.",
+            f"The spectral selection spans {selected.shape[0]} channels at the current frequency decimation, "
+            f"and a 2D fit needs at least {MIN_ACTIVE_CHANNELS}. Reduce the frequency decimation or widen the "
+            "spectral window.",
         )
 
     baseline, sigma, noise_basis = _channel_statistics(selected, np.asarray(inputs.offpulse_bins, dtype=int))
@@ -652,7 +672,9 @@ def run_drift_analysis(
     if active_count < MIN_ACTIVE_CHANNELS:
         return fail(
             "insufficient_channels",
-            f"Fewer than {MIN_ACTIVE_CHANNELS} channels survive masking inside the event window.",
+            f"Only {active_count} channels survive masking inside the event window, and a 2D fit needs at least "
+            f"{MIN_ACTIVE_CHANNELS}.",
+            ("heavily_masked",),
         )
 
     field = np.where(valid, event_block, 0.0)
@@ -802,13 +824,11 @@ def run_drift_analysis(
     transport = np.ix_(freq_indices, time_indices)
     model_surface = _gaussian_2d_model((time_grid, freq_grid), *popt)
 
+    # Significance is judged against the bar FLITS would report, so a drift
+    # rate that only survives by ignoring the DM systematic is not called
+    # constrained.
     drift_status = "ok"
-    if (
-        statistical_error is not None
-        and np.isfinite(statistical_error)
-        and drift != 0
-        and abs(drift) < abs(statistical_error)
-    ):
+    if combined_error is not None and np.isfinite(combined_error) and abs(drift) < abs(combined_error):
         drift_status = "unconstrained"
 
     uncertainty_details = _build_uncertainty_details(

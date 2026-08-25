@@ -204,6 +204,28 @@ class DriftAcfEstimatorTest(unittest.TestCase):
             DriftAnalysisSettings(monte_carlo_trials=0),
         )
         self.assertEqual(result.status, "insufficient_channels")
+        self.assertIn("heavily_masked", result.warning_flags)
+
+    def test_a_non_uniform_frequency_axis_is_refused_rather_than_averaged(self) -> None:
+        """The lag axis is index counts times one channel width, so it must be uniform."""
+        data, time_axis_ms, freqs_mhz = _drifting_burst(-10.0)
+        irregular = freqs_mhz.copy()
+        irregular[N_CHAN // 2 :] += 40.0
+        result = run_drift_analysis(
+            _inputs(data, time_axis_ms, irregular),
+            DriftAnalysisSettings(monte_carlo_trials=0),
+        )
+        self.assertEqual(result.status, "invalid_axes")
+        self.assertIsNone(result.drift_rate_mhz_per_ms)
+
+    def test_a_tiny_float_jitter_on_the_axes_is_tolerated(self) -> None:
+        data, time_axis_ms, freqs_mhz = _drifting_burst(-10.0)
+        jittered = freqs_mhz + np.linspace(-1e-6, 1e-6, freqs_mhz.size)
+        result = run_drift_analysis(
+            _inputs(data, time_axis_ms, jittered),
+            DriftAnalysisSettings(monte_carlo_trials=0),
+        )
+        self.assertEqual(result.status, "ok")
 
 
 class DriftDmDegeneracyTest(unittest.TestCase):
@@ -289,6 +311,15 @@ class DriftDmDegeneracyTest(unittest.TestCase):
         self.assertFalse(detail.is_formal_1sigma)
         self.assertIn("missing_dm_uncertainty", result.warning_flags)
         self.assertIsNone(result.drift_rate_dm_systematic_mhz_per_ms)
+
+    def test_significance_is_judged_against_the_bar_flits_would_report(self) -> None:
+        """A DM systematic that swamps the drift must not leave it called constrained."""
+        data, time_axis_ms, freqs_mhz = _drifting_burst(-10.0, noise=0.3, seed=5)
+        settings = DriftAnalysisSettings(monte_carlo_trials=8)
+        constrained = run_drift_analysis(_inputs(data, time_axis_ms, freqs_mhz, dm_uncertainty_pc_cm3=0.05), settings)
+        swamped = run_drift_analysis(_inputs(data, time_axis_ms, freqs_mhz, dm_uncertainty_pc_cm3=200.0), settings)
+        self.assertEqual(constrained.drift_rate_status, "ok")
+        self.assertEqual(swamped.drift_rate_status, "unconstrained")
 
     def test_a_dm_uncertainty_promotes_the_drift_and_inflates_the_bar(self) -> None:
         data, time_axis_ms, freqs_mhz = _drifting_burst(-10.0, noise=0.3, seed=5)
