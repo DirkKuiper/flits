@@ -497,6 +497,109 @@ def write_full_stokes_folded_psrfits(
     )
 
 
+@dataclass(frozen=True)
+class DriftingWaterfall:
+    """A SIGPROC filterbank holding a burst with a known sub-burst drift rate."""
+
+    path: Path
+    drift_mhz_per_ms: float
+    sigma_time_ms: float
+    sigma_freq_mhz: float
+    centre_time_ms: float
+    centre_freq_mhz: float
+    nchan: int
+    ntime: int
+    fch1_mhz: float
+    foff_mhz: float
+    tsamp_s: float
+
+
+_DRIFT_NCHAN = 128
+_DRIFT_NTIME = 512
+_DRIFT_TSAMP_S = 2e-4
+_DRIFT_FCH1_MHZ = 1500.0
+_DRIFT_FOFF_MHZ = -1.0
+
+
+def write_drifting_filterbank(
+    path: Path,
+    *,
+    drift_mhz_per_ms: float = -8.0,
+    sigma_time_ms: float = 1.5,
+    sigma_freq_mhz: float = 25.0,
+    amplitude: float = 40.0,
+    noise_std: float = 1.0,
+    rng_seed: int = 23,
+) -> DriftingWaterfall:
+    """Write a burst whose emission centroid drifts at a known rate.
+
+    The burst is built from a covariance matrix rather than a rotation angle, so
+    the injected truth is the same quantity FLITS reports: for a bivariate
+    Gaussian the conditional mean has slope ``Sigma_{f,t} / Sigma_{t,t}``.
+    """
+    from flits.io.sigproc import SigprocFilterbankHeader, build_sigproc_filterbank_bytes
+
+    correlation = drift_mhz_per_ms * sigma_time_ms / sigma_freq_mhz
+    if abs(correlation) >= 1.0:
+        raise ValueError("the requested drift is steeper than the burst extent allows")
+
+    freqs = _DRIFT_FCH1_MHZ + _DRIFT_FOFF_MHZ * np.arange(_DRIFT_NCHAN, dtype=float)
+    times_ms = np.arange(_DRIFT_NTIME, dtype=float) * _DRIFT_TSAMP_S * 1e3
+    centre_time_ms = float(times_ms[_DRIFT_NTIME // 2])
+    centre_freq_mhz = float(np.mean(freqs))
+
+    covariance = np.array(
+        [
+            [sigma_time_ms**2, correlation * sigma_time_ms * sigma_freq_mhz],
+            [correlation * sigma_time_ms * sigma_freq_mhz, sigma_freq_mhz**2],
+        ]
+    )
+    inverse = np.linalg.inv(covariance)
+    time_grid, freq_grid = np.meshgrid(times_ms - centre_time_ms, freqs - centre_freq_mhz, indexing="xy")
+    quadratic = (
+        inverse[0, 0] * time_grid**2 + 2.0 * inverse[0, 1] * time_grid * freq_grid + inverse[1, 1] * freq_grid**2
+    )
+
+    rng = np.random.default_rng(rng_seed)
+    data = amplitude * np.exp(-0.5 * quadratic) + rng.normal(0.0, noise_std, size=(_DRIFT_NCHAN, _DRIFT_NTIME))
+
+    header = SigprocFilterbankHeader(
+        rawdatafile=path.name,
+        source_name="DRIFT_TEST",
+        nchans=_DRIFT_NCHAN,
+        foff=_DRIFT_FOFF_MHZ,
+        fch1=_DRIFT_FCH1_MHZ,
+        tsamp=_DRIFT_TSAMP_S,
+        tstart=60000.0,
+        telescope_id=0,
+        machine_id=0,
+        src_raj=123456.78,
+        src_dej=-123456.78,
+        nbits=32,
+        nifs=1,
+    )
+    path.write_bytes(build_sigproc_filterbank_bytes(data.astype(np.float32), header))
+    return DriftingWaterfall(
+        path=path,
+        drift_mhz_per_ms=drift_mhz_per_ms,
+        sigma_time_ms=sigma_time_ms,
+        sigma_freq_mhz=sigma_freq_mhz,
+        centre_time_ms=centre_time_ms,
+        centre_freq_mhz=centre_freq_mhz,
+        nchan=_DRIFT_NCHAN,
+        ntime=_DRIFT_NTIME,
+        fch1_mhz=_DRIFT_FCH1_MHZ,
+        foff_mhz=_DRIFT_FOFF_MHZ,
+        tsamp_s=_DRIFT_TSAMP_S,
+    )
+
+
+@pytest.fixture
+def drifting_waterfall(tmp_path: Path) -> DriftingWaterfall:
+    """A burst whose sub-burst drift rate is known exactly."""
+    return write_drifting_filterbank(tmp_path / "drifting.fil")
+
+
 @pytest.fixture
 def full_stokes_waterfall(tmp_path: Path) -> FullStokesWaterfall:
     """A four-IF burst whose rotation measure is known exactly."""

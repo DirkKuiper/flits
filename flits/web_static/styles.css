@@ -1088,6 +1088,16 @@ button.is-busy::after {
   min-height: clamp(500px, 45vw, 620px);
 }
 
+.drift-acf-plot {
+  height: clamp(420px, 40vw, 520px);
+  min-height: clamp(420px, 40vw, 520px);
+}
+
+.drift-component-plot {
+  height: clamp(320px, 30vw, 400px);
+  min-height: clamp(320px, 30vw, 400px);
+}
+
 .fitting-plot {
   height: 340px;
   min-height: 340px;
@@ -2135,6 +2145,16 @@ button.is-busy::after {
     min-height: 380px;
   }
 
+  .drift-acf-plot {
+    height: 380px;
+    min-height: 380px;
+  }
+
+  .drift-component-plot {
+    height: 300px;
+    min-height: 300px;
+  }
+
   .temporal-scale-plot {
     height: 380px;
     min-height: 380px;
@@ -2216,9 +2236,15 @@ button.is-busy::after {
   }
 
   .temporal-acf-plot,
-  .temporal-scale-plot {
+  .temporal-scale-plot,
+  .drift-acf-plot {
     height: 340px;
     min-height: 340px;
+  }
+
+  .drift-component-plot {
+    height: 280px;
+    min-height: 280px;
   }
 
   .temporal-psd-plot {

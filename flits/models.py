@@ -13,6 +13,9 @@ from typing import Any
 
 import numpy as np
 
+MAX_DRIFT_MONTE_CARLO_TRIALS = 512
+MAX_DRIFT_RANDOM_SEED = 2**64 - 1
+
 
 def _jsonable_1d(values: np.ndarray, digits: int = 4) -> list[float | None]:
     rounded = np.round(np.asarray(values, dtype=float), digits)
@@ -1121,6 +1124,253 @@ class TemporalStructureResult:
 
 
 @dataclass(frozen=True)
+class DriftAnalysisSettings:
+    """Inputs that control the sub-burst drift measurement."""
+
+    max_lag_fraction: float = 0.5
+    min_overlap_fraction: float = 0.25
+    monte_carlo_trials: int = 64
+    random_seed: int = 20240617
+    exclude_zero_lag: bool = True
+    # An operator-supplied 1-sigma DM uncertainty, in pc cm^-3. It lives in the
+    # settings rather than in the call because it is what decides whether the
+    # drift rate is publishable, and a replay that quietly fell back to the DM
+    # sweep would reproduce a different classification from the one recorded.
+    dm_uncertainty_pc_cm3: float | None = None
+
+    def normalized(self) -> DriftAnalysisSettings:
+        """Return settings that are finite and safe to execute or replay.
+
+        These values can arrive through the actions API or an imported session
+        snapshot. Normalizing them in the shared model keeps the browser,
+        headless replay, and direct Python entry point on the same bounded
+        behaviour.
+        """
+        defaults = type(self)()
+
+        max_lag_fraction = float(self.max_lag_fraction)
+        if not np.isfinite(max_lag_fraction):
+            max_lag_fraction = defaults.max_lag_fraction
+        max_lag_fraction = float(np.clip(max_lag_fraction, 0.0, 1.0))
+
+        min_overlap_fraction = float(self.min_overlap_fraction)
+        if not np.isfinite(min_overlap_fraction):
+            min_overlap_fraction = defaults.min_overlap_fraction
+        min_overlap_fraction = float(np.clip(min_overlap_fraction, 0.0, 1.0))
+
+        try:
+            monte_carlo_trials = int(self.monte_carlo_trials)
+        except (OverflowError, TypeError, ValueError):
+            monte_carlo_trials = defaults.monte_carlo_trials
+        monte_carlo_trials = min(MAX_DRIFT_MONTE_CARLO_TRIALS, max(0, monte_carlo_trials))
+
+        try:
+            random_seed = int(self.random_seed)
+        except (OverflowError, TypeError, ValueError):
+            random_seed = defaults.random_seed
+        random_seed = min(MAX_DRIFT_RANDOM_SEED, max(0, random_seed))
+
+        dm_uncertainty = self.dm_uncertainty_pc_cm3
+        if dm_uncertainty is not None:
+            dm_uncertainty = abs(float(dm_uncertainty))
+            if not np.isfinite(dm_uncertainty):
+                dm_uncertainty = None
+
+        return type(self)(
+            max_lag_fraction=max_lag_fraction,
+            min_overlap_fraction=min_overlap_fraction,
+            monte_carlo_trials=monte_carlo_trials,
+            random_seed=random_seed,
+            exclude_zero_lag=bool(self.exclude_zero_lag),
+            dm_uncertainty_pc_cm3=dm_uncertainty,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        normalized = self.normalized()
+        return {
+            "max_lag_fraction": normalized.max_lag_fraction,
+            "min_overlap_fraction": normalized.min_overlap_fraction,
+            "monte_carlo_trials": normalized.monte_carlo_trials,
+            "random_seed": normalized.random_seed,
+            "exclude_zero_lag": normalized.exclude_zero_lag,
+            "dm_uncertainty_pc_cm3": normalized.dm_uncertainty_pc_cm3,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any] | None) -> DriftAnalysisSettings:
+        if not payload:
+            return cls()
+        defaults = cls()
+        return cls(
+            max_lag_fraction=float(payload.get("max_lag_fraction", defaults.max_lag_fraction)),
+            min_overlap_fraction=float(payload.get("min_overlap_fraction", defaults.min_overlap_fraction)),
+            monte_carlo_trials=payload.get("monte_carlo_trials", defaults.monte_carlo_trials),
+            random_seed=payload.get("random_seed", defaults.random_seed),
+            exclude_zero_lag=bool(payload.get("exclude_zero_lag", defaults.exclude_zero_lag)),
+            dm_uncertainty_pc_cm3=_float_or_none(payload.get("dm_uncertainty_pc_cm3")),
+        ).normalized()
+
+
+@dataclass(frozen=True)
+class DriftAnalysisResult:
+    """Sub-burst drift rate measured from the selected event window.
+
+    The drift rate is ``dnu/dt`` in MHz per millisecond: negative for the
+    downward "sad trombone" drift seen in repeaters. ``drift_rate_mhz_per_ms``
+    comes from a rotated two-dimensional Gaussian fitted to the mask-corrected
+    2D autocorrelation of the dynamic spectrum. ``component_*`` fields hold the
+    independent component-centroid regression, which is only populated when the
+    session defines at least two burst components.
+    """
+
+    status: str
+    message: str | None
+    method: str
+    event_window_ms: list[float]
+    spectral_extent_mhz: list[float]
+    tsamp_ms: float
+    freqres_mhz: float
+    dm_pc_cm3: float
+    dm_uncertainty_pc_cm3: float | None = None
+    reference_frequency_mhz: float | None = None
+    drift_rate_mhz_per_ms: float | None = None
+    drift_rate_uncertainty_mhz_per_ms: float | None = None
+    drift_rate_status: str = "unavailable"
+    drift_rate_statistical_mhz_per_ms: float | None = None
+    drift_rate_fit_covariance_mhz_per_ms: float | None = None
+    drift_rate_dm_systematic_mhz_per_ms: float | None = None
+    dm_sensitivity_mhz_per_ms_per_pc_cm3: float | None = None
+    dm_equivalent_pc_cm3: float | None = None
+    acf_slope_ms_per_mhz: float | None = None
+    acf_amplitude: float | None = None
+    acf_offset: float | None = None
+    acf_sigma_time_ms: float | None = None
+    acf_sigma_freq_mhz: float | None = None
+    acf_correlation: float | None = None
+    acf_theta_deg: float | None = None
+    acf_major_axis_slope_mhz_per_ms: float | None = None
+    acf_lag_time_ms: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    acf_lag_freq_mhz: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    acf: np.ndarray = field(default_factory=lambda: np.empty((0, 0), dtype=float))
+    acf_model: np.ndarray = field(default_factory=lambda: np.empty((0, 0), dtype=float))
+    monte_carlo_trials_used: int = 0
+    masked_channel_fraction: float = 0.0
+    component_labels: list[str] = field(default_factory=list)
+    component_times_ms: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    component_freqs_mhz: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    component_freq_uncertainty_mhz: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    component_drift_rate_mhz_per_ms: float | None = None
+    component_drift_uncertainty_mhz_per_ms: float | None = None
+    component_drift_status: str = "unavailable"
+    component_drift_r_squared: float | None = None
+    component_dm_equivalent_pc_cm3: float | None = None
+    warning_flags: list[str] = field(default_factory=list)
+    uncertainty_details: dict[str, UncertaintyDetail] = field(default_factory=dict)
+    settings: DriftAnalysisSettings | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "message": self.message,
+            "method": self.method,
+            "event_window_ms": [float(value) for value in self.event_window_ms],
+            "spectral_extent_mhz": [float(value) for value in self.spectral_extent_mhz],
+            "tsamp_ms": float(self.tsamp_ms),
+            "freqres_mhz": float(self.freqres_mhz),
+            "dm_pc_cm3": float(self.dm_pc_cm3),
+            "dm_uncertainty_pc_cm3": _float_or_none(self.dm_uncertainty_pc_cm3),
+            "reference_frequency_mhz": _float_or_none(self.reference_frequency_mhz),
+            "drift_rate_mhz_per_ms": _float_or_none(self.drift_rate_mhz_per_ms),
+            "drift_rate_uncertainty_mhz_per_ms": _float_or_none(self.drift_rate_uncertainty_mhz_per_ms),
+            "drift_rate_status": self.drift_rate_status,
+            "drift_rate_statistical_mhz_per_ms": _float_or_none(self.drift_rate_statistical_mhz_per_ms),
+            "drift_rate_fit_covariance_mhz_per_ms": _float_or_none(self.drift_rate_fit_covariance_mhz_per_ms),
+            "drift_rate_dm_systematic_mhz_per_ms": _float_or_none(self.drift_rate_dm_systematic_mhz_per_ms),
+            "dm_sensitivity_mhz_per_ms_per_pc_cm3": _float_or_none(self.dm_sensitivity_mhz_per_ms_per_pc_cm3),
+            "dm_equivalent_pc_cm3": _float_or_none(self.dm_equivalent_pc_cm3),
+            "acf_slope_ms_per_mhz": _float_or_none(self.acf_slope_ms_per_mhz),
+            "acf_amplitude": _float_or_none(self.acf_amplitude),
+            "acf_offset": _float_or_none(self.acf_offset),
+            "acf_sigma_time_ms": _float_or_none(self.acf_sigma_time_ms),
+            "acf_sigma_freq_mhz": _float_or_none(self.acf_sigma_freq_mhz),
+            "acf_correlation": _float_or_none(self.acf_correlation),
+            "acf_theta_deg": _float_or_none(self.acf_theta_deg),
+            "acf_major_axis_slope_mhz_per_ms": _float_or_none(self.acf_major_axis_slope_mhz_per_ms),
+            "acf_lag_time_ms": _jsonable_1d(self.acf_lag_time_ms, digits=6),
+            "acf_lag_freq_mhz": _jsonable_1d(self.acf_lag_freq_mhz, digits=6),
+            "acf": _jsonable(self.acf, digits=6),
+            "acf_model": _jsonable(self.acf_model, digits=6),
+            "monte_carlo_trials_used": int(self.monte_carlo_trials_used),
+            "masked_channel_fraction": float(self.masked_channel_fraction),
+            "component_labels": [str(label) for label in self.component_labels],
+            "component_times_ms": _jsonable_1d(self.component_times_ms, digits=6),
+            "component_freqs_mhz": _jsonable_1d(self.component_freqs_mhz, digits=6),
+            "component_freq_uncertainty_mhz": _jsonable_1d(self.component_freq_uncertainty_mhz, digits=6),
+            "component_drift_rate_mhz_per_ms": _float_or_none(self.component_drift_rate_mhz_per_ms),
+            "component_drift_uncertainty_mhz_per_ms": _float_or_none(self.component_drift_uncertainty_mhz_per_ms),
+            "component_drift_status": self.component_drift_status,
+            "component_drift_r_squared": _float_or_none(self.component_drift_r_squared),
+            "component_dm_equivalent_pc_cm3": _float_or_none(self.component_dm_equivalent_pc_cm3),
+            "warning_flags": [str(flag) for flag in self.warning_flags],
+            "uncertainty_details": _uncertainty_detail_map_to_dict(self.uncertainty_details),
+            "settings": None if self.settings is None else self.settings.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any] | None) -> DriftAnalysisResult | None:
+        if payload is None:
+            return None
+        return cls(
+            status=str(payload.get("status", "unknown")),
+            message=None if payload.get("message") in (None, "") else str(payload.get("message")),
+            method=str(payload.get("method", "acf_2d")),
+            event_window_ms=[float(value) for value in payload.get("event_window_ms", [])],
+            spectral_extent_mhz=[float(value) for value in payload.get("spectral_extent_mhz", [])],
+            tsamp_ms=float(payload.get("tsamp_ms", 0.0)),
+            freqres_mhz=float(payload.get("freqres_mhz", 0.0)),
+            dm_pc_cm3=float(payload.get("dm_pc_cm3", 0.0)),
+            dm_uncertainty_pc_cm3=_float_or_none(payload.get("dm_uncertainty_pc_cm3")),
+            reference_frequency_mhz=_float_or_none(payload.get("reference_frequency_mhz")),
+            drift_rate_mhz_per_ms=_float_or_none(payload.get("drift_rate_mhz_per_ms")),
+            drift_rate_uncertainty_mhz_per_ms=_float_or_none(payload.get("drift_rate_uncertainty_mhz_per_ms")),
+            drift_rate_status=str(payload.get("drift_rate_status", "unavailable")),
+            drift_rate_statistical_mhz_per_ms=_float_or_none(payload.get("drift_rate_statistical_mhz_per_ms")),
+            drift_rate_fit_covariance_mhz_per_ms=_float_or_none(payload.get("drift_rate_fit_covariance_mhz_per_ms")),
+            drift_rate_dm_systematic_mhz_per_ms=_float_or_none(payload.get("drift_rate_dm_systematic_mhz_per_ms")),
+            dm_sensitivity_mhz_per_ms_per_pc_cm3=_float_or_none(payload.get("dm_sensitivity_mhz_per_ms_per_pc_cm3")),
+            dm_equivalent_pc_cm3=_float_or_none(payload.get("dm_equivalent_pc_cm3")),
+            acf_slope_ms_per_mhz=_float_or_none(payload.get("acf_slope_ms_per_mhz")),
+            acf_amplitude=_float_or_none(payload.get("acf_amplitude")),
+            acf_offset=_float_or_none(payload.get("acf_offset")),
+            acf_sigma_time_ms=_float_or_none(payload.get("acf_sigma_time_ms")),
+            acf_sigma_freq_mhz=_float_or_none(payload.get("acf_sigma_freq_mhz")),
+            acf_correlation=_float_or_none(payload.get("acf_correlation")),
+            acf_theta_deg=_float_or_none(payload.get("acf_theta_deg")),
+            acf_major_axis_slope_mhz_per_ms=_float_or_none(payload.get("acf_major_axis_slope_mhz_per_ms")),
+            acf_lag_time_ms=_array_1d(payload.get("acf_lag_time_ms"), dtype=float),
+            acf_lag_freq_mhz=_array_1d(payload.get("acf_lag_freq_mhz"), dtype=float),
+            acf=_array_2d(payload.get("acf"), dtype=float),
+            acf_model=_array_2d(payload.get("acf_model"), dtype=float),
+            monte_carlo_trials_used=int(payload.get("monte_carlo_trials_used", 0) or 0),
+            masked_channel_fraction=float(payload.get("masked_channel_fraction", 0.0) or 0.0),
+            component_labels=[str(label) for label in payload.get("component_labels", [])],
+            component_times_ms=_array_1d(payload.get("component_times_ms"), dtype=float),
+            component_freqs_mhz=_array_1d(payload.get("component_freqs_mhz"), dtype=float),
+            component_freq_uncertainty_mhz=_array_1d(payload.get("component_freq_uncertainty_mhz"), dtype=float),
+            component_drift_rate_mhz_per_ms=_float_or_none(payload.get("component_drift_rate_mhz_per_ms")),
+            component_drift_uncertainty_mhz_per_ms=_float_or_none(
+                payload.get("component_drift_uncertainty_mhz_per_ms")
+            ),
+            component_drift_status=str(payload.get("component_drift_status", "unavailable")),
+            component_drift_r_squared=_float_or_none(payload.get("component_drift_r_squared")),
+            component_dm_equivalent_pc_cm3=_float_or_none(payload.get("component_dm_equivalent_pc_cm3")),
+            warning_flags=[str(flag) for flag in payload.get("warning_flags", [])],
+            uncertainty_details=_uncertainty_detail_map_from_dict(payload.get("uncertainty_details")),
+            settings=DriftAnalysisSettings.from_dict(payload.get("settings")),
+        )
+
+
+@dataclass(frozen=True)
 class MeasurementUncertainties:
     toa_peak_topo_mjd: float | None = None
     toa_topo_mjd: float | None = None
@@ -1921,6 +2171,8 @@ class AnalysisSessionSnapshot:
     dm_optimization: DmOptimizationResult | None
     spectral_analysis: SpectralAnalysisResult | None
     temporal_structure: TemporalStructureResult | None
+    drift_analysis: DriftAnalysisResult | None = None
+    drift_settings: DriftAnalysisSettings = field(default_factory=DriftAnalysisSettings)
     polarization: PolarizationAnalysisResult | None = None
     polarization_settings: PolarizationSettings = field(default_factory=PolarizationSettings)
     polarization_basis: str | None = None
@@ -1965,6 +2217,8 @@ class AnalysisSessionSnapshot:
             "dm_optimization": None if self.dm_optimization is None else self.dm_optimization.to_dict(),
             "spectral_analysis": None if self.spectral_analysis is None else self.spectral_analysis.to_dict(),
             "temporal_structure": None if self.temporal_structure is None else self.temporal_structure.to_dict(),
+            "drift_analysis": None if self.drift_analysis is None else self.drift_analysis.to_dict(),
+            "drift_settings": self.drift_settings.to_dict(),
             "polarization": None if self.polarization is None else self.polarization.to_dict(),
             "polarization_settings": self.polarization_settings.to_dict(),
             "polarization_basis": self.polarization_basis,
@@ -2019,6 +2273,8 @@ class AnalysisSessionSnapshot:
             ),
             spectral_analysis=SpectralAnalysisResult.from_dict(payload.get("spectral_analysis")),
             temporal_structure=TemporalStructureResult.from_dict(payload.get("temporal_structure")),
+            drift_analysis=DriftAnalysisResult.from_dict(payload.get("drift_analysis")),
+            drift_settings=DriftAnalysisSettings.from_dict(payload.get("drift_settings")),
             polarization=PolarizationAnalysisResult.from_dict(payload.get("polarization")),
             polarization_settings=PolarizationSettings.from_dict(payload.get("polarization_settings")),
             polarization_basis=(

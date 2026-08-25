@@ -31,6 +31,7 @@ LOG_LEVELS = ("debug", "info", "warning", "error")
 _REPLAYABLE_ANALYSES: tuple[tuple[str, str], ...] = (
     ("width_analysis", "compute_widths"),
     ("results", "compute_properties"),
+    ("drift_analysis", "run_drift_analysis"),
     ("polarization", "run_polarization_analysis"),
 )
 
@@ -259,6 +260,20 @@ def replay(argv: Sequence[str]) -> int:
         logger.info("Recomputed %s", key)
 
     results = session.results.to_dict() if session.results is not None else None
+    drift = session.drift_analysis
+    drift_report = (
+        None
+        if drift is None
+        else {
+            "drift_rate_mhz_per_ms": drift.drift_rate_mhz_per_ms,
+            "drift_rate_uncertainty_mhz_per_ms": drift.drift_rate_uncertainty_mhz_per_ms,
+            "drift_rate_status": drift.drift_rate_status,
+            "dm_equivalent_pc_cm3": drift.dm_equivalent_pc_cm3,
+            "component_drift_rate_mhz_per_ms": drift.component_drift_rate_mhz_per_ms,
+            "component_drift_status": drift.component_drift_status,
+            "warning_flags": list(drift.warning_flags),
+        }
+    )
     polarization = session.polarization
     polarization_report = (
         None
@@ -283,6 +298,7 @@ def replay(argv: Sequence[str]) -> int:
         "dm": session.dm,
         "recomputed": recomputed,
         "measurements": results,
+        "drift": drift_report,
         "polarization": polarization_report,
         "exported": [str(path) for path in exported],
         "checked": bool(args.check),

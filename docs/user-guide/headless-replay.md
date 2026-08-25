@@ -63,6 +63,22 @@ for snapshot in sessions/*_flits_session.json; do
 done
 ```
 
+## Analyses the snapshot recorded
+
+Beyond the measurements, replay recomputes any analysis the snapshot carries: the
+width comparison, a session-measured rotation measure, and a sub-burst drift
+rate. Each is recomputed from the settings the snapshot stored rather than from
+defaults, which is what makes the drift error bar reproduce exactly — its Monte
+Carlo is seeded, and the seed travels in the snapshot.
+
+```text
+recomputed width_analysis, results, drift_analysis
+```
+
+The drift result appears in the `--json` report under `drift`, with the drift
+rate, its uncertainty, and the DM offset that would account for the measured
+slope.
+
 ## Write an export bundle
 
 ```bash

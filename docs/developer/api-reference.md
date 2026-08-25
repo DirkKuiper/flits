@@ -81,6 +81,22 @@ with open("burst_flits_session.json", "w") as handle:
 
 ::: flits.analysis.temporal.multiscale.excess_power_fraction_below
 
+::: flits.analysis.drift.run_drift_analysis
+
+::: flits.analysis.drift.DriftAnalysisInputs
+
+::: flits.models.DriftAnalysisSettings
+
+::: flits.models.DriftAnalysisResult
+
+::: flits.analysis.drift.time_frequency_slope
+
+::: flits.analysis.drift.dm_slope_sensitivity
+
+::: flits.analysis.drift.drift_dm_sensitivity
+
+::: flits.analysis.drift.dm_equivalent_of_slope
+
 ## Polarization
 
 ::: flits.models.PolarizationSettings
