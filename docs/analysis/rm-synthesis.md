@@ -83,7 +83,7 @@ print(result.linear_fraction, result.circular_fraction)
 `result.rm_synthesis` holds the full RM-synthesis payload documented below.
 The result also records the basis and what established it, the exact event and
 off-pulse windows, the channels that survived, and the integrated Stokes I, Q, U
-and V spectra — which is what makes it reproducible from the snapshot alone.
+and V spectra — which supports replay from the snapshot and original data.
 
 ### Reading the cube directly
 

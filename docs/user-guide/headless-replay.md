@@ -52,6 +52,10 @@ flits replay session.json --check
 check      OK - recomputed measurements match the snapshot
 ```
 
+`--check` compares numerical fields in the core measurement result; it does
+not compare text labels, validate scientific assumptions, or independently
+check the stored DM sweep and other retained diagnostics.
+
 Use `--tolerance` to set the relative tolerance (default `1e-9`). A difference
 means either the data changed, the environment changed, or a FLITS version
 changed a result — all three are worth knowing about before a paper goes out.
@@ -65,9 +69,8 @@ done
 
 ## Analyses the snapshot recorded
 
-Beyond the measurements, replay recomputes any analysis the snapshot carries: the
-width comparison, a session-measured rotation measure, and a sub-burst drift
-rate. Each is recomputed from the settings the snapshot stored rather than from
+Beyond the core measurements, replay recomputes a recorded width comparison,
+a session-measured rotation measure, and a sub-burst drift rate. Each is recomputed from the settings the snapshot stored rather than from
 defaults, which is what makes the drift error bar reproduce exactly — its Monte
 Carlo is seeded, and the seed travels in the snapshot.
 
@@ -122,7 +125,7 @@ done | jq -s '[.[] | {burst: .burst_file, dm: .dm, fluence: .measurements.fluenc
 
 ## What replay does not do
 
-Replay restores selections and recomputes measurements and width analysis. It
-does not re-run the DM sweep, the temporal or spectral structure analyses, or
+Replay restores selections and recomputes core measurements and recorded
+width, drift, and in-session polarization analyses. It does not re-run the DM sweep, the temporal or spectral structure analyses, or
 model fitting — those are expensive and parameterized, and the snapshot keeps
 their stored results. Run them in the interface when you need them refreshed.

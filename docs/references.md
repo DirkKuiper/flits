@@ -129,7 +129,7 @@ decomposition against an empirical off-pulse floor.
 
 ## Software FLITS depends on
 
-- Aggarwal, K. et al. (2020), *Your: Your Unified Reader*, JOSS 5(52), 2750.
+- Aggarwal, K. et al. (2020), *Your: Your Unified Reader*, JOSS 5(55), 2750.
   [doi:10.21105/joss.02750](https://doi.org/10.21105/joss.02750) — filterbank
   and PSRFITS input.
 - `jess` — statistical interference mitigation.

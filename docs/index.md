@@ -11,36 +11,21 @@ plugin-based reader framework.
 
 ## Why FLITS exists
 
-Turning a detected burst into a number you can defend takes several steps — tune
-the DM, mask interference, place the event and off-pulse windows, choose a
-spectral extent, then measure — and every one of them is a judgement call that
-moves the answer.
+Measuring a detected burst involves selecting an event window and noise
+reference, masking interference, choosing a frequency range, and refining the
+dispersion measure (DM). These choices affect the resulting measurements and
+must be preserved to interpret and reproduce them.
 
-The tools that do these steps well do them separately. Search pipelines stop at
-detection; format libraries read data without offering a workflow; and the
-strong single-purpose tools — `fitburst` for model fitting, DM_phase for
-structure-maximizing DM, RM-Tools for rotation measure — each expect their own
-input conventions. A burst campaign therefore accumulates per-instrument glue
-scripts, and the decisions that produced the numbers survive only in someone's
-notebook.
+FLITS was built for a repeater campaign spanning GBT at L and P band, Nançay,
+Westerbork, Onsala, Stockert, and CHIME. A common reader interface and configurable
+telescope presets support analysis across their formats and calibration
+conventions. The session retains the selected state so collaborators can
+reopen it and recompute supported measurements from the original data.
 
-That gets harder for repeating sources, where the same population is observed by
-many telescopes. FLITS was built for a repeater campaign spanning GBT at L and P
-band, Nançay, Westerbork, Onsala, Stockert and CHIME: three file formats,
-sampling times differing by more than an order of magnitude, and instruments
-with different bandwidths, polarization conventions and SEFDs.
-
-FLITS makes the session, rather than the script, the unit of analysis. One
-interface covers every supported instrument, the reader layer absorbs the format
-differences, telescope presets carry the instrument-specific calibration, and
-[session snapshots](user-guide/exports-and-snapshots.md) make the analysis
-inspectable and replayable afterwards — including headlessly, with
-[`flits replay`](user-guide/headless-replay.md).
-
-Measurements state their own uncertainty basis: FLITS separates a formal
-1-sigma uncertainty from a statistical-only one, and will not mark a fluence
-publishable when the SEFD systematic it needs was never supplied. See
-[Measurements](analysis/measurements.md).
+FLITS builds on specialist search, data-processing, and analysis packages. It
+connects measurements through a shared session model with explicit calibration
+and uncertainty metadata. Flux and fluence estimates without a supplied SEFD
+uncertainty are flagged as having an incomplete uncertainty budget.
 
 !!! note "Not a search pipeline"
     FLITS starts from a burst you already have. Candidate generation and
@@ -77,8 +62,8 @@ pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3
 - Use [Quickstart](getting-started.md) if you want the shortest path from
   install to first session.
 - Use [Guided Workflow](guided-workflow.md) for a concrete GBT burst example
-  that goes from loading through preparation, measurements, DM, temporal
-  diagnostics, fitting, and export.
+  with fixed selections, reference measurements, a residual DM sweep, and
+  a downloadable session for replay.
 - Use [Installation and Deployment](installation.md) if you need Docker,
   Apptainer, or remote/HPC usage.
 - Use [Session Workflow](user-guide/session-workflow.md) once the interface is

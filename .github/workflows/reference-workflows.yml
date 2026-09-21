@@ -1,0 +1,58 @@
+name: Reference Workflows
+
+on:
+  pull_request:
+    paths:
+      - "flits/**"
+      - "examples/**"
+      - "docs/examples/**"
+      - "docs/guided-workflow.md"
+      - "pyproject.toml"
+      - ".github/workflows/reference-workflows.yml"
+  push:
+    branches: [main]
+    paths:
+      - "flits/**"
+      - "examples/**"
+      - "docs/examples/**"
+      - "docs/guided-workflow.md"
+      - "pyproject.toml"
+      - ".github/workflows/reference-workflows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gbt:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [published, checkout]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: docs/examples/gbt-reference-requirements.txt
+      - name: Install the pinned reference environment
+        run: python -m pip install -r docs/examples/gbt-reference-requirements.txt
+      - name: Test the source checkout with the reference dependencies
+        if: matrix.runtime == 'checkout'
+        run: python -m pip install --no-deps -e .
+      - name: Download the public filterbank
+        run: |
+          mkdir -p tutorial-data
+          curl --fail --location --retry 3 \
+            -o tutorial-data/flits-tutorial-gbt-frb20240114a-v1.fil \
+            https://github.com/DirkKuiper/flits/releases/download/tutorial-data-v1/flits-tutorial-gbt-frb20240114a-v1.fil
+      - name: Verify measurements and the residual DM sweep
+        run: |
+          python examples/gbt_reference_workflow.py \
+            --source tutorial-data/flits-tutorial-gbt-frb20240114a-v1.fil
+      - name: Verify portable session replay
+        run: |
+          flits replay docs/examples/gbt-reference-session.json \
+            --data-dir tutorial-data --check

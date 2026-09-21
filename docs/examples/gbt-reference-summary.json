@@ -1,0 +1,27 @@
+{
+  "flits_version": "1.2.0",
+  "python_version": "3.12.6",
+  "source_url": "https://github.com/DirkKuiper/flits/releases/download/tutorial-data-v1/flits-tutorial-gbt-frb20240114a-v1.fil",
+  "source_sha256": "e80c69842cdd5f41b5a1fc617b7b2cebd864c121e27830bbb5d2161af539a2cc",
+  "relative_tolerance": 1e-06,
+  "absolute_tolerance": 1e-08,
+  "measurements": {
+    "snr_peak": 27.461985585594213,
+    "snr_integrated": 69.76050393355581,
+    "fluence_jyms": 4.032203878611823,
+    "peak_flux_jy": 0.7142264968772689,
+    "width_ms_acf": 5.618759523055779,
+    "event_duration_ms": 15.073279999999986,
+    "spectral_extent_mhz": 448.2421875
+  },
+  "peak_time_ms": 240.51711999999978,
+  "mask_count": 0,
+  "fluence_uncertainty_classification": "statistical_only",
+  "fluence_publishable": false,
+  "dm_sweep": {
+    "best_residual_dm": 5.40976152870248,
+    "sampled_best_residual_dm": 5.5,
+    "fit_status": "dmphase_weighted_polyfit"
+  },
+  "scope": "Numerical regression example, not an observation-specific calibration or absolute-timing reference. The CLI replay recomputes core measurements; this script additionally reruns the residual DM sweep."
+}

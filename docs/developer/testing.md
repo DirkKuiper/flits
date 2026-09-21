@@ -59,11 +59,12 @@ They need Playwright and a browser binary:
 ```bash
 python -m pip install pytest-playwright
 python -m playwright install chromium
-python -m pytest tests/test_frontend_e2e.py -q
+python -m pytest tests/test_frontend_e2e.py -q -m e2e
 ```
 
-Without Playwright installed they skip, so the ordinary `pytest` run is
-unaffected. CI runs them in a dedicated job. To skip them explicitly:
+The default test configuration excludes browser and local-observatory-data
+tests. Select `-m e2e` explicitly for the browser run above. Without Playwright
+installed the browser module skips. CI runs them in a dedicated job. To skip them explicitly:
 
 ```bash
 python -m pytest -m "not e2e"
