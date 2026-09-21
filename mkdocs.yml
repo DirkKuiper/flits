@@ -78,5 +78,6 @@ nav:
       - References: references.md
   - Developer:
       - Testing: developer/testing.md
+      - JOSS Manuscript: developer/joss-submission.md
       - Publishing: developer/publishing.md
       - Custom Readers: developer/custom-readers.md

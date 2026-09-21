@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import html
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -21,7 +24,7 @@ REQUIRED_SECTIONS = (
     "Statement of need",
     "State of the field",
     "Software design",
-    "Research impact",
+    "Research impact statement",
     "AI usage disclosure",
     "Acknowledgements",
     "References",
@@ -71,6 +74,64 @@ def _resolver_status(doi: str) -> tuple[str, int | None, str | None]:
     return doi, status, location or None
 
 
+def _normalized_title(value: str) -> str:
+    value = html.unescape(re.sub(r"<[^>]*>", "", value))
+    value = unicodedata.normalize("NFKD", value).casefold()
+    return "".join(character for character in value if character.isalnum())
+
+
+def _reference_metadata_errors(bibliography_path: Path) -> list[str]:
+    """Verify that DOI titles match the bibliography, not just that DOIs resolve."""
+    try:
+        import bibtexparser
+    except ImportError:
+        return ["install paper/requirements.txt to check DOI bibliographic metadata"]
+    library = bibtexparser.parse_file(str(bibliography_path))
+    if library.failed_blocks:
+        return ["paper.bib contains BibTeX blocks that could not be parsed"]
+    errors: list[str] = []
+    for entry in library.entries:
+        if "doi" not in entry.fields_dict:
+            continue
+        doi = entry["doi"]
+        result = subprocess.run(
+            [
+                "curl",
+                "--fail",
+                "--silent",
+                "--show-error",
+                "--location",
+                "--max-time",
+                "30",
+                "--retry",
+                "2",
+                "--header",
+                "Accept: application/json",
+                f"https://api.crossref.org/works/{doi}",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        try:
+            metadata = json.loads(result.stdout)["message"]
+            resolved_title = metadata["title"][0]
+        except (ValueError, KeyError, IndexError, TypeError):
+            errors.append(f"{entry.key}: could not retrieve Crossref metadata for {doi}")
+            continue
+        if _normalized_title(entry["title"]) != _normalized_title(resolved_title):
+            errors.append(f"{entry.key}: DOI title mismatch; Crossref reports {resolved_title!r}")
+        for bib_field, crossref_field in (("volume", "volume"), ("number", "issue"), ("pages", "page")):
+            if (
+                bib_field in entry.fields_dict
+                and metadata.get(crossref_field)
+                and _normalized_title(entry[bib_field]) != _normalized_title(str(metadata[crossref_field]))
+            ):
+                errors.append(f"{entry.key}: {bib_field} differs from Crossref ({metadata[crossref_field]})")
+        print(f"Metadata {entry.key}: {resolved_title}")
+    return errors
+
+
 def validate(check_dois: bool) -> list[str]:
     errors: list[str] = []
     paper = PAPER_PATH.read_text(encoding="utf-8")
@@ -82,6 +143,9 @@ def validate(check_dois: bool) -> list[str]:
         return ["paper.md must start with a YAML front matter block"]
     frontmatter = frontmatter_parts[1]
     manuscript = frontmatter_parts[2]
+
+    if re.search(r"AUTHOR TO COMPLETE|\bTODO\b|\bTBD\b|FIXME", paper):
+        errors.append("paper.md contains an unfinished author-completion marker")
 
     headings = tuple(re.findall(r"^# (.+)$", manuscript, flags=re.MULTILINE))
     missing_sections = [section for section in REQUIRED_SECTIONS if section not in headings]
@@ -100,16 +164,22 @@ def validate(check_dois: bool) -> list[str]:
     if not paper_title or paper_title != cff_title:
         errors.append("paper.md and CITATION.cff titles must match exactly")
 
-    paper_orcid_match = re.search(r"^\s+orcid:\s*(\S+)$", frontmatter, re.MULTILINE)
-    cff_orcid_match = re.search(r"^\s+orcid:\s*(\S+)$", citation, re.MULTILINE)
-    paper_orcid = paper_orcid_match.group(1) if paper_orcid_match else ""
-    cff_orcid = cff_orcid_match.group(1) if cff_orcid_match else ""
-    if not _orcid_is_valid(paper_orcid):
-        errors.append(f"paper.md has an invalid ORCID: {paper_orcid or 'missing'}")
-    if not _orcid_is_valid(cff_orcid):
-        errors.append(f"CITATION.cff has an invalid ORCID: {cff_orcid or 'missing'}")
-    if paper_orcid and cff_orcid.removeprefix("https://orcid.org/") != paper_orcid:
-        errors.append("paper.md and CITATION.cff ORCIDs do not match")
+    paper_orcids = re.findall(r"^\s+orcid:\s*(\S+)$", frontmatter, re.MULTILINE)
+    cff_orcids = re.findall(r"^\s+orcid:\s*(\S+)$", citation, re.MULTILINE)
+    invalid_paper_orcids = [orcid for orcid in paper_orcids if not _orcid_is_valid(orcid)]
+    invalid_cff_orcids = [orcid for orcid in cff_orcids if not _orcid_is_valid(orcid)]
+    if not paper_orcids:
+        errors.append("paper.md has no author ORCIDs")
+    elif invalid_paper_orcids:
+        errors.append(f"paper.md has invalid ORCIDs: {', '.join(invalid_paper_orcids)}")
+    if not cff_orcids:
+        errors.append("CITATION.cff has no author ORCIDs")
+    elif invalid_cff_orcids:
+        errors.append(f"CITATION.cff has invalid ORCIDs: {', '.join(invalid_cff_orcids)}")
+
+    normalized_cff_orcids = [orcid.removeprefix("https://orcid.org/") for orcid in cff_orcids]
+    if paper_orcids != normalized_cff_orcids:
+        errors.append("paper.md and CITATION.cff author ORCIDs do not match in order")
 
     used_keys = set(re.findall(r"@([A-Za-z0-9_:-]+)", body))
     defined_keys = set(re.findall(r"^@[A-Za-z]+\{([^,]+),", bibliography, re.MULTILINE))
@@ -136,6 +206,7 @@ def validate(check_dois: bool) -> list[str]:
             errors.append(f"DOIs that did not resolve: {', '.join(failed)}")
         for doi, status, location in results:
             print(f"DOI {doi}: HTTP {status} -> {location or 'no redirect'}")
+        errors.extend(_reference_metadata_errors(BIB_PATH))
 
     print(f"Paper body: {len(words)} words")
     print(f"Sections: {', '.join(headings)}")
@@ -149,7 +220,7 @@ def main() -> int:
     parser.add_argument(
         "--check-dois",
         action="store_true",
-        help="also contact doi.org and require every DOI to resolve",
+        help="also require DOI resolution and compare bibliographic titles, volumes, issues, and pages with Crossref",
     )
     arguments = parser.parse_args()
     errors = validate(check_dois=arguments.check_dois)

@@ -1,127 +1,136 @@
 # Guided Workflow: GBT Burst
 
-This walkthrough follows a single GBT-L burst from loading through preparation,
-measurements, width comparison, DM optimization, temporal diagnostics, fitting,
-and export.
+This example follows a public GBT-L burst from loading through preparation,
+measurement, a residual-DM sweep, and session replay. The reference outputs
+were generated with the published **FLITS 1.2.0** package and Python 3.12.6.
 
-The example file is a SIGPROC filterbank from `DIAG_FRB20240114A`:
+The cutout is already dedispersed. Load it with **DM = 0** and interpret the
+DM sweep as a residual diagnostic. Its original filename contains `D527_851`,
+but the upstream absolute dedispersion time reference is not established by
+this example. The reference checks below validate intensity measurements and
+the residual sweep, not absolute or infinite-frequency arrival times.
 
-`blc_s_guppi_60385_53711_DIAG_FRB20240114A_0057_1673.964_1675.753_b32_I0_D527_851_F256D_K_t30_d1.fil`
+## 1. Download the data and reference environment
 
-The filename records `D527_851`, but this cutout is already dedispersed. Load it
-with `DM = 0` in FLITS. Use the DM tab later only as a local residual/refinement
-diagnostic around zero.
-
-## 1. Download the tutorial burst
-
-!!! note "Archived copy"
-    The tutorial burst is served from a GitHub release asset for convenience.
-    A citable, archived copy is deposited alongside the software release; use
-    that one when you need a permanent reference.
+The filterbank is a public [GitHub release asset](https://github.com/DirkKuiper/flits/releases/tag/tutorial-data-v1).
+Download it and check its SHA-256 digest:
 
 ```bash
 mkdir -p tutorial-data
-curl -L -o tutorial-data/flits-tutorial-gbt-frb20240114a-v1.fil \
+curl --fail --location -o tutorial-data/flits-tutorial-gbt-frb20240114a-v1.fil \
   https://github.com/DirkKuiper/flits/releases/download/tutorial-data-v1/flits-tutorial-gbt-frb20240114a-v1.fil
+python -c "import hashlib, pathlib; p = pathlib.Path('tutorial-data/flits-tutorial-gbt-frb20240114a-v1.fil'); assert hashlib.sha256(p.read_bytes()).hexdigest() == 'e80c69842cdd5f41b5a1fc617b7b2cebd864c121e27830bbb5d2161af539a2cc'; print('Checksum verified')"
 ```
 
-For development checkouts that already have the ignored local data directory,
-the source file is:
-
-```text
-data/GBT-L/blc_s_guppi_60385_53711_DIAG_FRB20240114A_0057_1673.964_1675.753_b32_I0_D527_851_F256D_K_t30_d1.fil
-```
-
-## 2. Start FLITS
+Use Python 3.12 and the downloadable
+[reference requirements](examples/gbt-reference-requirements.txt) for a pinned
+runtime environment. Save that file in your working directory, then run:
 
 ```bash
+python3.12 -m venv .venv-gbt
+source .venv-gbt/bin/activate
+python -m pip install -r gbt-reference-requirements.txt
 flits --data-dir ./tutorial-data --host 127.0.0.1 --port 8123
 ```
 
-Open `http://127.0.0.1:8123`.
+On Windows, activate with `.venv-gbt\Scripts\activate` instead. An existing
+FLITS installation can also follow the interface steps; use the pinned
+environment when comparing exact reference values.
 
-In the loader:
+## 2. Load the burst
 
-1. Select `flits-tutorial-gbt-frb20240114a-v1.fil`.
-2. Enter `0` for DM.
-3. Leave the preset on the detected `GBT` setting.
-4. Load the session.
+Open `http://127.0.0.1:8123` and select
+`flits-tutorial-gbt-frb20240114a-v1.fil`. Enter `0` for DM, select the `GBT`
+preset, and load the session.
 
-Expected first-session checks:
+Check that there are 256 channels, a native sample time of 10.24 microseconds,
+and a total time span of about 423 ms. The bright burst is near 240 ms. The GBT
+preset supplies a nominal SEFD of 10 Jy.
 
-- `256` channels
-- full time span of about `423 ms`
-- native sample time of `10.24 us`
-- default plotted time bins reduced by `x32`, or `327.68 us`
-- GBT calibration preset with `10 Jy` SEFD
-- the bright burst is near `240 ms`
+## 3. Prepare a reproducible selection
 
-![Loaded GBT burst in the FLITS aligned viewer.](assets/guided-workflow/prepared-viewer.png)
+Use these settings exactly:
 
-## 3. Prepare the burst
+| Setting | Value |
+| --- | --- |
+| Time downsampling factor | 32 (327.68 microseconds per bin) |
+| Frequency downsampling factor | 1 |
+| Event window | 235 to 250 ms |
+| First off-pulse window | 221 to 233 ms |
+| Second off-pulse window | 260 to 280 ms |
+| Spectral window | 1300 to 1750 MHz |
+| Channel mask | None; do not run Auto Mask for this reference |
 
-Use the Prepare controls to focus the analysis state before interpreting any
-numbers.
-
-Set:
-
-- event window: `235` to `250 ms`
-- off-pulse windows: `221` to `233 ms`, and `248` to `259 ms`
-- spectral window: `1300` to `1750 MHz`
-- masks: optionally click 'Auto Mask' once
+The off-pulse windows are separate from the event and set the background and
+noise estimates. FLITS quantizes selections to available bins, so the measured
+event duration and bandwidth differ slightly from the requested bounds.
 
 ## 4. Compute measurements
 
-Click **Compute** after the event, off-pulse, and spectral windows are set.
+Click **Compute**. The full-precision outputs are in the downloadable
+[reference summary](examples/gbt-reference-summary.json).
 
-The exact values can shift slightly with selection quantization, but the result
-should be close to:
-
-| Quantity | Expected value |
+| Quantity | Reference value |
 | --- | ---: |
-| Peak S/N | `~36.5` |
-| Integrated event S/N | `~93.4` |
-| Fluence | `~5.4 Jy ms` |
-| Peak flux density | `~0.95 Jy` |
-| Peak topocentric TOA | `~60385.62166196854 MJD` |
-| Infinite-frequency topocentric TOA | `~60385.62166196854 MJD` |
-| Barycentric TDB TOA | `~60385.61773505590 MJD` |
+| Peak S/N | 27.461986 |
+| Integrated event S/N | 69.760504 |
+| Fluence | 4.032204 Jy ms |
+| Peak flux density | 0.714226 Jy |
+| ACF width | 5.618760 ms |
+| Event duration | 15.073280 ms |
+| Selected spectral extent | 448.242188 MHz |
+| Peak position within the cutout | 240.517120 ms |
 
-Because the session DM is `0`, the infinite-frequency correction is `0 ms` and
-the peak and infinite-frequency topocentric TOAs are the same. The expected
-measurement flags are `calibrated`, `acf`, and `missing_distance`; the distance
-flag is normal unless you provide a distance or redshift.
+These flux estimates use the preset SEFD without an observation-specific SEFD
+uncertainty. FLITS therefore labels their uncertainties `statistical_only`
+and sets the corresponding `publishable` flag to `false`. This is an expected
+limitation of the example. Supply an independently justified calibration and
+its uncertainty before interpreting these as fully calibrated scientific
+measurements. The reference does not supply a source distance or redshift.
 
-![Measurement summary for the prepared GBT burst.](assets/guided-workflow/measurement-summary.png)
+## 5. Run a residual DM sweep
 
-## 5. Run a local DM sweep
+In the **DM** tab, select **DMphase**, center `0`, half range `10`, and step
+`0.5`. The expected fitted residual DM is about `5.409762 pc cm^-3`, with a
+sampled maximum of `5.5 pc cm^-3` and fit status `dmphase_weighted_polyfit`.
 
-Open the **DM** tab and run a DMphase sweep with:
+Keep the session DM at zero for comparison with the reference; applying the
+best-fit value changes the data used for the measurements above. This sweep
+demonstrates the diagnostic and does not establish a new astrophysical DM for
+the source.
 
-- center DM: `0`
-- half range: `10.0`
-- step: `0.5`
-- metric: `DMphase`
+## 6. Save and replay the session
 
-Expected checks:
+**Save Session** stores the current state in the local snapshot library;
+**Download JSON** produces a portable copy. A snapshot records the saved
+selections, calibration inputs, masks, notes, and analysis results. Keep the
+original data and software environment alongside it.
 
-- best DM near `5.41 pc cm^-3`
-- sampled best DM near `5.5 pc cm^-3`
-- fit status: `dmphase_weighted_polyfit`
-- residual status: `ok`
+To verify the supplied example directly, download
+[gbt-reference-session.json](examples/gbt-reference-session.json) into your
+working directory and run:
 
-![DMphase sweep and residual diagnostics for the prepared burst.](assets/guided-workflow/dm-sweep.png)
+```bash
+flits replay gbt-reference-session.json --data-dir ./tutorial-data --check
+```
 
-## 6. Export the session for reproducibility
+The expected message is `check OK - recomputed measurements match the snapshot`.
+The command recomputes core measurements from the original data. It retains
+the saved DM sweep without rerunning it; see [Headless Replay](user-guide/headless-replay.md)
+for the scope of replay and numerical comparison.
 
-Use **Save Session** in the sidebar after the event window, off-pulse windows,
-spectral window, mask state, measurements, and DM sweep are where you want them.
+## 7. Verify the complete reference calculation
 
-The saved JSON snapshot stores the interactive session state, not just the final
-values. FLITS writes it into a `snapshots/` folder next to the source data so the
-analysis can be reopened later from **Saved Sessions** and inspected from the
-same crop, selection, masking, calibration, notes, and analysis state. Use
-**Download JSON** only when you need a portable copy outside the snapshot
-library.
+From a FLITS source checkout, the executable example also reruns the residual
+DM sweep and verifies the measurements, uncertainty labels, and DM fit status:
 
-![Session panel with save, JSON, and saved-session controls.](assets/guided-workflow/session-reproducibility.png)
+```bash
+python examples/gbt_reference_workflow.py \
+  --source tutorial-data/flits-tutorial-gbt-frb20240114a-v1.fil
+```
+
+It checks the source checksum and compares numerical outputs at a relative
+tolerance of `1e-6` and an absolute tolerance of `1e-8`. Successful verification
+prints `PASS: GBT measurements, uncertainty labels, and residual DM sweep match the reference`.
+Ordinary runs do not overwrite the reference files. Maintainers can regenerate
+them deliberately with `--write-reference` when changing the documented example.

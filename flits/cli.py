@@ -2,7 +2,7 @@
 
 ``flits`` starts the browser interface. ``flits replay`` re-runs a saved session
 snapshot without a browser, which is what makes the reproducibility claim
-checkable: the snapshot records every interactive decision, and replaying it
+checkable: the snapshot records the selected analysis state, and replaying it
 recomputes the measurements from the original data file.
 
 Invoking ``flits`` with server options and no subcommand still starts the

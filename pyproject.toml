@@ -68,7 +68,7 @@ docs = [
 
 [project.urls]
 Homepage = "https://github.com/DirkKuiper/flits"
-Documentation = "https://github.com/DirkKuiper/flits#readme"
+Documentation = "https://dirkkuiper.github.io/flits/"
 Issues = "https://github.com/DirkKuiper/flits/issues"
 Releases = "https://github.com/DirkKuiper/flits/releases"
 Repository = "https://github.com/DirkKuiper/flits"

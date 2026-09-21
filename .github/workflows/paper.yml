@@ -6,6 +6,11 @@ on:
       - "paper/**"
       - "CITATION.cff"
       - ".github/workflows/paper.yml"
+  pull_request:
+    paths:
+      - "paper/**"
+      - "CITATION.cff"
+      - ".github/workflows/paper.yml"
   workflow_dispatch:
 
 permissions:
@@ -25,7 +30,10 @@ jobs:
           python-version: "3.12"
 
       - name: Validate manuscript and citation metadata
-        run: python paper/check.py
+        run: |
+          python -m pip install -r paper/requirements.txt
+          python paper/check.py
+          cffconvert --validate
 
       - name: Build draft PDF
         uses: openjournals/openjournals-draft-action@master

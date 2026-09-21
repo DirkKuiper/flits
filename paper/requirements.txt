@@ -1,0 +1,3 @@
+# Tools for manuscript metadata validation; not FLITS runtime dependencies.
+bibtexparser==2.0.1
+cffconvert==2.0.0

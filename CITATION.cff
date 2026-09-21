@@ -6,7 +6,13 @@ authors:
   - family-names: Kuiper
     given-names: Dirk
     orcid: https://orcid.org/0009-0003-5650-796X
-abstract: Browser-based scientific software for interactive FRB filterbank inspection, masking, and measurement.
+  - family-names: Pleunis
+    given-names: Ziggy
+    orcid: https://orcid.org/0000-0002-4795-697X
+  - family-names: Hessels
+    given-names: Jason W. T.
+    orcid: https://orcid.org/0000-0003-2317-1446
+abstract: Open-source Python software for interactive fast radio burst analysis, with saved analysis state, explicit uncertainty metadata, and command-line replay.
 repository-code: https://github.com/DirkKuiper/flits
 url: https://github.com/DirkKuiper/flits
 license: GPL-3.0-only

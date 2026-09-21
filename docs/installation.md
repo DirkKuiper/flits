@@ -46,15 +46,15 @@ pip install "git+https://github.com/DirkKuiper/flits.git"
 
 ## Docker
 
-The canonical image is intended to live at `ghcr.io/dirkkuiper/flits`.
+The published image is available at `ghcr.io/dirkkuiper/flits`.
 
 Recommended tags:
 
 - `latest` for the newest stable release
-- an exact tag such as `0.2.0` when you want a reproducible deployment
+- an exact tag such as `1.2.0` when you want a reproducible deployment
 - `edge` for snapshots built from `main`
 
-If an image is already published:
+Run the latest stable release:
 
 ```bash
 docker run --rm -p 8123:8123 \
@@ -69,7 +69,7 @@ To pin a specific stable release instead:
 docker run --rm -p 8123:8123 \
   -e FLITS_DATA_DIR=/data \
   -v /path/to/filterbanks:/data \
-  ghcr.io/dirkkuiper/flits:0.1.1
+  ghcr.io/dirkkuiper/flits:1.2.0
 ```
 
 To build locally instead:
