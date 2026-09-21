@@ -140,43 +140,26 @@ calibration uncertainties. Flux and fluence estimates without an SEFD
 incomplete uncertainty budgets. These labels expose assumptions for scientific
 assessment rather than guaranteeing that a measurement is suitable for publication.
 
+User documentation and reproducible examples are available at
+<https://dirkkuiper.github.io/flits/>.
+
 # Research impact statement
 
-FLITS is used in the first author's ongoing multi-telescope repeater project
-and in routine analysis within the AstroFlash research group. It was also used
-in a summer research project to determine burst dispersion measures. These
-applications use the software for current scientific analysis and provide
-practical use cases for its shared measurement workflow.
-
-Public development records document additional non-author engagement. A user
-reported a need to analyse folded pulsar data for scattering measurements in
-[issue 62](https://github.com/DirkKuiper/flits/issues/62), and contributed an
-initial implementation through
-[pull request 65](https://github.com/DirkKuiper/flits/pull/65). These records
-provide a concrete example of a research use case extending format support.
-
-For independent evaluation, the
-[guided workflow](https://dirkkuiper.github.io/flits/guided-workflow/)
-provides a downloadable GBT burst, analysis instructions, and reference values.
-A separate executable example compares RM-synthesis outputs with a pinned
-RM-Tools dataset. Synthetic tests and browser tests exercise the analysis and
-interface. FLITS is distributed through PyPI and container images, with user
-and developer documentation at <https://dirkkuiper.github.io/flits/>.
+FLITS is used for FRB research within the AstroFlash group and the CHIME
+collaboration. It supports studies of burst energetics, spectro-temporal
+structure, and propagation effects by bringing intensity and polarization
+measurements into a consistent workflow. Researchers can compare bursts across
+observing epochs and instruments, assess how analysis choices affect the
+results, and share reproducible analyses through saved sessions and the
+original data.
 
 # AI usage disclosure
 
-OpenAI Codex and ChatGPT, and Anthropic Claude Code, were used during
-software development, documentation, and manuscript preparation. Assistance
-included code generation and review, refactoring, test scaffolding, and prose
-drafting and editing. Tools and models changed during development; historical
-model names and versions were not systematically recorded.
-
-The first author reviewed, edited, and validated AI-assisted contributions and
-made the core scientific and software-design decisions with the co-authors.
-Validation included automated tests, static analysis, browser tests, packaging
-and container checks, and comparison of scientific claims and references with
-the implementation and primary sources. The authors retain responsibility for
-the software and manuscript.
+Generative AI tools (OpenAI Codex/ChatGPT and Anthropic Claude Code) assisted
+software development, documentation, and manuscript preparation, including
+prose editing and review. Historical model versions were not recorded. The
+authors reviewed and validated AI-assisted outputs, made the core scientific
+and design decisions, and retain responsibility for the work.
 
 # Acknowledgements
 
