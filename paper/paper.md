@@ -23,7 +23,7 @@ affiliations:
     index: 2
   - name: Department of Physics, McGill University, 3600 University Street, Montreal, Quebec H3A 2T8, Canada
     index: 3
-  - name: Trottier Space Institute at McGill, McGill University, 3550 University Street, Montreal, Quebec H3A 2A7, Canada
+  - name: Trottier Space Institute, McGill University, 3550 University Street, Montreal, Quebec H3A 2A7, Canada
     index: 4
 date: 21 September 2026
 bibliography: paper.bib
@@ -32,122 +32,138 @@ bibliography: paper.bib
 # Summary
 
 Fast radio bursts (FRBs) are brief flashes of radio emission, usually detected
-from distant galaxies [@Lorimer2007; @Petroff2022]. Their duration, brightness,
-frequency structure, and polarization help researchers investigate their
-sources and the material through which the signals have travelled. Measuring
-these properties requires choices about interference removal, background
-estimation, and which parts of a burst to include. Retaining those choices is
-essential for interpreting and reproducing the measurements.
+from distant galaxies [@Lorimer2007; @Petroff2022]. They are commonly studied
+using a dynamic spectrum: a record of the radio signal as a function of time
+and observing frequency. Measurements of burst brightness, duration, frequency
+structure, and polarization help researchers investigate the source and the
+material through which its radiation has travelled.
 
 FLITS (Fast-Look Interactive Transient Suite) is an open-source Python package
-with a browser interface for analysing individual detected bursts. It brings
-data inspection, interference masking, burst selection, measurement, and
-export into a shared workflow across several radio-telescope data formats.
-Its analysis tools include corrections for frequency-dependent arrival times,
-measurements of burst duration and fluence, time-frequency structure
-diagnostics, polarization analysis, and optional burst modelling.
+with a browser interface for analysing detected bursts. It brings data
+inspection, interference removal, measurement, and modelling into a single
+interactive session. It also acts as a wrapper around existing tools, including
+`your` for reading data, `jess` for interference mitigation, and optional
+`fitburst` modelling, so users can apply them to the same selected data without
+moving between separate programs.
 
-FLITS records the selected analysis state in a portable session snapshot,
-including the input-file identity, data selections, channel masks, and
-calibration inputs. Given the snapshot and original data, users can reopen an
-analysis or recompute supported measurements without a browser. Outputs also
-identify their uncertainty basis and flag missing calibration information.
-This combination supports consistent measurements across instruments while
-preserving the choices needed to inspect and reproduce the analysis.
+FLITS saves the measurement settings, selected data regions, excluded frequency
+channels, and calibration inputs in a portable session file. Together with the
+original data, this file allows users to reopen an analysis and recompute
+supported measurements. Outputs describe how uncertainties were estimated and
+flag missing calibration information, making published results easier to check
+and reproduce.
 
 # Statement of need
 
-FRB researchers often combine observations from telescopes with different data
-formats, time resolutions, bandwidths, and calibration conventions. Comparing
-burst properties across these observations requires consistent definitions of
-the burst window, background region, usable frequency range, and adopted
-dispersion measure (DM). DM describes the frequency-dependent propagation
-delay and can affect both the measured duration and apparent burst structure.
+For each detected burst, radio observations provide dynamic spectra, often for
+the four Stokes parameters: total intensity ($I$), linear polarization ($Q$
+and $U$), and circular polarization ($V$). Some observations retain only total
+intensity. Turning these data into an astrophysical interpretation requires
+measurements such as dispersion measure (DM), which describes the delay of
+lower-frequency radiation by free electrons, and rotation measure (RM), which
+describes the wavelength-dependent rotation of linear polarization by
+magnetized plasma. Other quantities include burst width, arrival time,
+spectrum, fluence (flux density integrated over time), and, given calibration
+and distance information, peak luminosity. Scintillation bandwidth and
+scattering time characterize fine frequency structure and pulse broadening
+caused by propagation through intervening material.
 
-The campaign that motivated FLITS combines observations from the Green Bank
-Telescope at L and P band, Nançay, Westerbork, Onsala, Stockert, and CHIME.
-Maintaining separate analysis scripts for these instruments introduces repeated
-format-conversion work and makes it harder to preserve a consistent record of
-measurement settings. A table of final values alone cannot establish which
-channels, noise samples, or calibration assumptions produced each result.
+These derived properties are routinely reported in papers, but a table of
+values rarely records every choice needed to reproduce them. Results depend
+on the burst and background regions, excluded interference, time and frequency
+resolution, calibration, and fitted model. Comparing observations from
+instruments with different formats and sensitivities adds further complexity.
+The campaign that motivated FLITS combines data from the Green Bank Telescope
+at L and P band, Nançay, Westerbork, Onsala, Stockert, and CHIME.
 
-FLITS serves researchers who need to inspect bursts interactively while
-retaining an explicit, reusable analysis state. Instrument readers provide a
-common data representation, telescope presets supply configurable calibration
-defaults, and saved sessions retain the selections associated with each
-measurement. This supports comparisons across a campaign and lets
-collaborators revisit an analysis without reconstructing its settings from
-separate scripts and notes.
+Automated pipelines are essential for samples of hundreds to thousands of
+bursts, but unusual or particularly informative events often warrant individual
+attention. For example, successive components in some repeating FRBs appear
+at progressively lower frequencies, the "sad-trombone" effect
+[@Hessels2019]. This structure can be confused with an incorrect dispersion
+correction, so the DM that maximizes signal-to-noise need not best preserve the
+burst's components. Interactive inspection lets researchers compare DM choices,
+separate overlapping components, select uncontaminated background data, and
+check what a fitted model fails to explain. It supports careful assessment of
+such ambiguities without claiming to remove them automatically.
+
+FLITS combines this flexibility with a record of the settings used. Users can
+refine an individual analysis, compare measurements across observations, and
+share the saved session and original data so collaborators can examine how
+the results were obtained.
 
 # State of the field
 
-FLITS builds on an established ecosystem of radio-astronomy software. PRESTO
-[@presto] provides pulsar search and analysis tools, while Heimdall supports
-single-pulse searches using accelerated dedispersion [@Barsdell2012]. The `your`
-library [@Aggarwal2020] provides unified access to common time-domain formats,
-and PSRCHIVE [@Hotan2004] supports pulsar data processing, calibration, and
-analysis. More specialized packages include `fitburst` for modelling dynamic
-spectra [@fitburst], DM\_phase for structure-based DM estimation [@dmphase],
-RM-Tools for Faraday-rotation analysis [@rmtools], and FRBGui for interactive
-measurements of burst spectro-temporal properties [@frbgui].
+Several packages address the analysis of bursts after detection. `fitburst`
+[@fitburst] models dynamic spectra to estimate burst shape, dispersion, and
+scattering parameters. FRBGui [@frbgui] provides interactive measurements of
+burst structure in time and frequency. DM\_phase [@dmphase] estimates DM using
+resolved burst structure, while RM-Tools [@rmtools] provides rotation-measure
+synthesis and polarization fitting. Stingray [@Bachetti2024] offers broader
+time-series and variability analysis, including power spectra, correlations,
+and statistical modelling of astronomical light curves. These tools provide
+complementary ways to study transient signals.
 
-FLITS focuses on coordinating these kinds of measurements through one
-instrument-independent session model. Its contribution is the connection
-between interactive selections, calibration and uncertainty metadata, and
-replayable measurement outputs. Implementing this workflow as a separate
-package allows its session representation to span several formats and analysis
-methods without tying it to one specialist application's data model. FLITS
-reuses `your` and `jess` [@Kania2026], integrates optional `fitburst` modelling,
-and checks its RM-synthesis outputs against an RM-Tools reference dataset.
-This design combines existing capabilities with explicit provenance for the
-measurement workflow.
+FLITS connects data preparation, selected specialist tools, and its own
+measurements through a shared session. It uses `your` [@Aggarwal2020] to read
+common radio data formats and `jess` [@Kania2026] for interference mitigation,
+and passes the selected dynamic spectrum to `fitburst` for optional modelling.
+Its own RM-synthesis implementation is checked against an RM-Tools reference
+dataset. Keeping the session independent of any one modelling package lets
+FLITS combine different methods and file formats. Its main contribution is to retain the
+data selections and calibration assumptions alongside measurements, so the
+interactive workflow can be inspected and supported calculations repeated.
 
 # Software design
 
-FLITS separates the scientific session from its browser interface. Readers
-normalize SIGPROC filterbank, PSRFITS search and folded data, and supported
-CHIME/FRB HDF5 products into a common representation. CHIME inputs include
-public catalogue waterfalls [@CHIMEFRB2021] and beamformed power products.
-Additional readers can register through Python entry points. Analysis modules
-operate on the session's selections, while a FastAPI service exposes them to a
-browser. Keeping computation independent of the interface supports automated
-testing and command-line use.
+The same Python analysis routines serve both the browser interface and
+command-line workflows. Changes made in the browser update a session containing
+the data and analysis settings; the calculations can also run without opening
+a browser. This allows automated tests to exercise the measurement routines
+directly.
 
-The session is the central unit of analysis. Its versioned JSON snapshot stores
-the source-file reference and SHA-256 hash, DM, crop, burst and off-pulse
-windows, frequency selection, channel mask, calibration inputs, and available
-analysis results. Recording this state requires more serialization and
-compatibility handling than exporting a measurement table, but makes the
-settings inspectable and reusable. A snapshot records the saved state; it is
-not a chronological log of every interaction or a substitute for the input
-data and software environment.
+FLITS reads SIGPROC filterbank files, PSRFITS search and folded data
+[@Hotan2004], and supported CHIME/FRB HDF5 products, including public catalogue
+dynamic spectra [@CHIMEFRB2021] and beamformed power data. These readers convert
+the input into common arrays and descriptive information. Additional file
+formats can be supported through reader plugins.
 
-The `flits replay` command reopens the source data and recomputes the core
-measurements and recorded width, drift, and in-session polarization analyses.
-It can compare core numerical measurement outputs with stored values. DM
-sweeps, temporal and spectral diagnostics, and optional model fits are retained
-as stored results rather than rerun by this command. Export bundles collect
-measurements, plots, and method-specific products for further analysis.
+A saved JSON session file records the input-file location and checksum, DM,
+data crop, burst and background regions, frequency range, excluded channels,
+calibration inputs, and available results. This takes more care to maintain
+than a table of measurements, but preserves the settings needed to revisit an
+analysis. The file captures the saved state, not a history of every interaction;
+reproducing the calculation also requires the original data and an appropriate
+software environment.
 
-Polarization analysis supports both suitable four-product input files with an
-established polarization basis and separately prepared Q/U spectra. FLITS
-performs weighted rotation-measure synthesis [@Brentjens2005; @Heald2009];
-instrumental polarization calibration and ionospheric corrections remain
-upstream responsibilities. For intensity measurements, uncertainty metadata
-distinguishes statistical errors from estimates that include supplied
-calibration uncertainties. Flux and fluence estimates without an SEFD
-(system-equivalent flux density) uncertainty are explicitly flagged as having
-incomplete uncertainty budgets. These labels expose assumptions for scientific
-assessment rather than guaranteeing that a measurement is suitable for publication.
+The `flits replay` command reopens the data and recomputes the core
+measurements and any recorded width comparisons, frequency-drift measurements,
+and polarization analyses performed on the session data. It can compare the
+core numerical results with their saved values. DM scans, other time- and
+frequency-structure analyses, and optional model fits remain saved results
+rather than being rerun by this command. Users can export measurements,
+plots, and model outputs for further analysis.
+
+Polarization analysis accepts suitable four-polarization input files with known
+conventions, or separately prepared $Q/U$ spectra. FLITS performs weighted
+RM synthesis [@Brentjens2005; @Heald2009], which combines the polarization
+across frequency to estimate Faraday rotation. Instrumental polarization
+calibration and corrections for Earth's ionosphere must be applied separately.
+Flux and fluence uncertainties distinguish measurement noise from calibration
+uncertainty. When uncertainty in the system-equivalent flux density (SEFD), a
+measure of telescope sensitivity, is not supplied, the outputs flag the
+incomplete uncertainty budget. These checks help users judge a result's limits;
+they do not establish its scientific validity on their own.
 
 User documentation and reproducible examples are available at
 <https://dirkkuiper.github.io/flits/>.
 
 # Research impact statement
 
-FLITS is used for FRB research within the AstroFlash group and the CHIME
-collaboration. It supports studies of burst energetics, spectro-temporal
-structure, and propagation effects by bringing intensity and polarization
+FLITS is used for FRB research within the
+[AstroFlash group](https://astroflash-frb.github.io/) and the CHIME/FRB
+Collaboration. It supports studies of burst energetics, structure in time and
+frequency, and propagation effects by bringing intensity and polarization
 measurements into a consistent workflow. Researchers can compare bursts across
 observing epochs and instruments, assess how analysis choices affect the
 results, and share reproducible analyses through saved sessions and the
