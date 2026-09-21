@@ -4,6 +4,14 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.2.1](https://github.com/DirkKuiper/flits/compare/flits-v1.2.0...flits-v1.2.1) (2026-09-21)
+
+
+### Documentation
+
+* **joss:** prepare manuscript and reproducible submission materials ([f31ae6b](https://github.com/DirkKuiper/flits/commit/f31ae6be232771dcd270433f3f6720f9404a93d3))
+* **paper:** streamline impact and AI disclosure ([e5ecf32](https://github.com/DirkKuiper/flits/commit/e5ecf32cd8e7d772f757a12efd8b89141c804d0c))
+
 ## [1.2.0](https://github.com/DirkKuiper/flits/compare/flits-v1.1.0...flits-v1.2.0) (2026-08-25)
 
 
