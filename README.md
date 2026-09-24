@@ -21,6 +21,11 @@ The selected analysis state is recorded in a JSON session snapshot. Given
 the snapshot and original data, `flits replay` restores the selections and
 recomputes supported measurements without a browser.
 
+![FLITS aligned viewer showing a GBT burst with its time profile, dynamic spectrum, frequency profile, and selected event, off-pulse, and spectral windows.](docs/assets/guided-workflow/prepared-viewer.png)
+
+The [guided GBT workflow](https://dirkkuiper.github.io/flits/guided-workflow/)
+walks through the selections and results shown in the interface.
+
 ## Why FLITS exists
 
 Measuring a detected burst involves selecting an event window and noise

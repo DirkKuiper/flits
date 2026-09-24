@@ -105,6 +105,13 @@ That state is what the session snapshot records.
 
 ## Reading the result
 
+![DMphase score curve and residual arrival time plots from the guided GBT example.](../assets/guided-workflow/dm-sweep.png)
+
+*The DMphase curve peaks near a residual DM of 5.5 on the sampled grid; the
+weighted fit reports about 5.41. The lower plot compares sub-band arrival-time
+residuals at the applied and fitted DMs. See the [GBT guided workflow](../guided-workflow.md)
+for the inputs and interpretation limits of this example.*
+
 | Output | What to look at |
 | --- | --- |
 | Score curve | Should have a clear single maximum. Multiple comparable peaks mean the metric cannot distinguish them. |

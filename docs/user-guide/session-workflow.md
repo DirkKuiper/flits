@@ -4,6 +4,11 @@ FLITS is centered on the current session state. Most analysis products depend on
 the same crop window, event window, off-pulse definition, spectral window, and
 mask selection.
 
+![Diagram of a FLITS session: source data and DM feed prepared selections, which feed measurements and analysis tabs, then exports and snapshots.](../assets/session-state.svg)
+
+*The preparation state is shared by the measurement and analysis tabs. Save a
+snapshot when you want to preserve the selections as well as the results.*
+
 ## Typical order of operations
 
 1. Load a filterbank and DM.
@@ -29,6 +34,13 @@ Use the Prepare workflow to set the core analysis state:
 - channel masks
 
 This state feeds the later analysis tabs.
+
+![GBT burst in the aligned viewer with time, waterfall, and frequency profiles and marked event, off-pulse, and spectral selections.](../assets/guided-workflow/prepared-viewer.png)
+
+*The top plot is the time profile, the middle plot is the dynamic spectrum, and
+the plot at right is the frequency profile. Select an interaction mode above
+the plots, then click the plot to set its bounds. **Exact Selection** below the
+toolbar accepts coordinates directly when you need reproducible boundaries.*
 
 ## Measurement mindset
 

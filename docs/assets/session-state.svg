@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="270" viewBox="0 0 1040 270" role="img" aria-labelledby="title description">
+  <title id="title">How one FLITS session carries selections into analysis and export</title>
+  <desc id="description">A source file and applied DM lead to prepared crop, event, off-pulse, spectral, and mask selections. Those shared selections feed measurements and specialist analysis tabs. Results and selections can then be saved as a session snapshot or exported as products.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M1 1 L9 5 L1 9" fill="none" stroke="#5c358a" stroke-width="2"/>
+    </marker>
+  </defs>
+  <rect width="1040" height="270" rx="18" fill="#faf8fd"/>
+  <g font-family="Arial, Helvetica, sans-serif" fill="#252132">
+    <rect x="24" y="56" width="182" height="160" rx="14" fill="#fff" stroke="#d9cfe9" stroke-width="2"/>
+    <text x="44" y="94" font-size="22" font-weight="700">Load</text>
+    <text x="44" y="127" font-size="16">Source file</text>
+    <text x="44" y="152" font-size="16">Applied DM</text>
+    <text x="44" y="177" font-size="16">Preset / calibration</text>
+
+    <rect x="244" y="32" width="245" height="208" rx="14" fill="#f1e9fa" stroke="#9e7ac4" stroke-width="2"/>
+    <text x="264" y="70" font-size="22" font-weight="700">Prepare</text>
+    <text x="264" y="104" font-size="16">Crop + event window</text>
+    <text x="264" y="129" font-size="16">Off-pulse windows</text>
+    <text x="264" y="154" font-size="16">Spectral window</text>
+    <text x="264" y="179" font-size="16">Channel mask</text>
+    <text x="264" y="211" font-size="13" fill="#5c358a">Shared session state</text>
+
+    <rect x="528" y="56" width="232" height="160" rx="14" fill="#fff" stroke="#d9cfe9" stroke-width="2"/>
+    <text x="548" y="94" font-size="22" font-weight="700">Analyze</text>
+    <text x="548" y="127" font-size="16">Compute measurements</text>
+    <text x="548" y="152" font-size="16">DM / Temporal / Drift</text>
+    <text x="548" y="177" font-size="16">Fitting / Polarization</text>
+
+    <rect x="799" y="56" width="217" height="160" rx="14" fill="#fff" stroke="#d9cfe9" stroke-width="2"/>
+    <text x="819" y="94" font-size="22" font-weight="700">Keep results</text>
+    <text x="819" y="127" font-size="16">Save session snapshot</text>
+    <text x="819" y="152" font-size="16">Download JSON</text>
+    <text x="819" y="177" font-size="16">Build export bundle</text>
+  </g>
+  <g fill="none" stroke="#5c358a" stroke-width="2.5" marker-end="url(#arrow)">
+    <path d="M207 136 H236"/>
+    <path d="M490 136 H519"/>
+    <path d="M761 136 H790"/>
+  </g>
+</svg>

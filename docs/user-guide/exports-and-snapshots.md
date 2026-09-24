@@ -15,6 +15,12 @@ Use the export workflow when you want shareable outputs such as:
 The export preview helps you see what is currently available from the session
 state before downloading anything.
 
+![FLITS Export tab with Science JSON selected in the export planner and the corresponding artifact in the preview.](../assets/guided-workflow/export-panel.png)
+
+*Choose output types on the left and inspect the exact artifact list on the
+right. **Build Export Bundle** creates the selected products from the current
+session state.*
+
 ## Session snapshots
 
 Session snapshots capture the analysis state itself rather than just the final
@@ -30,6 +36,11 @@ Use **Save Session** to write the current session next to the source data in a
 timestamped copy instead. The **Saved Sessions** browser can search stored
 snapshots by source, file name, note text, preset, and DM, then reopen a
 matching session directly.
+
+![FLITS Session sidebar showing Save Session, Save Copy, Download JSON, Upload JSON, and the Saved Sessions browser.](../assets/guided-workflow/session-panel.png)
+
+*The Session panel saves or reopens the full interactive state. **Download JSON**
+makes a portable snapshot; the Export tab above builds derived artifacts.*
 
 Snapshots do not embed the raw filterbank data. To share a snapshot with someone
 else, use **Download JSON** or send the saved JSON file and make sure they start

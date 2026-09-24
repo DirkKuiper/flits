@@ -9,6 +9,12 @@ formats include SIGPROC filterbank (`.fil`), PSRFITS search/fold data
 catalog waterfalls and beamformed `BBData` power files, extensible via a
 plugin-based reader framework.
 
+![FLITS aligned viewer showing a GBT burst, its time profile, dynamic spectrum, frequency profile, event and off-pulse windows, and selected spectral band.](assets/guided-workflow/prepared-viewer.png)
+
+*The aligned viewer in the [GBT guided workflow](guided-workflow.md). Blue marks
+the event and off-pulse time windows; purple lines mark the selected frequency
+range. The three plots share the same selection state.*
+
 ## Why FLITS exists
 
 Measuring a detected burst involves selecting an event window and noise
