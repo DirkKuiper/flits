@@ -65,6 +65,13 @@ The off-pulse windows are separate from the event and set the background and
 noise estimates. FLITS quantizes selections to available bins, so the measured
 event duration and bandwidth differ slightly from the requested bounds.
 
+![Aligned viewer with the GBT burst near 240 ms, event and off-pulse windows on the time profile, and a 1300–1750 MHz spectral window on the waterfall and frequency profile.](assets/guided-workflow/prepared-viewer.png)
+
+*Prepared GBT selection. The narrow blue band around the burst is the event
+window; the pale blue regions on either side are off-pulse references. Purple
+horizontal lines delimit the spectral window. White horizontal streaks in the
+waterfall are visible interference; this reference intentionally uses no mask.*
+
 ## 4. Compute measurements
 
 Click **Compute**. The full-precision outputs are in the downloadable
@@ -88,6 +95,13 @@ limitation of the example. Supply an independently justified calibration and
 its uncertainty before interpreting these as fully calibrated scientific
 measurements. The reference does not supply a source distance or redshift.
 
+![FLITS Prepare tab showing the GBT selection, measurement cards, signal metrics, and uncertainty flags.](assets/guided-workflow/measurement-summary.png)
+
+*The Prepare tab connects the selected windows to the measured quantities.
+Fluence and peak flux carry a “Statistical only” label because this example
+does not provide an SEFD uncertainty. The displayed TOA fields are outside
+the validated reference checks for this already-dedispersed cutout.*
+
 ## 5. Run a residual DM sweep
 
 In the **DM** tab, select **DMphase**, center `0`, half range `10`, and step
@@ -98,6 +112,12 @@ Keep the session DM at zero for comparison with the reference; applying the
 best-fit value changes the data used for the measurements above. This sweep
 demonstrates the diagnostic and does not establish a new astrophysical DM for
 the source.
+
+![DMphase tab showing a sweep centered at zero with a sampled peak at 5.5 and fitted best residual DM near 5.41, plus sub-band residual-arrival-time diagnostics.](assets/guided-workflow/dm-sweep.png)
+
+*Read the score curve together with the residual diagnostics below it. The
+sampled peak and fitted best DM are distinct. This screenshot illustrates the
+residual sweep; the exact reference values are in the downloadable summary.*
 
 ## 6. Save and replay the session
 

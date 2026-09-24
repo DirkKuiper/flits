@@ -53,6 +53,12 @@ is built to remove exactly this S/N dependence.
 
 ## ACF widths are not durations
 
+![Temporal and spectral autocorrelation functions for the guided GBT burst, with a dashed half-maximum reference line.](../assets/guided-workflow/temporal-acf.png)
+
+*The dashed line marks normalized ACF = 0.5. Its intersections with the curves
+give self-similarity widths in time and frequency for the [GBT example](../guided-workflow.md),
+not the manually selected event duration.*
+
 An ACF width is a self-similarity scale. It is a good way to compare coherence
 structure between bursts or between time and frequency, but it is not
 interchangeable with the full burst duration, and the two can differ by a large

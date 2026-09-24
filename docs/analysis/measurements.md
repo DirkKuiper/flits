@@ -2,6 +2,13 @@
 
 FLITS reports measurements from the current prepared session state.
 
+![Prepare tab showing selected windows, headline measurements, signal metrics, and uncertainty flags for the GBT tutorial burst.](../assets/guided-workflow/measurement-summary.png)
+
+*The Prepare tab groups selection readiness, headline measurements, timing
+details, and uncertainty flags. These values come from the [GBT guided
+workflow](../guided-workflow.md); its absolute TOA fields are not part of the
+validated reference calculation.*
+
 ## Core outputs
 
 The measurement workflow can report:

@@ -25,6 +25,10 @@ flits --data-dir /path/to/filterbanks --host 127.0.0.1 --port 8123
 
 Open `http://127.0.0.1:8123`.
 
+The browser opens with a **New Session** form. Choose the source file and DM
+there, then use **Load Session**. The **Session** panel in the left sidebar is
+for saving or reopening a session after it has loaded.
+
 ## 3. Load a burst file
 
 FLITS reads SIGPROC filterbank (`.fil`), PSRFITS search/fold data (`.fits`,
@@ -44,6 +48,11 @@ Inside the UI:
 If FLITS can identify the observing setup, it may populate default calibration
 values such as SEFD. If it cannot, use the generic preset or set an explicit
 SEFD yourself.
+
+![New Session form with the tutorial filterbank selected, DM set to zero, the GBT preset, and the Load Session button.](assets/guided-workflow/load-session.png)
+
+*The New Session form for the [GBT example](guided-workflow.md). For your own
+data, choose your file and its appropriate DM before loading.*
 
 ## 4. Work through the session
 
