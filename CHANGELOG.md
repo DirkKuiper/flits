@@ -4,6 +4,20 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.3.0](https://github.com/DirkKuiper/flits/compare/flits-v1.2.2...flits-v1.3.0) (2026-09-25)
+
+
+### Features
+
+* **provenance:** record software origins and verify historical files ([c16348b](https://github.com/DirkKuiper/flits/commit/c16348b7fb5aaefc06968af2a6b02d314fd43138))
+* **provenance:** record software origins and verify historical files ([f4ee516](https://github.com/DirkKuiper/flits/commit/f4ee516262f3d7cd42b7be14eeac46aba4141fa5))
+
+
+### Documentation
+
+* **paper:** update and refine AI disclosure statement ([54c1c1a](https://github.com/DirkKuiper/flits/commit/54c1c1aca033b1518cd6dfea73d0ee6f9a40af6c))
+* **paper:** update and refine AI disclosure statement ([b7c9fab](https://github.com/DirkKuiper/flits/commit/b7c9fabcbb87fc9307702c909cc397c4ae0ac8a7))
+
 ## [1.2.2](https://github.com/DirkKuiper/flits/compare/flits-v1.2.1...flits-v1.2.2) (2026-09-24)
 
 
