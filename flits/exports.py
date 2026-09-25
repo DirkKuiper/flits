@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from flits.session import BurstSession
 
 
-EXPORT_SCHEMA_VERSION = "1.8"
+EXPORT_SCHEMA_VERSION = "1.9"
 DEFAULT_EXPORT_INCLUDE = ("json", "csv", "npz", "plots")
 DEFAULT_PLOT_FORMATS = ("png", "svg")
 DEFAULT_WINDOW_FORMATS = ("npz",)
@@ -114,6 +114,7 @@ class ExportSnapshotData:
     selected_channel_end: int
     masked_channels: np.ndarray
     peak_positions_ms: np.ndarray
+    software_provenance: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -287,6 +288,7 @@ def create_export_snapshot(
                 bundle_name=snapshot.bundle_name,
                 schema_version=EXPORT_SCHEMA_VERSION,
                 created_at_utc=snapshot.created_at_utc,
+                software_provenance=snapshot.software_provenance,
                 artifacts=_artifact_objects(
                     session_id=session_id,
                     export_id=snapshot.export_id,
@@ -323,6 +325,7 @@ def create_export_snapshot(
         bundle_name=snapshot.bundle_name,
         schema_version=EXPORT_SCHEMA_VERSION,
         created_at_utc=snapshot.created_at_utc,
+        software_provenance=snapshot.software_provenance,
         artifacts=_artifact_objects(
             session_id=session_id,
             export_id=snapshot.export_id,
@@ -365,6 +368,7 @@ def _build_snapshot_data(session: BurstSession) -> ExportSnapshotData:
         export_id=export_id,
         bundle_name=bundle_name,
         created_at_utc=created_at_utc,
+        software_provenance=session.software_provenance(),
         meta=export_meta,
         state=view["state"],
         results=session.results.to_dict() if session.results is not None else None,
@@ -542,6 +546,7 @@ def _build_window_metadata_payload(snapshot: ExportSnapshotData, window: WindowE
     )
     return {
         "schema_version": EXPORT_SCHEMA_VERSION,
+        "software_provenance": snapshot.software_provenance,
         "flits_version": __version__,
         "export_id": snapshot.export_id,
         "bundle_name": snapshot.bundle_name,
@@ -918,7 +923,7 @@ def _materialize_artifact(
         figure = plot_figure_cache.get(artifact.plot_key)
         if figure is None:
             raise ValueError(f"Missing plot figure for artifact: {artifact.key}")
-        return _figure_bytes(figure, artifact.format)
+        return _figure_bytes(figure, artifact.format, provenance=snapshot.software_provenance)
     raise ValueError(f"Unsupported artifact build target: {artifact.build_target}")
 
 
@@ -1034,6 +1039,7 @@ def _artifact_objects(
 def _build_science_json(snapshot: ExportSnapshotData, manifest: ExportManifest) -> bytes:
     payload = {
         "schema_version": EXPORT_SCHEMA_VERSION,
+        "software_provenance": snapshot.software_provenance,
         "flits_version": __version__,
         "export_id": snapshot.export_id,
         "bundle_name": snapshot.bundle_name,
@@ -1215,6 +1221,7 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
             drift_uncertainty_details.get("component_drift_rate_mhz_per_ms"),
         )
     )
+    row["software_provenance_json"] = json.dumps(snapshot.software_provenance, sort_keys=True)
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=list(row))
     writer.writeheader()
@@ -1224,6 +1231,7 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
 
 def _build_diagnostics_npz(snapshot: ExportSnapshotData) -> bytes:
     payload: dict[str, Any] = {
+        "software_provenance_json": np.asarray(json.dumps(snapshot.software_provenance, sort_keys=True), dtype=np.str_),
         "dynamic_spectrum": np.asarray(snapshot.dynamic_spectrum, dtype=float),
         "time_axis_ms": np.asarray(snapshot.time_axis_ms, dtype=float),
         "freq_axis_mhz": np.asarray(snapshot.freq_axis_mhz, dtype=float),
@@ -1863,9 +1871,10 @@ def _style_colorbar(colorbar: Any) -> None:
     colorbar.ax.tick_params(color=ASTROFLASH_COLORS["muted"], labelcolor=ASTROFLASH_COLORS["muted"])
 
 
-def _figure_bytes(figure: plt.Figure, fmt: str) -> bytes:
+def _figure_bytes(figure: plt.Figure, fmt: str, *, provenance: dict[str, Any] | None = None) -> bytes:
     buffer = io.BytesIO()
-    figure.savefig(buffer, format=fmt, dpi=200, bbox_inches="tight", facecolor="white")
+    metadata = None if provenance is None else {"Description": json.dumps(provenance, sort_keys=True)}
+    figure.savefig(buffer, format=fmt, dpi=200, bbox_inches="tight", facecolor="white", metadata=metadata)
     return buffer.getvalue()
 
 

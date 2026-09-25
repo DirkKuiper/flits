@@ -1,0 +1,2 @@
+# Release-produced compatibility files are immutable test data, not hand-written code.
+tests/fixtures/compatibility/flits-v*/** linguist-generated=true -text -whitespace

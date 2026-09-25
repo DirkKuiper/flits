@@ -250,6 +250,9 @@ def replay(argv: Sequence[str]) -> int:
         _fail(f"Snapshot could not be replayed: {exc}")
 
     logger.info("Reopened %s at DM %.6f", session.burst_file, session.dm)
+    provenance_warnings = session.provenance_warnings()
+    for message in provenance_warnings:
+        logger.warning(message)
 
     recomputed: list[str] = []
     for key, method_name in _REPLAYABLE_ANALYSES:
@@ -303,6 +306,8 @@ def replay(argv: Sequence[str]) -> int:
         "exported": [str(path) for path in exported],
         "checked": bool(args.check),
         "differences": differences,
+        "provenance_warnings": provenance_warnings,
+        "software_provenance": session.software_provenance(),
     }
 
     if args.as_json:

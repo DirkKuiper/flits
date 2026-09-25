@@ -1,0 +1,529 @@
+{
+  "generation_environment": {
+    "flits_version": "1.2.2",
+    "flits_source": {
+      "commit": "a96114ca8c3d8981872f1be5a0717ff4eb123ea9",
+      "dirty": true,
+      "python_source_sha256": "dec67e9d032f731dae174ffb6a265dd59aea7f56f74dffc20caa4e74e9bd6548"
+    },
+    "python_version": "3.12.2",
+    "python_implementation": "CPython",
+    "system": "Darwin",
+    "system_release": "25.6.0",
+    "machine": "arm64",
+    "byteorder": "little",
+    "packages": {
+      "annotated-doc": {
+        "version": "0.0.4"
+      },
+      "annotated-types": {
+        "version": "0.7.0"
+      },
+      "anyio": {
+        "version": "4.12.1"
+      },
+      "appnope": {
+        "version": "0.1.4"
+      },
+      "ast-serialize": {
+        "version": "0.8.0"
+      },
+      "astropy": {
+        "version": "7.2.0"
+      },
+      "astropy-iers-data": {
+        "version": "0.2026.3.9.0.47.45"
+      },
+      "asttokens": {
+        "version": "3.0.1"
+      },
+      "babel": {
+        "version": "2.18.0"
+      },
+      "backrefs": {
+        "version": "8.0"
+      },
+      "certifi": {
+        "version": "2026.7.22"
+      },
+      "charset-normalizer": {
+        "version": "3.5.1"
+      },
+      "click": {
+        "version": "8.3.1"
+      },
+      "colorama": {
+        "version": "0.4.6"
+      },
+      "comm": {
+        "version": "0.2.3"
+      },
+      "contourpy": {
+        "version": "1.3.3"
+      },
+      "cycler": {
+        "version": "0.12.1"
+      },
+      "debugpy": {
+        "version": "1.8.20"
+      },
+      "decorator": {
+        "version": "5.2.1"
+      },
+      "dmphase": {
+        "version": "0.1.1",
+        "source": {
+          "url": "https://github.com/danielemichilli/DM_phase/archive/refs/heads/master.zip",
+          "archive_hashes": {
+            "sha256": "3227d3f104e2c15cabdf3c7d53e1925f8719354d08ddd0eeaf92c48f5498c577"
+          }
+        }
+      },
+      "executing": {
+        "version": "2.2.1"
+      },
+      "fastapi": {
+        "version": "0.135.1"
+      },
+      "fitburst": {
+        "version": "0.1.0",
+        "source": {
+          "url": "https://github.com/CHIMEFRB/fitburst.git",
+          "vcs": "git",
+          "commit_id": "3c76da8f9e3ec7bc21951ce1b4a26a0255096b69",
+          "requested_revision": "3c76da8f9e3ec7bc21951ce1b4a26a0255096b69"
+        }
+      },
+      "flits": {
+        "version": "0.1.0",
+        "source": {
+          "kind": "local",
+          "editable": false,
+          "commit": null,
+          "dirty": null
+        }
+      },
+      "fonttools": {
+        "version": "4.61.1"
+      },
+      "ghp-import": {
+        "version": "2.1.0"
+      },
+      "greenlet": {
+        "version": "3.5.5"
+      },
+      "griffelib": {
+        "version": "2.2.0"
+      },
+      "h11": {
+        "version": "0.16.0"
+      },
+      "h5py": {
+        "version": "3.16.0"
+      },
+      "httpcore": {
+        "version": "1.0.9"
+      },
+      "httpx": {
+        "version": "0.28.1"
+      },
+      "idna": {
+        "version": "3.11"
+      },
+      "imageio": {
+        "version": "2.37.3"
+      },
+      "iniconfig": {
+        "version": "2.3.0"
+      },
+      "ipykernel": {
+        "version": "7.2.0"
+      },
+      "ipython": {
+        "version": "9.12.0"
+      },
+      "ipython-pygments-lexers": {
+        "version": "1.1.1"
+      },
+      "jedi": {
+        "version": "0.19.2"
+      },
+      "jess": {
+        "version": "0.3.1"
+      },
+      "jinja2": {
+        "version": "3.1.6"
+      },
+      "joblib": {
+        "version": "1.5.3"
+      },
+      "jupyter-client": {
+        "version": "8.8.0"
+      },
+      "jupyter-core": {
+        "version": "5.9.1"
+      },
+      "kiwisolver": {
+        "version": "1.4.9"
+      },
+      "lazy-loader": {
+        "version": "0.5"
+      },
+      "librt": {
+        "version": "0.15.0"
+      },
+      "llvmlite": {
+        "version": "0.46.0"
+      },
+      "markdown": {
+        "version": "3.10.3"
+      },
+      "markdown-it-py": {
+        "version": "4.0.0"
+      },
+      "markupsafe": {
+        "version": "3.0.3"
+      },
+      "matplotlib": {
+        "version": "3.10.1"
+      },
+      "matplotlib-inline": {
+        "version": "0.2.1"
+      },
+      "mdurl": {
+        "version": "0.1.2"
+      },
+      "mergedeep": {
+        "version": "1.3.4"
+      },
+      "mkdocs": {
+        "version": "1.6.1"
+      },
+      "mkdocs-autorefs": {
+        "version": "1.4.4"
+      },
+      "mkdocs-get-deps": {
+        "version": "0.2.2"
+      },
+      "mkdocs-material": {
+        "version": "9.7.7"
+      },
+      "mkdocs-material-extensions": {
+        "version": "1.3.1"
+      },
+      "mkdocstrings": {
+        "version": "1.0.6"
+      },
+      "mkdocstrings-python": {
+        "version": "2.0.7"
+      },
+      "mypy": {
+        "version": "2.3.1"
+      },
+      "mypy-extensions": {
+        "version": "1.1.0"
+      },
+      "nest-asyncio": {
+        "version": "1.6.0"
+      },
+      "networkx": {
+        "version": "3.6.1"
+      },
+      "numba": {
+        "version": "0.64.0"
+      },
+      "numpy": {
+        "version": "2.4.3"
+      },
+      "packaging": {
+        "version": "26.0"
+      },
+      "paginate": {
+        "version": "0.5.7"
+      },
+      "pandas": {
+        "version": "3.0.1"
+      },
+      "parso": {
+        "version": "0.8.6"
+      },
+      "pathspec": {
+        "version": "1.1.1"
+      },
+      "pexpect": {
+        "version": "4.9.0"
+      },
+      "pillow": {
+        "version": "12.1.1"
+      },
+      "pip": {
+        "version": "26.0.1"
+      },
+      "platformdirs": {
+        "version": "4.9.4"
+      },
+      "playwright": {
+        "version": "1.62.0"
+      },
+      "pluggy": {
+        "version": "1.6.0"
+      },
+      "prompt-toolkit": {
+        "version": "3.0.52"
+      },
+      "psutil": {
+        "version": "7.2.2"
+      },
+      "ptyprocess": {
+        "version": "0.7.0"
+      },
+      "pure-eval": {
+        "version": "0.2.3"
+      },
+      "pydantic": {
+        "version": "2.12.5"
+      },
+      "pydantic-core": {
+        "version": "2.41.5"
+      },
+      "pyee": {
+        "version": "13.0.1"
+      },
+      "pyerfa": {
+        "version": "2.0.1.5"
+      },
+      "pygments": {
+        "version": "2.19.2"
+      },
+      "pymdown-extensions": {
+        "version": "11.0.2"
+      },
+      "pyparsing": {
+        "version": "3.3.2"
+      },
+      "pytest": {
+        "version": "9.0.3"
+      },
+      "pytest-base-url": {
+        "version": "2.1.0"
+      },
+      "pytest-playwright": {
+        "version": "0.9.0"
+      },
+      "python-dateutil": {
+        "version": "2.9.0.post0"
+      },
+      "python-slugify": {
+        "version": "8.0.4"
+      },
+      "pytz": {
+        "version": "2023.4"
+      },
+      "pyyaml": {
+        "version": "6.0.3"
+      },
+      "pyyaml-env-tag": {
+        "version": "1.1"
+      },
+      "pyzmq": {
+        "version": "27.1.0"
+      },
+      "requests": {
+        "version": "2.34.2"
+      },
+      "rich": {
+        "version": "14.3.3"
+      },
+      "ruff": {
+        "version": "0.16.4"
+      },
+      "scikit-image": {
+        "version": "0.26.0"
+      },
+      "scikit-learn": {
+        "version": "1.8.0"
+      },
+      "scipy": {
+        "version": "1.17.1"
+      },
+      "six": {
+        "version": "1.17.0"
+      },
+      "stack-data": {
+        "version": "0.6.3"
+      },
+      "starlette": {
+        "version": "0.52.1"
+      },
+      "stingray": {
+        "version": "2.3.2"
+      },
+      "text-unidecode": {
+        "version": "1.3"
+      },
+      "threadpoolctl": {
+        "version": "3.6.0"
+      },
+      "tifffile": {
+        "version": "2026.3.3"
+      },
+      "tornado": {
+        "version": "6.5.5"
+      },
+      "traitlets": {
+        "version": "5.14.3"
+      },
+      "typing-extensions": {
+        "version": "4.15.0"
+      },
+      "typing-inspection": {
+        "version": "0.4.2"
+      },
+      "urllib3": {
+        "version": "2.7.0"
+      },
+      "uvicorn": {
+        "version": "0.41.0"
+      },
+      "watchdog": {
+        "version": "6.0.0"
+      },
+      "wcwidth": {
+        "version": "0.6.0"
+      },
+      "your": {
+        "version": "0.6.7"
+      }
+    }
+  },
+  "releases": [
+    {
+      "tag": "flits-v0.2.0",
+      "commit": "947e7e76d5c0a360617016854cb95cfa2f0a9ff6",
+      "flits_version": "0.2.0",
+      "session_schema": "1.2",
+      "export_schema": "1.4"
+    },
+    {
+      "tag": "flits-v0.2.1",
+      "commit": "af4ee64e44cf4ce1cf51072ce2adc6d5cdc8a5fe",
+      "flits_version": "0.2.1",
+      "session_schema": "1.3",
+      "export_schema": "1.5"
+    },
+    {
+      "tag": "flits-v1.0.0",
+      "commit": "3b65cef40fa41011435451f5554577b94ce33f17",
+      "flits_version": "1.0.0",
+      "session_schema": "1.4",
+      "export_schema": "1.6"
+    },
+    {
+      "tag": "flits-v1.1.0",
+      "commit": "3d9d94af25af2028558ff3ea9edb0fddf06bd472",
+      "flits_version": "1.1.0",
+      "session_schema": "1.5",
+      "export_schema": "1.7"
+    },
+    {
+      "tag": "flits-v1.2.1",
+      "commit": "b48bedc3330d29d359554a26a155c4d749214cba",
+      "flits_version": "1.2.1",
+      "session_schema": "1.6",
+      "export_schema": "1.8"
+    }
+  ],
+  "sha256": {
+    "flits-v0.2.0/acf_panel.png": "9604eaa954523b662099b5a59633269d6017f2f7c5119397cab6525f6b70100a",
+    "flits-v0.2.0/acf_panel.svg": "b63d4d7c45993592e5642b66ea8ede6d3b8c86ae7a0ade2771a1da213e7494b2",
+    "flits-v0.2.0/catalog.csv": "ffbef14b0d4b22ae9d8ced10fa4f6012624671916922d7b2faa1b803ee7b6eeb",
+    "flits-v0.2.0/diagnostics.npz": "e5a94d282e9fe5069b36e8044132c3a5b1d61aa6a1b0393cc707fa6217718243",
+    "flits-v0.2.0/dm_curve.png": "609841022de2f806f07e7276baf607865e071178900d163240a951415fba727a",
+    "flits-v0.2.0/dm_curve.svg": "3540668bcf291d64deea01795fd9988e512c2f2374165e4b9eecb974c6cbe0fd",
+    "flits-v0.2.0/dynamic_spectrum.png": "b66e89447f4416ecc7a8a79121baa676accc872384f41e8b2aa4a0b870a59d10",
+    "flits-v0.2.0/dynamic_spectrum.svg": "3225bf8519ced5fbcc8182cd24cbdca31fc41cc2609e712f66decb528efb7862",
+    "flits-v0.2.0/manifest.json": "8a58e1a24774ea24f69871a5e3978add4eef1b5b57473d2ac7e0dd498e791dd8",
+    "flits-v0.2.0/power_spectrum.png": "251c3f800a4aa6441ddc63550844debb03e361ddb4b896fe0ff9058ca84abe35",
+    "flits-v0.2.0/power_spectrum.svg": "d49a8f4f0b8f55a3afcdde6b07d0140d5d24fefffb34e496821169184923bdab",
+    "flits-v0.2.0/profile_diagnostics.png": "cf07a581ab87c46d1a85b9b3fad7ba4ea1baa8b1610c0115155a5a601cc7d3b3",
+    "flits-v0.2.0/profile_diagnostics.svg": "cb69c28ded783285ec5db4573be3eb6cf6e656ee305f845642f08ddf8ff1f87c",
+    "flits-v0.2.0/science.json": "7f08d672a6ceba4fedd03f1e7d2b591a22e07f8cc1b58a3f8178d885852a3db8",
+    "flits-v0.2.0/session.json": "ff1d86e275778ce8e25c68752c2f46707b6d73250cd03de10aa0afd463482bd4",
+    "flits-v0.2.0/window_native.fil": "1f4ceccccdad8312dad1c019615593e6ebefb3e9102373cc1cf39d19bab50647",
+    "flits-v0.2.0/window_native.meta.json": "7cd6b17a5e8ab06d392eaac261f34add19f076099404bacc5bc819b9a96afa26",
+    "flits-v0.2.0/window_native.npz": "f2fbc0bd671e0e98e0c10dfd1f77a672eb2ab1b7cdf754157df378a1cfdfa961",
+    "flits-v0.2.1/acf_panel.png": "9604eaa954523b662099b5a59633269d6017f2f7c5119397cab6525f6b70100a",
+    "flits-v0.2.1/acf_panel.svg": "ce0a3d6ee03c2aad05cd34cf1f599bf102e0642adb162676649e05ba922625d0",
+    "flits-v0.2.1/catalog.csv": "5a928848278d71c8a42e3b02735dc68bbd7fa1786f8fbd95ecdd147b83fbca9d",
+    "flits-v0.2.1/diagnostics.npz": "e5a94d282e9fe5069b36e8044132c3a5b1d61aa6a1b0393cc707fa6217718243",
+    "flits-v0.2.1/dm_curve.png": "609841022de2f806f07e7276baf607865e071178900d163240a951415fba727a",
+    "flits-v0.2.1/dm_curve.svg": "09fce01098dbd3d8274bb189c85b7e672ba77d94dcea8e51476fd873c06228ac",
+    "flits-v0.2.1/dynamic_spectrum.png": "b66e89447f4416ecc7a8a79121baa676accc872384f41e8b2aa4a0b870a59d10",
+    "flits-v0.2.1/dynamic_spectrum.svg": "1415a42e84b4b0d5b0a781bfdf2fa40b16a862e201e0762c4f409d9e5378e56e",
+    "flits-v0.2.1/manifest.json": "8e44a956b3c8531c1b673c1c3c31f7a688379736532dcc98efa63be2ac9769a5",
+    "flits-v0.2.1/power_spectrum.png": "251c3f800a4aa6441ddc63550844debb03e361ddb4b896fe0ff9058ca84abe35",
+    "flits-v0.2.1/power_spectrum.svg": "4b2ecd0fb223de62d583506ad6e5a081d41d48389492af898a6ec335973ac65a",
+    "flits-v0.2.1/profile_diagnostics.png": "cf07a581ab87c46d1a85b9b3fad7ba4ea1baa8b1610c0115155a5a601cc7d3b3",
+    "flits-v0.2.1/profile_diagnostics.svg": "9d6c412499f6f54d762e5daf4b4f107ad9860599def7907e9398a8022a5d9df7",
+    "flits-v0.2.1/science.json": "58fb6e39b557f7a8d9108a9550d20106484474fa04f12268702e6ab7629c05e4",
+    "flits-v0.2.1/session.json": "6a7c3f6b70962382d6a85664a47e30a868dad41134692e6ee64f9d18763d472c",
+    "flits-v0.2.1/window_native.fil": "c58655d575bba0f7f89aa89e2a35fcbc9b6fe842c6e18e5b4989199b18150f3a",
+    "flits-v0.2.1/window_native.meta.json": "29d59a3643d19ae6e15ed3451892ab48ef1a6ad30275a4a7a5f5b5610909176f",
+    "flits-v0.2.1/window_native.npz": "24317f23f62197e3cac9e2087342db548287c2837f78ba23789a8dc31941c21b",
+    "flits-v1.0.0/acf_panel.png": "9604eaa954523b662099b5a59633269d6017f2f7c5119397cab6525f6b70100a",
+    "flits-v1.0.0/acf_panel.svg": "cc96098cf89f08ea72206761369075ce6fa97c3e7b6563f97782e238acf6e5b9",
+    "flits-v1.0.0/catalog.csv": "6c7f4dc18f9d1a1f7e54881c98308cd0c35400531dba22a798ba3f923a393d60",
+    "flits-v1.0.0/diagnostics.npz": "e5a94d282e9fe5069b36e8044132c3a5b1d61aa6a1b0393cc707fa6217718243",
+    "flits-v1.0.0/dm_curve.png": "609841022de2f806f07e7276baf607865e071178900d163240a951415fba727a",
+    "flits-v1.0.0/dm_curve.svg": "30ca3bb7bd55649c041e11223295eb87c66be5a1edeef274f1051ff3014faab8",
+    "flits-v1.0.0/dynamic_spectrum.png": "b66e89447f4416ecc7a8a79121baa676accc872384f41e8b2aa4a0b870a59d10",
+    "flits-v1.0.0/dynamic_spectrum.svg": "dc6f9577f6b95e4a02e873b1935fa1dd007459dc3fc926552fb43b3b5ca30cba",
+    "flits-v1.0.0/manifest.json": "925270d42d461c20fe882f94930aecbdc6921d4edb812c09d47efbdafc7652f1",
+    "flits-v1.0.0/power_spectrum.png": "251c3f800a4aa6441ddc63550844debb03e361ddb4b896fe0ff9058ca84abe35",
+    "flits-v1.0.0/power_spectrum.svg": "a84364cc77385836205d1bee94a468aab37a71f02062646ed0d1879d6ffed4f6",
+    "flits-v1.0.0/profile_diagnostics.png": "cf07a581ab87c46d1a85b9b3fad7ba4ea1baa8b1610c0115155a5a601cc7d3b3",
+    "flits-v1.0.0/profile_diagnostics.svg": "da63a00cb3d5a02a9f6ac2b0503d0da6d76139595a7d0aa67757c127a333685c",
+    "flits-v1.0.0/science.json": "bcea4c7d6a4e65b1c1f0a9d9dde4c2fd31608a2844abc312df9c6b8059ea6290",
+    "flits-v1.0.0/session.json": "3a91bf45d71156fa1a89792feb91dd6f3e6ca15ad659ef31769150271985c123",
+    "flits-v1.0.0/window_native.fil": "0e173927f696fccdf5b38dad4b056a4d129b161ca721f5b6f4d175ed4fceb439",
+    "flits-v1.0.0/window_native.meta.json": "7c3a76287f7e6cd9624623f3eecb4fb5ebb33056d88155ddee0d154b79c8960c",
+    "flits-v1.0.0/window_native.npz": "3419f9358d13a925684b326c41649a04eacbb1a41d423eaed485cee96c6e97f4",
+    "flits-v1.1.0/acf_panel.png": "9604eaa954523b662099b5a59633269d6017f2f7c5119397cab6525f6b70100a",
+    "flits-v1.1.0/acf_panel.svg": "8c5393797c201a70d96f7063291e63cc48f587fb6c5c743326f5232966025806",
+    "flits-v1.1.0/catalog.csv": "7df99c29bb09ddb556fc0c0f8d25a7fedb5deeff0de934d86a58eb407e2c61c9",
+    "flits-v1.1.0/diagnostics.npz": "e5a94d282e9fe5069b36e8044132c3a5b1d61aa6a1b0393cc707fa6217718243",
+    "flits-v1.1.0/dm_curve.png": "609841022de2f806f07e7276baf607865e071178900d163240a951415fba727a",
+    "flits-v1.1.0/dm_curve.svg": "251e2a262e64b8fffa57284a792551d781e98f0a3177b29f30cea209ddc392be",
+    "flits-v1.1.0/dynamic_spectrum.png": "b66e89447f4416ecc7a8a79121baa676accc872384f41e8b2aa4a0b870a59d10",
+    "flits-v1.1.0/dynamic_spectrum.svg": "06ac2d2f4685dc44e98ea94bedc8dcfc2feb39232ced53d6f499b681e2bbc574",
+    "flits-v1.1.0/manifest.json": "c04f83eedccb1aedc5650b0e201634b74ce1dbdd9bc5faec678d7f0967d231b8",
+    "flits-v1.1.0/power_spectrum.png": "251c3f800a4aa6441ddc63550844debb03e361ddb4b896fe0ff9058ca84abe35",
+    "flits-v1.1.0/power_spectrum.svg": "6fe3a56412e4830a79af6b3069ced6b3b5effc81234fcc9fc344bdc3b39631c3",
+    "flits-v1.1.0/profile_diagnostics.png": "cf07a581ab87c46d1a85b9b3fad7ba4ea1baa8b1610c0115155a5a601cc7d3b3",
+    "flits-v1.1.0/profile_diagnostics.svg": "3d787c2a32de4b563eebe093808ea22b3d0fe2155d7c346fb00ab924ee070a49",
+    "flits-v1.1.0/science.json": "06cb2ee7e0db790bfbf2cd1b337bbc792e485eded4c3381d352b84cb5029ddf7",
+    "flits-v1.1.0/session.json": "3948912fd59be9b168aa268ad2a1bcd705ae63ad0876bc5090e282729b9e530e",
+    "flits-v1.1.0/window_native.fil": "1ba177c1bd7d392c7263fd553c687bf5836d23cdf5606b96f8f9a5e6c19ab0e5",
+    "flits-v1.1.0/window_native.meta.json": "4dad335573c241a2677c3d035f0e264ca24394bb2767c218a58f4d27b2b15674",
+    "flits-v1.1.0/window_native.npz": "136463bc26d6a1157c389b977c86144e538fca1980c302ef9797bb4f8c17cd47",
+    "flits-v1.2.1/acf_panel.png": "9604eaa954523b662099b5a59633269d6017f2f7c5119397cab6525f6b70100a",
+    "flits-v1.2.1/acf_panel.svg": "8ee3a16dcf7fe0d84fc87522e85bc890839754143ea57e343ad8b00e9d630897",
+    "flits-v1.2.1/catalog.csv": "cd74bca4d0b15164fabf64a8ae5884db248f1977c062f21d625a10b915e56574",
+    "flits-v1.2.1/diagnostics.npz": "e5a94d282e9fe5069b36e8044132c3a5b1d61aa6a1b0393cc707fa6217718243",
+    "flits-v1.2.1/dm_curve.png": "609841022de2f806f07e7276baf607865e071178900d163240a951415fba727a",
+    "flits-v1.2.1/dm_curve.svg": "69ea90f673ee8ebd919b8e0f1cfaf6d6103453f43fb10ca407e8f0d11f7473c4",
+    "flits-v1.2.1/dynamic_spectrum.png": "b66e89447f4416ecc7a8a79121baa676accc872384f41e8b2aa4a0b870a59d10",
+    "flits-v1.2.1/dynamic_spectrum.svg": "cb6be42df98ae07a2b5c393e95303dbbbf7295353c70c048d6ae1e98c60fc7dd",
+    "flits-v1.2.1/manifest.json": "10adc7f1c7e53baaac2fb7cf3c8dd062da3cab2ccbc2d7db71fff5fec23777a2",
+    "flits-v1.2.1/power_spectrum.png": "251c3f800a4aa6441ddc63550844debb03e361ddb4b896fe0ff9058ca84abe35",
+    "flits-v1.2.1/power_spectrum.svg": "872f9ed84d2332954db00c23a4d7ce2636e495e46959c80f8784c5873a86c86d",
+    "flits-v1.2.1/profile_diagnostics.png": "cf07a581ab87c46d1a85b9b3fad7ba4ea1baa8b1610c0115155a5a601cc7d3b3",
+    "flits-v1.2.1/profile_diagnostics.svg": "3041a0d2205558ecc54c3f0473ccee1ec91d531377d89ea690b17e94aad0410b",
+    "flits-v1.2.1/science.json": "611f909a53ef6af45e039b95922477abff67a44354cef4dfbd5927b185fdc57d",
+    "flits-v1.2.1/session.json": "8d9c511d20cdeb17c6d34277318533586ba232d2bebc56fb67988469b46e9cb1",
+    "flits-v1.2.1/window_native.fil": "85c1861863cd3b137118665297c329d87d0ebb24f37c7bd8901fe7dcbc2b993b",
+    "flits-v1.2.1/window_native.meta.json": "d9f06e7bce59fb4ec2ed600cf7d43f62d1c2883eb499d24cc4dbda60e142657c",
+    "flits-v1.2.1/window_native.npz": "af689e71aa75f43bea4962e917b11e8025fdb6ac0499271f0c33fbd61a6ef31e",
+    "synthetic.fil": "f08d3eee282bbf5a2bd965e7cfc38c27ecb9e2174bf4df2478da9e6c7626ed8c"
+  }
+}

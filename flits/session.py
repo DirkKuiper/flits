@@ -62,6 +62,7 @@ from flits.models import (
     WidthAnalysisSummary,
     compatible_scalar_uncertainty,
 )
+from flits.provenance import SESSION_SCHEMA_VERSION, SoftwareProvenance, validate_session_schema
 from flits.settings import ObservationConfig, get_auto_mask_profile, get_preset
 from flits.signal import (
     block_reduce_mean,
@@ -81,7 +82,7 @@ except Exception as exc:  # pragma: no cover - optional dependency
     jess = SimpleNamespace(channel_masks=SimpleNamespace(channel_masker=None))
 
 
-SESSION_SNAPSHOT_SCHEMA_VERSION = "1.6"
+SESSION_SNAPSHOT_SCHEMA_VERSION = SESSION_SCHEMA_VERSION
 SOURCE_HASH_ALGORITHM = "sha256"
 SOURCE_HASH_CHUNK_BYTES = 1024 * 1024
 JESS_MASK_DTYPE = np.float32
@@ -150,6 +151,7 @@ def _sample_time_bins_evenly(candidate_bins: np.ndarray, max_samples: int) -> np
 
 def _coerce_snapshot(snapshot: AnalysisSessionSnapshot | dict[str, Any]) -> AnalysisSessionSnapshot:
     if isinstance(snapshot, AnalysisSessionSnapshot):
+        validate_session_schema(snapshot.schema_version)
         return snapshot
     return AnalysisSessionSnapshot.from_dict(snapshot)
 
@@ -325,8 +327,10 @@ class BurstSession:
 
     The whole of that state round-trips through `to_snapshot` and
     `from_snapshot`, which is what makes an analysis reproducible: the snapshot
-    plus the original file is enough to obtain the same numbers again, either in
-    the interface or through `flits replay`.
+    plus the original file and a compatible software environment permit
+    supported calculations to be repeated, either in the interface or through
+    `flits replay`. Software provenance identifies the environment of each
+    cached analysis independently of the environment saving the snapshot.
 
     Examples
     --------
@@ -375,6 +379,7 @@ class BurstSession:
     polarization: PolarizationAnalysisResult | None = None
     export_snapshots: dict[str, StoredExportSnapshot] = field(default_factory=dict)
     export_order: list[str] = field(default_factory=list)
+    provenance: SoftwareProvenance = field(default_factory=SoftwareProvenance)
     # Dispersion state relative to the DM the data was loaded at. Retuning the
     # DM re-derives the absolute shift solution from this reference instead of
     # rounding each incremental step, so repeated changes cannot accumulate
@@ -388,6 +393,44 @@ class BurstSession:
     _stokes_base_cube: np.ndarray | None = field(default=None, repr=False, compare=False)
     _stokes_metadata: FilterbankMetadata | None = field(default=None, repr=False, compare=False)
     _polarization_capability: dict[str, Any] | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self.provenance.record("data_load")
+
+    def _active_provenance_products(self) -> list[str]:
+        products = ["data_load"]
+        products.extend(
+            key
+            for key in (
+                "results",
+                "width_analysis",
+                "dm_optimization",
+                "spectral_analysis",
+                "temporal_structure",
+                "drift_analysis",
+                "polarization",
+            )
+            if getattr(self, key) is not None
+        )
+        if self.last_auto_mask is not None:
+            products.append("auto_mask")
+        if self.results is not None:
+            if self.results.diagnostics.model_fit is not None:
+                products.append("model_fit")
+            if self.results.width_ms_model is not None or self.results.tau_sc_ms is not None:
+                products.append("model_fit_values")
+        return products
+
+    def software_provenance(self) -> dict[str, Any]:
+        """Snapshot of software identities; unknown historical origins stay unknown."""
+        return self.provenance.to_dict(self._active_provenance_products())
+
+    def provenance_warnings(self) -> list[str]:
+        return self.provenance.warnings(self._active_provenance_products())
+
+    def _record_analysis(self, name: str, *inputs: str) -> None:
+        upstream = ("data_load",) + (("auto_mask",) if self.last_auto_mask is not None else ()) + inputs
+        self.provenance.record(name, inputs=upstream)
 
     @classmethod
     def from_file(
@@ -477,6 +520,8 @@ class BurstSession:
         web layer uses this to enforce data-directory containment.
         """
         snapshot = _coerce_snapshot(snapshot)
+        # Validate provenance before opening the potentially large input file.
+        saved_provenance = SoftwareProvenance.restore(snapshot.software_provenance, runtime={})
         session_loader = cls.from_file if loader is None else loader
         source_path = _resolve_snapshot_source_path(snapshot.source)
         session = session_loader(
@@ -501,6 +546,9 @@ class BurstSession:
             polarization_basis=snapshot.polarization_basis,
         )
         session._validate_snapshot_source(snapshot.source)
+        saved_provenance.runtime = session.provenance.runtime
+        session.provenance = saved_provenance
+        session.provenance.record("data_load")
 
         if len(snapshot.crop_bins) == 2:
             session.crop_start = session.clamp_bin(snapshot.crop_bins[0])
@@ -550,6 +598,8 @@ class BurstSession:
             session.polarization = snapshot.polarization
             if session.results is not None:
                 session._apply_width_analysis_to_results()
+        else:
+            session.provenance.products = {"data_load": session.provenance.products["data_load"]}
         return session
 
     @property
@@ -692,24 +742,30 @@ class BurstSession:
     def invalidate_results(self) -> None:
         """Discard cached burst measurements."""
         self.results = None
+        self.provenance.discard("results", "model_fit", "model_fit_values")
 
     def clear_width_analysis(self) -> None:
         """Discard the cached width analysis."""
         self.width_analysis = None
+        self.provenance.discard("width_analysis")
         if self.results is not None:
             self.results = replace(self.results, width_results=[], accepted_width=None)
+            self.provenance.annotate("results", "width_analysis", None)
 
     def clear_dm_optimization(self) -> None:
         """Discard the cached DM sweep result."""
         self.dm_optimization = None
+        self.provenance.discard("dm_optimization")
 
     def clear_spectral_analysis(self) -> None:
         """Discard the cached spectral analysis."""
         self.spectral_analysis = None
+        self.provenance.discard("spectral_analysis")
 
     def clear_temporal_structure(self) -> None:
         """Discard the cached temporal-structure analysis."""
         self.temporal_structure = None
+        self.provenance.discard("temporal_structure")
 
     def clear_drift_analysis(self) -> None:
         """Discard the cached sub-burst drift measurement.
@@ -719,6 +775,7 @@ class BurstSession:
         the other measurements alone.
         """
         self.drift_analysis = None
+        self.provenance.discard("drift_analysis")
 
     def clear_polarization(self) -> None:
         """Discard the cached polarization analysis.
@@ -728,6 +785,7 @@ class BurstSession:
         dispersion shift to it on use.
         """
         self.polarization = None
+        self.provenance.discard("polarization")
 
     def invalidate_analysis_state(self) -> None:
         """Discard every cached analysis, after a change that invalidates them all."""
@@ -1595,6 +1653,7 @@ class BurstSession:
         observatory = self._observatory_location()
 
         return {
+            "provenance_warnings": self.provenance_warnings(),
             "meta": {
                 "burst_file": self.burst_file,
                 "burst_name": Path(self.burst_file).name,
@@ -1956,6 +2015,7 @@ class BurstSession:
                 test_used=None,
                 tests_tried=(),
             )
+            self.provenance.record("auto_mask", inputs=("data_load",))
             return
 
         explicit_offpulse = self._offpulse_regions_in_crop()
@@ -1995,6 +2055,7 @@ class BurstSession:
                 test_used=None,
                 tests_tried=(),
             )
+            self.provenance.record("auto_mask", inputs=("data_load",))
             return
 
         offburst = masked[eligible_channels][:, sampled_bins]
@@ -2052,6 +2113,7 @@ class BurstSession:
             test_used=test_used,
             tests_tried=tuple(tests_tried),
         )
+        self.provenance.record("auto_mask", inputs=("data_load",))
 
     def set_dm(self, new_dm: float) -> None:
         """Retune the dispersion measure of the loaded data.
@@ -2088,6 +2150,7 @@ class BurstSession:
     def apply_best_dm(self) -> DmOptimizationResult:
         """Adopt the best DM found by the last sweep and re-dedisperse to it."""
         optimization = self.dm_optimization
+        origin = self.provenance.products.get("dm_optimization")
         if optimization is None:
             raise ValueError("No DM optimization is available to apply.")
         best_dm = float(optimization.best_dm)
@@ -2095,6 +2158,8 @@ class BurstSession:
             raise ValueError("The optimized best DM is not finite.")
         self.set_dm(best_dm)
         self.dm_optimization = optimization
+        if origin is not None:
+            self.provenance.products["dm_optimization"] = origin
         return optimization
 
     def _dm_provenance(
@@ -2162,6 +2227,7 @@ class BurstSession:
             effective_bandwidth_mhz=context.effective_bandwidth_mhz,
             existing_accepted_method=existing_method,
         )
+        self._record_analysis("width_analysis")
         self._apply_width_analysis_to_results()
         return self.width_analysis
 
@@ -2302,6 +2368,7 @@ class BurstSession:
             optimization,
             component_results=component_results,
         )
+        self._record_analysis("dm_optimization")
         return self.dm_optimization
 
     def _apply_width_analysis_to_results(self) -> None:
@@ -2313,6 +2380,9 @@ class BurstSession:
             self.results,
             width_results=width_results,
             accepted_width=accepted_width,
+        )
+        self.provenance.annotate(
+            "results", "width_analysis", "width_analysis" if self.width_analysis is not None else None
         )
 
     def compute_properties(self) -> BurstMeasurements:
@@ -2389,6 +2459,7 @@ class BurstSession:
                 ),
             )
         self.results = measurements
+        self._record_analysis("results", *(("width_analysis",) if self.width_analysis is not None else ()))
         self._apply_width_analysis_to_results()
         return self.results
 
@@ -2480,6 +2551,9 @@ class BurstSession:
             width_guess_ms=self.results.width_ms_acf,
             config=config,
         )
+        self._record_analysis("model_fit", "results")
+        if fit_result.status == "ok":
+            self._record_analysis("model_fit_values", "model_fit")
 
         updated_flags = list(self.results.measurement_flags)
         if fit_result.status == "ok" and "fit" not in updated_flags:
@@ -2527,6 +2601,9 @@ class BurstSession:
                 self.temporal_structure,
                 model_fit_min_component_ms=(None if finite_widths.size == 0 else float(np.min(finite_widths))),
             )
+            # Only this fit-derived annotation changed; retain the origin of
+            # the temporal calculation and attach the annotation's own origin.
+            self.provenance.annotate("temporal_structure", "model_fit_annotation", "model_fit")
         self._apply_width_analysis_to_results()
         return self.results
 
@@ -2574,6 +2651,11 @@ class BurstSession:
             ),
         )
         self.spectral_analysis = temporal_to_spectral_result(self.temporal_structure)
+        self._record_analysis(
+            "temporal_structure",
+            *(("model_fit",) if self.results is not None and self.results.diagnostics.model_fit is not None else ()),
+        )
+        self._record_analysis("spectral_analysis", "temporal_structure")
         return self.temporal_structure
 
     def run_spectral_analysis(self, segment_length_ms: float) -> SpectralAnalysisResult:
@@ -2668,6 +2750,7 @@ class BurstSession:
             ),
             self.drift_settings,
         )
+        self._record_analysis("drift_analysis", *(("dm_optimization",) if self.dm_optimization is not None else ()))
         return self.drift_analysis
 
     # ------------------------------------------------------------------
@@ -2886,6 +2969,7 @@ class BurstSession:
             warnings=warnings_list,
         )
         self.polarization = result
+        self._record_analysis("polarization")
         return result
 
     def _build_source_ref(self) -> SessionSourceRef:
@@ -2956,6 +3040,7 @@ class BurstSession:
         """Capture the full session state as a snapshot object."""
         return AnalysisSessionSnapshot(
             schema_version=SESSION_SNAPSHOT_SCHEMA_VERSION,
+            software_provenance=self.software_provenance(),
             source=self._build_source_ref(),
             dm=float(self.dm),
             preset_key=self.config.preset_key,

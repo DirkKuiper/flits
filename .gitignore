@@ -13,6 +13,8 @@ __pycache__/
 .flits/
 *.fil
 *.npz
+!tests/fixtures/compatibility/**/*.npz
+!tests/fixtures/compatibility/**/*.fil
 burst_properties*.csv
 tools/
 data/

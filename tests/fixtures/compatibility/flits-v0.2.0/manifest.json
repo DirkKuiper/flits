@@ -1,0 +1,170 @@
+{
+  "export_id": "d2205950cea741cfa97febe6cf635569",
+  "bundle_name": "synthetic_20260925T090727Z_d2205950",
+  "schema_version": "1.4",
+  "created_at_utc": "2026-09-25T09:07:27Z",
+  "artifacts": [
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_science.json",
+      "kind": "structured",
+      "content_type": "application/json; charset=utf-8",
+      "size_bytes": 30393,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_science.json",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_catalog.csv",
+      "kind": "catalog",
+      "content_type": "text/csv; charset=utf-8",
+      "size_bytes": 1644,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_catalog.csv",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_diagnostics.npz",
+      "kind": "arrays",
+      "content_type": "application/x-npz",
+      "size_bytes": 17420,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_diagnostics.npz",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_dynamic_spectrum.png",
+      "kind": "plot",
+      "content_type": "image/png",
+      "size_bytes": 69237,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_dynamic_spectrum.png",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_dynamic_spectrum.svg",
+      "kind": "plot",
+      "content_type": "image/svg+xml",
+      "size_bytes": 52405,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_dynamic_spectrum.svg",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_profile_diagnostics.png",
+      "kind": "plot",
+      "content_type": "image/png",
+      "size_bytes": 128833,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_profile_diagnostics.png",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_profile_diagnostics.svg",
+      "kind": "plot",
+      "content_type": "image/svg+xml",
+      "size_bytes": 54503,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_profile_diagnostics.svg",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_acf_panel.png",
+      "kind": "plot",
+      "content_type": "image/png",
+      "size_bytes": 75302,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_acf_panel.png",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_acf_panel.svg",
+      "kind": "plot",
+      "content_type": "image/svg+xml",
+      "size_bytes": 44024,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_acf_panel.svg",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_power_spectrum.png",
+      "kind": "plot",
+      "content_type": "image/png",
+      "size_bytes": 48051,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_power_spectrum.png",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_power_spectrum.svg",
+      "kind": "plot",
+      "content_type": "image/svg+xml",
+      "size_bytes": 41717,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_power_spectrum.svg",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_dm_curve.png",
+      "kind": "plot",
+      "content_type": "image/png",
+      "size_bytes": 50941,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_dm_curve.png",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_dm_curve.svg",
+      "kind": "plot",
+      "content_type": "image/svg+xml",
+      "size_bytes": 33960,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_dm_curve.svg",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_dm_residuals.png",
+      "kind": "plot",
+      "content_type": "image/png",
+      "size_bytes": null,
+      "url": null,
+      "status": "omitted",
+      "reason": "residual_diagnostics_unavailable"
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_dm_residuals.svg",
+      "kind": "plot",
+      "content_type": "image/svg+xml",
+      "size_bytes": null,
+      "url": null,
+      "status": "omitted",
+      "reason": "residual_diagnostics_unavailable"
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_window_native.meta.json",
+      "kind": "window",
+      "content_type": "application/json; charset=utf-8",
+      "size_bytes": 4597,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_window_native.meta.json",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_window_native.npz",
+      "kind": "window",
+      "content_type": "application/x-npz",
+      "size_bytes": 13076,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_window_native.npz",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090727Z_d2205950_window_native.fil",
+      "kind": "window",
+      "content_type": "application/octet-stream",
+      "size_bytes": 7160,
+      "url": "/api/sessions/compatibility/exports/d2205950cea741cfa97febe6cf635569/synthetic_20260925T090727Z_d2205950_window_native.fil",
+      "status": "ready",
+      "reason": null
+    }
+  ]
+}

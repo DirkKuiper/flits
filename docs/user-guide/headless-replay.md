@@ -6,9 +6,12 @@ event window, off-pulse regions, channel mask, spectral extent, calibration
 inputs — recomputes the measurements, and can write the same export bundle the
 interface produces.
 
-This is what turns the snapshot from a record of an analysis into a reproducible
-one. Anyone with the snapshot and the data file can obtain the numbers again,
-and check that they still come out the same.
+Replay makes supported calculations checkable using the snapshot, original
+data, and a compatible software environment. It reports unknown or changed
+software provenance before recomputing. The `--json` report includes these
+warnings and the origins of both recomputed and retained results. A software
+change can alter a calculation; file readability alone does not guarantee
+identical numbers. See [software versions and file longevity](exports-and-snapshots.md#file-longevity-and-software-versions).
 
 ## Reproduce an analysis
 
