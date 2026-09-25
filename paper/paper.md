@@ -197,12 +197,7 @@ and the current source checkout against this reference.
 
 # AI usage disclosure
 
-Generative AI tools (OpenAI Codex/ChatGPT and Anthropic Claude Code) assisted
-software development, documentation, and manuscript preparation, including
-prose editing and review. This submission-preparation revision used Codex
-(GPT-6). Earlier model versions were not systematically recorded. The
-authors reviewed and validated AI-assisted outputs, made the core scientific
-and design decisions, and retain responsibility for the work.
+Generative AI tools (OpenAI Codex/ChatGPT, Anthropic Claude Code, Google Gemini, and Microsoft Copilot) assisted with software development, documentation, and manuscript preparation, including prose editing and review. Specific model versions were not systematically recorded; however, use generally involved a then-current flagship model from the respective provider. The authors reviewed and validated AI-assisted outputs, made the core scientific and design decisions, and retain responsibility for the work.
 
 # Acknowledgements
 
