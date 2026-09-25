@@ -7,11 +7,14 @@ releases."""
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from flits.provenance import validate_session_schema
 
 MAX_DRIFT_MONTE_CARLO_TRIALS = 512
 MAX_DRIFT_RANDOM_SEED = 2**64 - 1
@@ -2182,10 +2185,12 @@ class AnalysisSessionSnapshot:
     observatory_longitude_deg: float | None = None
     observatory_latitude_deg: float | None = None
     observatory_height_m: float | None = None
+    software_provenance: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
+            "software_provenance": deepcopy(self.software_provenance),
             "source": self.source.to_dict(),
             "dm": float(self.dm),
             "preset_key": self.preset_key,
@@ -2232,8 +2237,10 @@ class AnalysisSessionSnapshot:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> AnalysisSessionSnapshot:
+        validate_session_schema(str(payload.get("schema_version", "1.0")))
         return cls(
             schema_version=str(payload.get("schema_version", "1.0")),
+            software_provenance=deepcopy(payload.get("software_provenance")),
             source=SessionSourceRef.from_dict(payload["source"]),
             dm=float(payload["dm"]),
             preset_key=str(payload.get("preset_key", "generic")),
@@ -2318,6 +2325,7 @@ class ExportManifest:
     schema_version: str
     created_at_utc: str
     artifacts: list[ExportArtifact]
+    software_provenance: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2326,6 +2334,7 @@ class ExportManifest:
             "schema_version": self.schema_version,
             "created_at_utc": self.created_at_utc,
             "artifacts": [artifact.to_dict() for artifact in self.artifacts],
+            "software_provenance": deepcopy(self.software_provenance),
         }
 
 

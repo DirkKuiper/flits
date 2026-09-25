@@ -1,5 +1,20 @@
 # Testing
 
+## Saved-file compatibility and software provenance
+
+The default suite includes `tests/test_historical_compatibility.py` and
+`tests/test_software_provenance.py`. The former reads checksum-protected
+snapshots and exports produced by five actual releases, checks their stored
+values with independent readers, and compares supported recalculations. See
+`tests/fixtures/compatibility/README.md` for release commits, dependency
+limitations, and the intentional uncertainty changes since 0.2.0. Regenerate
+these fixtures only when deliberately extending the historical baseline.
+
+Provenance tests cover changed environments, mixed old and new results,
+unknown historical origins, rejected future schemas, source revisions, and
+metadata in every export format. These checks establish specific compatibility
+evidence; they cannot promise unchanged results under arbitrary future updates.
+
 ## Full local environment
 
 Create a virtual environment and install the full test stack:

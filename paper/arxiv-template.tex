@@ -1,0 +1,52 @@
+% Clean preprint template; all scientific text comes from paper.md.
+% Citeproc definitions follow Pandoc's standard LaTeX template (GPL-2.0+).
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern,amsmath,amssymb,microtype}
+\usepackage[margin=25mm]{geometry}
+\usepackage{authblk}
+\usepackage{xcolor}
+\usepackage{xurl}
+\usepackage[colorlinks=true,allcolors=blue]{hyperref}
+\setlength{\emergencystretch}{3em}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\setcounter{secnumdepth}{0}
+\renewcommand\Affilfont{\small}
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\NewDocumentCommand\citeproctext{}{}
+\NewDocumentCommand\citeproc{mm}{\begingroup\def\citeproctext{#2}\cite{#1}\endgroup}
+\makeatletter
+\let\@cite@ofmt\@firstofone
+\def\@biblabel#1{}
+\def\@cite#1#2{{#1\if@tempswa , #2\fi}}
+\makeatother
+\newlength{\cslhangindent}
+\setlength{\cslhangindent}{1.5em}
+\newlength{\csllabelwidth}
+\setlength{\csllabelwidth}{3em}
+\newenvironment{CSLReferences}[2]
+ {\begin{list}{}{\setlength{\itemindent}{0pt}\setlength{\leftmargin}{0pt}
+  \setlength{\parsep}{0pt}
+  \ifodd #1\setlength{\leftmargin}{\cslhangindent}\setlength{\itemindent}{-1\cslhangindent}\fi
+  \setlength{\itemsep}{#2\baselineskip}}}
+ {\end{list}}
+\usepackage{calc}
+\newcommand{\CSLBlock}[1]{\hfill\break\parbox[t]{\linewidth}{\strut\ignorespaces#1\strut}}
+\newcommand{\CSLLeftMargin}[1]{\parbox[t]{\csllabelwidth}{\strut#1\strut}}
+\newcommand{\CSLRightInline}[1]{\parbox[t]{\linewidth - \csllabelwidth}{\strut#1\strut}}
+\newcommand{\CSLIndent}[1]{\hspace{\cslhangindent}#1}
+\title{$title$}
+$for(authors)$
+\author[$authors.affiliation$]{$authors.name$}
+$endfor$
+$for(affiliations)$
+\affil[$affiliations.index$]{$affiliations.name$}
+$endfor$
+\date{$date$}
+\hypersetup{pdftitle={$title$},pdfauthor={Dirk Kuiper, Ziggy Pleunis, Jason W. T. Hessels}}
+\begin{document}
+\maketitle
+$body$
+\end{document}

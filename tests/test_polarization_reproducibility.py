@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import io
 import json
 from pathlib import Path
@@ -48,8 +49,7 @@ def test_the_science_json_carries_the_polarization_analysis(measured_session: Bu
 def test_the_catalog_csv_gains_rotation_measure_columns(measured_session: BurstSession) -> None:
     snapshot = create_export_snapshot(measured_session, session_id="pol-csv", include=["csv"])
     text = _artifact(snapshot, "catalog.csv").decode("utf-8")
-    header, row = (line.split(",") for line in text.splitlines()[:2])
-    columns = dict(zip(header, row, strict=True))
+    columns = next(csv.DictReader(io.StringIO(text)))
 
     assert columns["polarization_basis"] == "coherency_linear"
     assert columns["polarization_calibration_status"] == "unknown"

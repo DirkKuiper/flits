@@ -1071,7 +1071,8 @@ async function importSessionSnapshot(event) {
       }
     }
     setStatus("Imported", "success")
-    showToast("Session imported", "success")
+    const provenanceWarnings = payload.view.provenance_warnings || []
+    showToast(provenanceWarnings.length ? provenanceWarnings.join(" ") : "Session imported", provenanceWarnings.length ? "warning" : "success")
   } catch (error) {
     setStatus(error.message, "error")
     showToast(error.message, "error")
@@ -1174,7 +1175,8 @@ async function openStoredSession(snapshotId) {
       }
     }
     setStatus("Saved session opened", "success")
-    showToast("Saved session opened", "success")
+    const provenanceWarnings = payload.view.provenance_warnings || []
+    showToast(provenanceWarnings.length ? provenanceWarnings.join(" ") : "Saved session opened", provenanceWarnings.length ? "warning" : "success")
   } catch (error) {
     setStatus(error.message, "error")
     showToast(error.message, "error")

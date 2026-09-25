@@ -46,3 +46,17 @@ jobs:
         with:
           name: paper
           path: paper/paper.pdf
+
+      - name: Build and verify arXiv source archive
+        run: |
+          docker pull openjournals/inara@sha256:a0414b8b72fd8923917ede614d340d98dc7aa3102aabc2e955e9c02a6100fd62
+          python paper/build_arxiv.py
+
+      - name: Upload arXiv package
+        uses: actions/upload-artifact@v7
+        with:
+          name: arxiv
+          path: |
+            output/arxiv/flits-arxiv-source.zip
+            output/arxiv/flits-arxiv.pdf
+            output/arxiv/build-report.json

@@ -1,0 +1,166 @@
+{
+  "schema_version": "1.4",
+  "flits_version": "0.2.0",
+  "export_id": "d2205950cea741cfa97febe6cf635569",
+  "bundle_name": "synthetic_20260925T090727Z_d2205950",
+  "exported_at_utc": "2026-09-25T09:07:27Z",
+  "type": "window_metadata",
+  "data_semantics": "dedispersed_normalized_stokes_i",
+  "resolution_mode": "native",
+  "time_factor": 1,
+  "freq_factor": 1,
+  "effective_tsamp_sec": 0.001,
+  "effective_freqres_mhz": 1.0,
+  "frequency_step_mhz": -1.0,
+  "meta": {
+    "burst_file": "/private/var/folders/j0/8s1r2g350v7cf5kjglxtbfrh0000gn/T/flits-historical-f7q0kopp/synthetic.fil",
+    "burst_name": "synthetic.fil",
+    "dm": 0.0,
+    "telescope": "GBT",
+    "preset_key": "gbt",
+    "detected_telescope": "GBT",
+    "detected_preset_key": "gbt",
+    "detection_basis": "matched telescope_id=6",
+    "telescope_id": 6,
+    "machine_id": 0,
+    "source_name": "COMPATIBILITY",
+    "sefd_jy": 10.0,
+    "npol_override": null,
+    "auto_mask_profile": "auto",
+    "auto_mask_profile_label": "Auto",
+    "tsamp_us": 1000.0,
+    "freqres_mhz": 1.0,
+    "npol": 1,
+    "header_npol": 1,
+    "distance_mpc": null,
+    "redshift": null,
+    "shape": [
+      16,
+      256
+    ],
+    "view_shape": [
+      8,
+      128
+    ],
+    "freq_range_mhz": [
+      1485.0,
+      1500.0
+    ],
+    "dm_metrics": [
+      {
+        "key": "integrated_event_snr",
+        "label": "Integrated-event S/N",
+        "summary": "Sum the off-pulse-normalized event profile across the selected event window.",
+        "formula": "score = sum_i s_i / sqrt(N_event), where s_i is the event profile in off-pulse noise units.",
+        "origin": "Direct FLITS implementation of the standard integrated-S/N idea used by pulsar/FRB search software.",
+        "references": [
+          {
+            "label": "PSRCHIVE psrstat",
+            "citation": "PSRCHIVE psrstat documentation: phase S/N algorithm",
+            "url": "https://psrchive.sourceforge.net/manuals/psrstat/algorithms/snr/",
+            "note": "Documents integrated on-pulse S/N estimation relative to off-pulse noise."
+          },
+          {
+            "label": "PDMP",
+            "citation": "Teoh 2005, PDMP User Manual",
+            "url": "https://psrchive.sourceforge.net/manuals/pdmp/pdmp_manual.html",
+            "note": "Software precedent for DM sweeps scored by profile S/N."
+          }
+        ]
+      },
+      {
+        "key": "dm_phase",
+        "label": "DMphase",
+        "summary": "Use the automatic DMphase coherent-power curve on the selected reduced waterfall.",
+        "formula": "score = DMphase automatic coherent-power curve derived from phase-only Fourier sums across frequency channels.",
+        "origin": "Clean-room FLITS implementation aligned to the automatic non-interactive DM_phase algorithm. FLITS reproduces the coherent-power and automatic DM-curve construction while keeping the runtime implementation native.",
+        "references": [
+          {
+            "label": "DM_phase",
+            "citation": "Seymour, Michilli, and Pleunis, DM_phase repository",
+            "url": "https://github.com/danielemichilli/DM_phase",
+            "note": "FLITS follows the automatic `get_dm(...)` path rather than the manual GUI workflow."
+          },
+          {
+            "label": "ASCL",
+            "citation": "ascl:1910.004, DM_phase",
+            "url": "https://ascl.net/1910.004",
+            "note": "Software reference for the DMphase method."
+          }
+        ]
+      }
+    ],
+    "start_mjd": 60000.0,
+    "read_start_sec": 0.0
+  },
+  "state": {
+    "time_factor": 2,
+    "freq_factor": 2,
+    "crop_ms": [
+      0.0,
+      256.0
+    ],
+    "event_ms": [
+      110.0,
+      145.0
+    ],
+    "burst_regions_ms": [],
+    "offpulse_ms": [
+      [
+        0.0,
+        90.0
+      ]
+    ],
+    "peak_ms": [
+      128.0
+    ],
+    "manual_peaks": false,
+    "spectral_extent_mhz": [
+      1485.0,
+      1500.0
+    ],
+    "masked_channels": [
+      0
+    ],
+    "last_auto_mask": null,
+    "notes": "Synthetic historical compatibility fixture; not observatory data."
+  },
+  "window": {
+    "policy": "event_plus_one_event_width_clipped_to_crop",
+    "time_bins": [
+      75,
+      180
+    ],
+    "time_ms": [
+      75.0,
+      180.0
+    ],
+    "event_window_bins": [
+      35,
+      70
+    ],
+    "event_window_ms": [
+      110.0,
+      145.0
+    ],
+    "crop_bins": [
+      0,
+      256
+    ],
+    "spectral_extent_channels": [
+      0,
+      15
+    ],
+    "spectral_extent_mhz": [
+      1485.0,
+      1500.0
+    ],
+    "masked_channels": [
+      0
+    ],
+    "shape": [
+      16,
+      105
+    ]
+  }
+}

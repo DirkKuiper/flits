@@ -1,0 +1,206 @@
+{
+  "export_id": "8f78bc4c178e4082bdfc4d75b9938523",
+  "bundle_name": "synthetic_20260925T090800Z_8f78bc4c",
+  "schema_version": "1.8",
+  "created_at_utc": "2026-09-25T09:08:00Z",
+  "artifacts": [
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_science.json",
+      "kind": "structured",
+      "content_type": "application/json; charset=utf-8",
+      "size_bytes": 45841,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_science.json",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_catalog.csv",
+      "kind": "catalog",
+      "content_type": "text/csv; charset=utf-8",
+      "size_bytes": 5992,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_catalog.csv",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_diagnostics.npz",
+      "kind": "arrays",
+      "content_type": "application/x-npz",
+      "size_bytes": 17420,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_diagnostics.npz",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_dynamic_spectrum.png",
+      "kind": "plot",
+      "content_type": "image/png",
+      "size_bytes": 69237,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_dynamic_spectrum.png",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_dynamic_spectrum.svg",
+      "kind": "plot",
+      "content_type": "image/svg+xml",
+      "size_bytes": 52405,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_dynamic_spectrum.svg",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_profile_diagnostics.png",
+      "kind": "plot",
+      "content_type": "image/png",
+      "size_bytes": 128833,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_profile_diagnostics.png",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_profile_diagnostics.svg",
+      "kind": "plot",
+      "content_type": "image/svg+xml",
+      "size_bytes": 54503,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_profile_diagnostics.svg",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_acf_panel.png",
+      "kind": "plot",
+      "content_type": "image/png",
+      "size_bytes": 75302,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_acf_panel.png",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_acf_panel.svg",
+      "kind": "plot",
+      "content_type": "image/svg+xml",
+      "size_bytes": 44024,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_acf_panel.svg",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_faraday_spectrum.png",
+      "kind": "plot",
+      "content_type": "image/png",
+      "size_bytes": null,
+      "url": null,
+      "status": "omitted",
+      "reason": "polarization_analysis_unavailable"
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_faraday_spectrum.svg",
+      "kind": "plot",
+      "content_type": "image/svg+xml",
+      "size_bytes": null,
+      "url": null,
+      "status": "omitted",
+      "reason": "polarization_analysis_unavailable"
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_drift_acf.png",
+      "kind": "plot",
+      "content_type": "image/png",
+      "size_bytes": null,
+      "url": null,
+      "status": "omitted",
+      "reason": "drift_analysis_unavailable"
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_drift_acf.svg",
+      "kind": "plot",
+      "content_type": "image/svg+xml",
+      "size_bytes": null,
+      "url": null,
+      "status": "omitted",
+      "reason": "drift_analysis_unavailable"
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_power_spectrum.png",
+      "kind": "plot",
+      "content_type": "image/png",
+      "size_bytes": 48051,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_power_spectrum.png",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_power_spectrum.svg",
+      "kind": "plot",
+      "content_type": "image/svg+xml",
+      "size_bytes": 41717,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_power_spectrum.svg",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_dm_curve.png",
+      "kind": "plot",
+      "content_type": "image/png",
+      "size_bytes": 50941,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_dm_curve.png",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_dm_curve.svg",
+      "kind": "plot",
+      "content_type": "image/svg+xml",
+      "size_bytes": 33960,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_dm_curve.svg",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_dm_residuals.png",
+      "kind": "plot",
+      "content_type": "image/png",
+      "size_bytes": null,
+      "url": null,
+      "status": "omitted",
+      "reason": "residual_diagnostics_unavailable"
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_dm_residuals.svg",
+      "kind": "plot",
+      "content_type": "image/svg+xml",
+      "size_bytes": null,
+      "url": null,
+      "status": "omitted",
+      "reason": "residual_diagnostics_unavailable"
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_window_native.meta.json",
+      "kind": "window",
+      "content_type": "application/json; charset=utf-8",
+      "size_bytes": 5379,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_window_native.meta.json",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_window_native.npz",
+      "kind": "window",
+      "content_type": "application/x-npz",
+      "size_bytes": 13431,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_window_native.npz",
+      "status": "ready",
+      "reason": null
+    },
+    {
+      "name": "synthetic_20260925T090800Z_8f78bc4c_window_native.fil",
+      "kind": "window",
+      "content_type": "application/octet-stream",
+      "size_bytes": 7160,
+      "url": "/api/sessions/compatibility/exports/8f78bc4c178e4082bdfc4d75b9938523/synthetic_20260925T090800Z_8f78bc4c_window_native.fil",
+      "status": "ready",
+      "reason": null
+    }
+  ]
+}

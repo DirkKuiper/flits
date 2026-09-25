@@ -38,6 +38,11 @@ Westerbork, Onsala, Stockert, and CHIME. A common reader interface and configura
 telescope presets support analysis across their formats and calibration
 conventions. The session retains the selected state so collaborators can
 reopen it and recompute supported measurements from the original data.
+Snapshots and exports record software versions and available source identities
+for each analysis, preserving the origins of older results during partial
+recomputation. Historical files without this information remain explicitly
+unattributed. See the [preservation guide](https://dirkkuiper.github.io/flits/user-guide/exports-and-snapshots/)
+for environment archiving and compatibility limits.
 
 FLITS builds on specialist search, data-processing, and analysis packages. It
 connects measurements through a shared session model with explicit calibration
