@@ -42,9 +42,9 @@ FLITS (Fast-Look Interactive Transient Suite) is an open-source Python package
 with a browser interface for analysing detected bursts. It brings data
 inspection, interference removal, measurement, and modelling into a single
 interactive session. It also acts as a wrapper around existing tools, including
-`your` for reading data, `jess` for interference mitigation, and optional
-`fitburst` modelling, so users can apply them to the same selected data without
-moving between separate programs.
+`your` [@Aggarwal2020] for reading data, `jess` [@Kania2026] for interference
+mitigation, and optional `fitburst` [@fitburst] modelling, so users can apply
+them to the same selected data without moving between separate programs.
 This approach can be extended to other analysis packages by writing adapters
 that use the same prepared data and session settings.
 
@@ -110,8 +110,8 @@ FLITS connects data preparation, selected specialist tools, and its own
 measurements through a shared session. It uses `your` [@Aggarwal2020] to read
 common radio data formats and `jess` [@Kania2026] for interference mitigation,
 and passes the selected dynamic spectrum to `fitburst` for optional modelling.
-Its own RM-synthesis implementation is checked against an RM-Tools reference
-dataset. A separate workbench is useful because the shared preparation and
+Its own RM-synthesis implementation is checked against an RM-Tools [@rmtools]
+reference dataset. A separate workbench is useful because the shared preparation and
 analysis record span several specialist packages and file formats. The existing
 wrappers are examples of this architecture: developers can integrate further
 tools through Python adapters, following the `fitburst` integration, while
@@ -165,8 +165,8 @@ still requires preserving its software environment: version records identify
 software but do not archive it. The repository supplies pinned dependencies,
 including a specific `fitburst` revision, and a public reference workflow.
 
-Polarization analysis accepts suitable four-polarization input files with known
-conventions, or separately prepared $Q/U$ spectra. FLITS performs weighted
+Polarization analysis accepts suitable full-Stokes polarization input files
+with known conventions, or separately prepared $Q/U$ spectra. FLITS performs weighted
 RM synthesis [@Brentjens2005; @Heald2009], which combines the polarization
 across frequency to estimate Faraday rotation. Instrumental polarization
 calibration and corrections for Earth's ionosphere must be applied separately.
