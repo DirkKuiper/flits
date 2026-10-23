@@ -1176,6 +1176,9 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         "dm_sweep_center": dm.get("center_dm", ""),
         "dm_best": dm.get("best_dm", ""),
         "dm_uncertainty": dm.get("best_dm_uncertainty", ""),
+        # Smoothed-structure metric only: the DM range consistent with the best DM.
+        "dm_range_low": (dm.get("structure") or {}).get("interval_low_dm", ""),
+        "dm_range_high": (dm.get("structure") or {}).get("interval_high_dm", ""),
         "dm_fit_status": dm.get("fit_status", ""),
         "dm_best_snr": dm.get("best_sn", ""),
         "dm_sampled_best_dm": dm.get("sampled_best_dm", ""),

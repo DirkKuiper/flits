@@ -14,7 +14,8 @@ seconds, while serialized provenance and residual diagnostics use milliseconds.
 This module includes a clean-room FLITS implementation of DMphase. FLITS keeps
 the runtime implementation native so it can operate on the current reduced
 analysis grid, masking, crop, and selection state without depending on the
-external package.
+external package. The smoothed-structure metric, which also yields a DM
+interval, lives in :mod:`flits.analysis.dm_optimization.structure`.
 """
 
 from __future__ import annotations
@@ -26,6 +27,16 @@ from typing import Any
 import numpy as np
 from scipy import signal
 
+from flits.analysis.dm_optimization.structure import (
+    DEFAULT_FILTER_ORDER,
+    MIN_EVENT_BINS,
+    StructureCurve,
+    automatic_cutoff,
+    consistent_interval,
+    dct_envelope,
+    noise_floor,
+    structure_curve,
+)
 from flits.measurements import MeasurementContext, event_snr
 from flits.models import (
     DmMetricDefinition,
@@ -33,10 +44,13 @@ from flits.models import (
     DmOptimizationProvenance,
     DmOptimizationResult,
     DmOptimizationSettings,
+    DmStructureDiagnostics,
     UncertaintyDetail,
     compatible_scalar_uncertainty,
 )
 from flits.signal import dedisperse
+
+STRUCTURE_METRIC = "smoothed_structure"
 
 ResidualRunner = Callable[[], tuple[np.ndarray, np.ndarray, np.ndarray, str]]
 
@@ -90,6 +104,7 @@ class DMMetricPreparedTrial:
     scalar_score: float | None = None
     dmphase_power_spectrum: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     dmphase_channel_count: int = 0
+    structure_lightcurve: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
 
 
 @dataclass(frozen=True)
@@ -117,6 +132,7 @@ class DMMetricFinalizeResult:
     scores: np.ndarray
     fit_result: DMMetricFitResult | None = None
     fit_payload: DMPhaseFitInput | None = None
+    structure_payload: StructureFitInput | None = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +156,16 @@ class DMPhaseFitInput:
     low_idx: int
     dstd: float
     weights: np.ndarray
+
+
+@dataclass(frozen=True)
+class StructureFitInput:
+    """Smoothed-structure payload: the consistency test and the spectrum behind its cutoff."""
+
+    curve: StructureCurve
+    envelope: np.ndarray
+    noise_floor: float
+    cutoff_source: str
 
 
 def _best_dm_uncertainty_detail(
@@ -224,6 +250,33 @@ DM_METRIC_METADATA: dict[str, DmMetricDefinition] = {
                 citation="ascl:1910.004, DM_phase",
                 url="https://ascl.net/1910.004",
                 note="Software reference for the DMphase method.",
+            ),
+        ],
+    ),
+    STRUCTURE_METRIC: DmMetricDefinition(
+        key=STRUCTURE_METRIC,
+        label="Smoothed structure",
+        summary=(
+            "Maximize the derivative norm of the DCT-smoothed event light curve, and report the DM range "
+            "the leftover noise cannot distinguish from the best trial."
+        ),
+        formula=(
+            "score = ||D1 i~||, with i~ the event light curve low-pass filtered in the DCT domain; trials with "
+            "score + ||D1 S (dI_j - dI_best)|| >= best score span the DM interval (Sutinjo et al. 2023, eqs. 15, 27, 28)."
+        ),
+        origin=(
+            "Clean-room FLITS implementation of the smoothed-structure method of Sutinjo et al. (2023), "
+            "run on the current reduced analysis grid, event window, spectral window, and mask."
+        ),
+        references=[
+            _dm_ref(
+                label="Sutinjo et al. 2023",
+                citation=(
+                    "Sutinjo, A. T., Scott, D. R., James, C. W., et al. 2023, ApJ, 954, 37: "
+                    "Calculation and Uncertainty of Fast Radio Burst Structure Based on Smoothed Data"
+                ),
+                url="https://doi.org/10.3847/1538-4357/ace774",
+                note="Defines the DCT smoothing, the structure parameter, and the noise criterion for the DM interval.",
             ),
         ],
     ),
@@ -602,6 +655,102 @@ def _finalize_dmphase_scores(prepared_trials: list[DMMetricPreparedTrial]) -> DM
     )
 
 
+def _run_structure_prepare(metric_input: DMMetricInput) -> DMMetricPreparedTrial:
+    """Sum the selected, unmasked channels over the event window into a light curve."""
+    event = np.asarray(metric_input.event_waterfall, dtype=float)
+    if event.ndim != 2 or event.size == 0:
+        return DMMetricPreparedTrial()
+    finite_rows = np.isfinite(event).any(axis=1)
+    lightcurve = np.nansum(event[finite_rows], axis=0) if finite_rows.any() else np.array([], dtype=float)
+    return DMMetricPreparedTrial(structure_lightcurve=np.asarray(lightcurve, dtype=float))
+
+
+def _finalize_structure_scores(
+    prepared_trials: list[DMMetricPreparedTrial],
+    *,
+    cutoff: int | None = None,
+    order: int = DEFAULT_FILTER_ORDER,
+) -> DMMetricFinalizeResult:
+    """Score the stacked trial light curves and run the eq. 15 consistency test.
+
+    Raises
+    ------
+    ValueError
+        If the event window is too short to judge a DCT spectrum from, or the
+        cutoff cannot be chosen automatically or is out of range.
+    """
+    lengths = {int(trial.structure_lightcurve.size) for trial in prepared_trials}
+    size = min(lengths) if lengths else 0
+    if size < MIN_EVENT_BINS:
+        raise ValueError(
+            f"The smoothed-structure metric needs at least {MIN_EVENT_BINS} time samples in the event window; "
+            f"this one has {size}. Widen the event window or reduce the time downsampling."
+        )
+    lightcurves = np.vstack([np.asarray(trial.structure_lightcurve[:size], dtype=float) for trial in prepared_trials])
+    envelope = dct_envelope(lightcurves)
+    if cutoff is None:
+        chosen = automatic_cutoff(envelope)
+        if chosen is None:
+            raise ValueError(
+                "Could not choose the low-pass cutoff k_c automatically: the DCT spectrum of the event light "
+                "curve never falls to its noise floor. Set k_c by hand."
+            )
+        cutoff_source = "automatic"
+    else:
+        chosen = int(cutoff)
+        cutoff_source = "manual"
+    curve = structure_curve(lightcurves, cutoff=chosen, order=order)
+    return DMMetricFinalizeResult(
+        scores=np.asarray(curve.scores, dtype=float),
+        structure_payload=StructureFitInput(
+            curve=curve,
+            envelope=envelope,
+            noise_floor=noise_floor(envelope),
+            cutoff_source=cutoff_source,
+        ),
+    )
+
+
+def _structure_uncertainty_detail(
+    *,
+    best_dm: float,
+    interval_low: float,
+    interval_high: float,
+    step: float,
+    warning_flags: list[str],
+) -> UncertaintyDetail:
+    """Describe the smoothed-structure DM interval as a conservative bound."""
+    half_width = max(best_dm - interval_low, interval_high - best_dm)
+    flags = ["integer_bin_dedispersion", *warning_flags]
+    value_note = "The value is the larger distance from the best DM to either end."
+    if half_width <= 0:
+        # Only the best trial passes: the interval is narrower than the spacing.
+        half_width = float(step)
+        flags.append("structure_interval_within_one_step")
+        value_note = "Only the best trial passed, so the value is one trial spacing."
+    basis = (
+        f"DM range {interval_low:g} to {interval_high:g} pc cm^-3: the trials whose smoothed-structure score plus "
+        f"noise allowance reaches the best trial's (Sutinjo et al. 2023, eq. 15). {value_note} It is a "
+        "conservative bound, not a 1-sigma error: on simulated bursts it contained the true DM at least 98% "
+        "of the time and was about 4 to 7 times the rms error of the best DM. Quote it as a range."
+    )
+    tooltip = (
+        "Conservative DM range from the smoothed-structure noise criterion (Sutinjo et al. 2023). "
+        "Not a 1-sigma error bar; quote it as the range of DMs consistent with the best one."
+    )
+    clean = not ({"structure_interval_on_sweep_edge", "structure_interval_has_gaps"} & set(flags))
+    return UncertaintyDetail(
+        value=float(half_width),
+        units="pc cm^-3",
+        classification="conservative_bound",
+        is_formal_1sigma=False,
+        publishable=clean,
+        basis=basis,
+        tooltip=tooltip,
+        warning_flags=flags,
+    )
+
+
 DM_METRIC_REGISTRY: dict[str, DMMetricAlgorithm] = {
     "integrated_event_snr": DMMetricAlgorithm(
         prepare_trial=_run_integrated_event_snr_prepare,
@@ -610,6 +759,10 @@ DM_METRIC_REGISTRY: dict[str, DMMetricAlgorithm] = {
     "dm_phase": DMMetricAlgorithm(
         prepare_trial=_run_dmphase_prepare,
         finalize_scores=_finalize_dmphase_scores,
+    ),
+    STRUCTURE_METRIC: DMMetricAlgorithm(
+        prepare_trial=_run_structure_prepare,
+        finalize_scores=_finalize_structure_scores,
     ),
 }
 
@@ -797,6 +950,8 @@ def optimize_dm_trials(
     residuals: Callable[[np.ndarray], tuple[np.ndarray, np.ndarray, np.ndarray, str]],
     provenance: DmOptimizationProvenance,
     metric: str = "integrated_event_snr",
+    structure_cutoff: int | None = None,
+    structure_filter_order: int = DEFAULT_FILTER_ORDER,
 ) -> DmOptimizationResult:
     """Run a DM trial sweep and return the optimized DM result.
 
@@ -838,6 +993,10 @@ def optimize_dm_trials(
     metric
         Registered metric key. Supported values are defined by
         ``DM_METRIC_REGISTRY``.
+    structure_cutoff, structure_filter_order
+        Low-pass cutoff ``k_c`` and filter order for the smoothed-structure
+        metric. A cutoff of None is chosen automatically from the DCT spectrum.
+        Ignored by the other metrics.
 
     Returns
     -------
@@ -875,7 +1034,14 @@ def optimize_dm_trials(
         metric_input = metric_input_builder(trial_data)
         prepared_trials.append(metric_algorithm.prepare_trial(metric_input))
 
-    finalized = metric_algorithm.finalize_scores(prepared_trials)
+    if metric == STRUCTURE_METRIC:
+        finalized = _finalize_structure_scores(
+            prepared_trials,
+            cutoff=structure_cutoff,
+            order=int(structure_filter_order),
+        )
+    else:
+        finalized = metric_algorithm.finalize_scores(prepared_trials)
     scores = np.asarray(finalized.scores, dtype=float)
     if scores.shape != trial_dms.shape:
         raise ValueError(f"DM metric '{metric}' returned an invalid score vector shape.")
@@ -885,7 +1051,37 @@ def optimize_dm_trials(
     peak_index = int(np.nanargmax(scores))
     sampled_best_dm = float(trial_dms[peak_index])
     sampled_best_score = float(scores[peak_index])
-    if metric == "dm_phase" and finalized.fit_payload is not None:
+    structure_diagnostics: DmStructureDiagnostics | None = None
+    structure_detail: UncertaintyDetail | None = None
+    if metric == STRUCTURE_METRIC and finalized.structure_payload is not None:
+        # The interval is built from sampled trials, so the best DM stays on the
+        # grid too rather than moving to a refined vertex the interval may miss.
+        payload = finalized.structure_payload
+        best_dm = sampled_best_dm
+        best_score = sampled_best_score
+        best_dm_uncertainty = None
+        interval_low, interval_high, interval_flags = consistent_interval(trial_dms, payload.curve.consistent)
+        fit_status = interval_flags[0] if interval_flags else "structure_noise_interval"
+        structure_detail = _structure_uncertainty_detail(
+            best_dm=best_dm,
+            interval_low=interval_low,
+            interval_high=interval_high,
+            step=float(step),
+            warning_flags=interval_flags,
+        )
+        structure_diagnostics = DmStructureDiagnostics(
+            cutoff=payload.curve.cutoff,
+            cutoff_source=payload.cutoff_source,
+            filter_order=payload.curve.order,
+            interval_low_dm=interval_low,
+            interval_high_dm=interval_high,
+            noise_terms=np.asarray(payload.curve.noise_terms, dtype=float),
+            consistent=np.asarray(payload.curve.consistent, dtype=bool),
+            dct_envelope=np.asarray(payload.envelope, dtype=float),
+            noise_floor=float(payload.noise_floor),
+            warning_flags=list(structure_detail.warning_flags),
+        )
+    elif metric == "dm_phase" and finalized.fit_payload is not None:
         dmphase_fit = _fit_dmphase_peak(
             trial_dms,
             scores,
@@ -958,11 +1154,17 @@ def optimize_dm_trials(
         half_range=float(half_range),
         step=float(step),
         metric=metric,
+        structure_cutoff=structure_cutoff if metric == STRUCTURE_METRIC else None,
+        structure_filter_order=int(structure_filter_order) if metric == STRUCTURE_METRIC else None,
     )
-    best_dm_detail = _best_dm_uncertainty_detail(
-        value=best_dm_uncertainty,
-        metric=metric,
-        fit_status=fit_status,
+    best_dm_detail = (
+        structure_detail
+        if structure_detail is not None
+        else _best_dm_uncertainty_detail(
+            value=best_dm_uncertainty,
+            metric=metric,
+            fit_status=fit_status,
+        )
     )
     return DmOptimizationResult(
         center_dm=float(center_dm),
@@ -992,4 +1194,5 @@ def optimize_dm_trials(
         uncertainty_details={"best_dm": best_dm_detail},
         settings=settings,
         provenance=provenance,
+        structure=structure_diagnostics,
     )

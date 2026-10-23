@@ -803,7 +803,9 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("formula", metric_defs[0])
         self.assertIn("origin", metric_defs[0])
         self.assertIn("references", metric_defs[0])
-        self.assertEqual([item["key"] for item in metric_defs], ["integrated_event_snr", "dm_phase"])
+        self.assertEqual(
+            [item["key"] for item in metric_defs], ["integrated_event_snr", "dm_phase", "smoothed_structure"]
+        )
 
     def test_session_action_apply_best_dm_preserves_dm_optimization_payload(self) -> None:
         session_id = "synthetic-apply-best-dm"
