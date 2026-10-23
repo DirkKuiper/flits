@@ -115,14 +115,18 @@ jobs:
           python -m venv /tmp/flits-release-smoke
           . /tmp/flits-release-smoke/bin/activate
           python -m pip install --upgrade pip
-          for attempt in 1 2 3 4 5; do
-            python -m pip install "flits==${FLITS_VERSION}" && break
-            if [ "$attempt" -eq 5 ]; then
+          # PyPI's index can take several minutes to list a new upload (about
+          # five for 1.4.0), so keep trying for ten before calling it a failure.
+          for attempt in $(seq 1 20); do
+            python -m pip install --no-cache-dir "flits==${FLITS_VERSION}" && break
+            if [ "$attempt" -eq 20 ]; then
               exit 1
             fi
             sleep 30
           done
           flits --help
+          flits measure --help
+          flits demo --help
 
   publish-stable-image:
     needs:
