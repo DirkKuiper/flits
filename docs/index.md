@@ -47,11 +47,20 @@ uncertainty are flagged as having an incomplete uncertainty budget.
 - Comparing DM metrics and inspecting residual arrival-time diagnostics.
 - Running temporal-structure and spectral analyses on the current selection.
 - Exporting structured results, plots, and session snapshots.
+- Measuring bursts without a browser, one or many at a time, with
+  `flits measure` or the `BurstSession` Python API.
 
 ## Quickstart
 
 ```bash
 pip install flits
+flits demo
+```
+
+`flits demo` opens a prepared example burst in your browser. To work on your
+own data:
+
+```bash
 flits --data-dir /path/to/filterbanks --host 127.0.0.1 --port 8123
 ```
 
@@ -76,6 +85,8 @@ pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3
   open and you want to know how to work through a burst.
 - See [Supported Formats](user-guide/supported-formats.md) for the full
   reader matrix and detection rules.
+- Use [Headless Measurement](user-guide/headless-measurement.md) to measure
+  bursts from the command line or Python, including batches.
 
 ## Analysis areas
 
