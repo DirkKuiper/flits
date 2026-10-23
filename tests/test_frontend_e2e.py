@@ -208,8 +208,8 @@ def test_measuring_the_sub_burst_drift_rate(drifting_waterfall, page) -> None:
     content = page.locator("#driftContent")
     expect(content).to_contain_text("Drift Rate", timeout=90_000)
     expect(content).to_contain_text("MHz/ms")
-    # No DM uncertainty was supplied, so the bar must stay statistical-only.
-    expect(content).to_contain_text("Statistical only")
+    # No DM uncertainty was supplied, so the bar is the statistical term alone.
+    expect(content).to_contain_text("1σ statistical")
     expect(content).to_contain_text("Missing DM uncertainty")
     expect(content).to_contain_text("Equivalent DM Error")
     expect(page.locator("#driftAcfPlot")).to_be_visible()
@@ -218,10 +218,10 @@ def test_measuring_the_sub_burst_drift_rate(drifting_waterfall, page) -> None:
     measured = float(tile.inner_text().split()[0])
     assert measured == pytest.approx(drifting_waterfall.drift_mhz_per_ms, rel=0.25), measured
 
-    # Supplying a DM uncertainty is what promotes the measurement.
+    # Supplying a DM uncertainty adds the DM term to the bar.
     page.fill("#driftDmUncertaintyInput", "0.05")
     page.click("#runDriftButton")
-    expect(content).to_contain_text("Formal 1σ", timeout=90_000)
+    expect(content.locator(".uncertainty-badge").first).to_have_text("1σ", timeout=90_000)
     expect(content).not_to_contain_text("Missing DM uncertainty")
 
     # The result must survive leaving the tab and coming back.
@@ -355,4 +355,23 @@ def test_a_smoothed_structure_sweep_reports_a_dm_range(page, synthetic_waterfall
 
     page.select_option("#dmMetricInput", "dm_phase")
     expect(page.locator("#dmStructureCutoffField")).to_be_hidden()
+    assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
+
+
+def test_uncertainties_say_what_they_are(page, synthetic_waterfall) -> None:
+    """A statistical fluence error is labelled as such and says how to add the SEFD term."""
+    _load_session(page, synthetic_waterfall)
+    _apply_exact_selection(page, "event", 100.0, 160.0)
+    _apply_exact_selection(page, "offpulse", 0.0, 50.0)
+    page.click("#computeButton")
+
+    results = page.locator("#resultsContent")
+    expect(results).to_contain_text("1σ statistical", timeout=60_000)
+    expect(results).not_to_contain_text("Statistical only")
+
+    badge = results.locator(".uncertainty-badge", has_text="1σ statistical").first
+    tooltip = badge.get_attribute("data-tooltip") or ""
+    assert "Supply the SEFD uncertainty" in tooltip
+    assert "Method:" in tooltip
+    assert badge.get_attribute("data-tone") == "neutral"
     assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
