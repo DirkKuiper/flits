@@ -436,9 +436,41 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadPresets()
   await loadAutoMaskProfiles()
   await loadFiles()
-  void loadSnapshotLibrary()
-  // Removed auto-loading logic. Waiting for explicit user action.
+  // Nothing loads on its own. The one exception is a link that names a saved
+  // session, such as the one `flits demo` opens: following it is the action.
+  const requestedSnapshot = takeRequestedSnapshot()
+  if (requestedSnapshot) {
+    await loadSnapshotLibrary({ silent: true })
+    await openRequestedSnapshot(requestedSnapshot)
+  } else {
+    void loadSnapshotLibrary()
+  }
 })
+
+// `?open-snapshot=` takes a saved session's id or its path relative to the data
+// directory. The parameter is consumed so that a reload starts clean.
+function takeRequestedSnapshot() {
+  const url = new URL(window.location.href)
+  const requested = (url.searchParams.get("open-snapshot") || "").trim()
+  if (!requested) {
+    return null
+  }
+  url.searchParams.delete("open-snapshot")
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
+  return requested
+}
+
+async function openRequestedSnapshot(requested) {
+  const match = state.snapshotLibrary.find((item) => item.id === requested || item.relative_path === requested)
+  if (!match) {
+    const message = `Saved session not found: ${requested}`
+    snapshotLibraryMeta.textContent = message
+    setStatus(message, "error")
+    showToast(message, "error")
+    return
+  }
+  await openStoredSession(match.id)
+}
 
 function initialAnalysisTab() {
   const fromHash = window.location.hash.replace(/^#/, "").trim().toLowerCase()

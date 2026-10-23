@@ -288,3 +288,42 @@ def test_measuring_the_rotation_measure_from_the_session(full_stokes_waterfall, 
     expect(content).to_contain_text("Peak Faraday Depth")
 
     assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
+
+
+def _save_synthetic_snapshot(waterfall) -> str:
+    """Save a measured session where the interface lists it; return its relative path."""
+    import json
+
+    from flits.session import BurstSession
+
+    session = BurstSession.from_file(str(waterfall.path), dm=0.0, sefd_jy=10.0)
+    session.set_event_ms(100.0, 160.0)
+    session.add_offpulse_ms(0.0, 50.0)
+    session.compute_properties()
+
+    target = waterfall.path.parent / "snapshots" / f"{waterfall.path.stem}_flits_session.json"
+    target.parent.mkdir()
+    target.write_text(json.dumps(session.snapshot_dict(), indent=2), encoding="utf-8")
+    return f"snapshots/{target.name}"
+
+
+def test_a_link_naming_a_saved_session_opens_it(page, flits_server, synthetic_waterfall) -> None:
+    # This is the link `flits demo` opens.
+    relative_path = _save_synthetic_snapshot(synthetic_waterfall)
+
+    page.goto(f"{flits_server}/?open-snapshot={relative_path}", wait_until="networkidle")
+
+    page.wait_for_selector("#viewerPlot.js-plotly-plot", timeout=60_000)
+    expect(page.locator("#burstTitle")).to_contain_text(synthetic_waterfall.path.stem[:8])
+    expect(page.locator("#sessionSaveStatus")).to_contain_text(relative_path.split("/")[-1])
+    # The link is consumed, so a reload starts clean instead of reopening it.
+    assert "open-snapshot" not in page.url
+    assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
+
+
+def test_a_link_naming_an_unknown_session_says_so(page, flits_server) -> None:
+    page.goto(f"{flits_server}/?open-snapshot=snapshots/missing_flits_session.json", wait_until="networkidle")
+
+    expect(page.locator("#snapshotLibraryMeta")).to_contain_text("Saved session not found", timeout=30_000)
+    expect(page.locator("#sessionBadge")).to_contain_text("Not loaded")
+    assert page.errors == [], f"page raised JavaScript errors: {page.errors}"

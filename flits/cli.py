@@ -1,9 +1,10 @@
 """Command line entry point for FLITS.
 
-``flits`` starts the browser interface. ``flits replay`` re-runs a saved session
-snapshot without a browser, which is what makes the reproducibility claim
-checkable: the snapshot records the selected analysis state, and replaying it
-recomputes the measurements from the original data file.
+``flits`` starts the browser interface. ``flits demo`` opens it on a prepared
+example burst. ``flits replay`` re-runs a saved session snapshot without a
+browser, which is what makes the reproducibility claim checkable: the snapshot
+records the selected analysis state, and replaying it recomputes the
+measurements from the original data file.
 
 Invoking ``flits`` with server options and no subcommand still starts the
 server, so existing commands and container entrypoints keep working.
@@ -135,6 +136,42 @@ def build_replay_parser(prog: str = "flits replay") -> argparse.ArgumentParser:
         dest="as_json",
         action="store_true",
         help="Print the replay report as JSON instead of text.",
+    )
+    _add_log_level(parser)
+    return parser
+
+
+def build_demo_parser(prog: str = "flits demo") -> argparse.ArgumentParser:
+    """Return the parser for the demo command."""
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description=(
+            "Open a prepared example burst in the interface. The first run downloads "
+            "the public GBT burst from the guided workflow (42 MB, checked against its "
+            "published SHA-256); later runs reuse it and work offline."
+        ),
+    )
+    parser.add_argument(
+        "--dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help=(
+            "Where to keep the demo burst and its session (default: $FLITS_DEMO_DIR, "
+            "else ~/.cache/flits/demo). A copy of the burst placed here is reused."
+        ),
+    )
+    parser.add_argument("--host", default="127.0.0.1", help="Interface to bind (default: 127.0.0.1).")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind (default: 8000).")
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not open a browser; print the link instead (useful over SSH).",
+    )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Rebuild the demo session, discarding changes saved to it from the interface.",
     )
     _add_log_level(parser)
     return parser
@@ -359,10 +396,15 @@ def _print_report(report: dict[str, Any]) -> None:
                 print(f"           ... and {len(differences) - 20} more")
 
 
-def serve(argv: Sequence[str]) -> int:
-    """Run the ``flits serve`` command (also the default). Returns the exit code."""
+def _run_server(host: str, port: int) -> None:
     import uvicorn
 
+    logger.info("FLITS %s serving on http://%s:%d", __version__, host, port)
+    uvicorn.run("flits.web.app:app", host=host, port=port, reload=False)
+
+
+def serve(argv: Sequence[str]) -> int:
+    """Run the ``flits serve`` command (also the default). Returns the exit code."""
     args = build_serve_parser().parse_args(list(argv))
     _configure_logging(args.log_level)
 
@@ -373,14 +415,75 @@ def serve(argv: Sequence[str]) -> int:
     if args.cors_origin:
         os.environ["FLITS_CORS_ORIGINS"] = ",".join(args.cors_origin)
 
-    logger.info("FLITS %s serving on http://%s:%d", __version__, args.host, args.port)
-    uvicorn.run("flits.web.app:app", host=args.host, port=args.port, reload=False)
+    _run_server(args.host, args.port)
+    return 0
+
+
+def _browser_host(host: str) -> str:
+    """A host a local browser can reach, for servers bound to every interface."""
+    return "127.0.0.1" if host in {"0.0.0.0", "::", ""} else host
+
+
+def _open_browser_when_ready(health_url: str, url: str, timeout_s: float = 60.0) -> None:
+    """Open `url` once the server answers `health_url`; give up quietly after `timeout_s`."""
+    import time
+    import webbrowser
+    from urllib.request import urlopen
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            with urlopen(health_url, timeout=2):
+                break
+        except OSError:
+            time.sleep(0.25)
+    else:
+        return
+    webbrowser.open(url)
+
+
+def demo(argv: Sequence[str]) -> int:
+    """Run the ``flits demo`` command. Returns the process exit code."""
+    import threading
+    from urllib.parse import quote
+
+    from flits.demo import GUIDE_URL, DemoError, default_demo_dir, fetch_demo_burst, write_demo_snapshot
+
+    args = build_demo_parser().parse_args(list(argv))
+    _configure_logging(args.log_level)
+
+    directory = (args.dir or default_demo_dir()).expanduser().resolve()
+    # The demo directory is the data directory, so the snapshot records its burst
+    # relative to it and the interface lists both.
+    os.environ["FLITS_DATA_DIR"] = str(directory)
+    try:
+        burst = fetch_demo_burst(directory)
+        snapshot = write_demo_snapshot(directory, burst, reset=args.reset)
+    except DemoError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+
+    base_url = f"http://{_browser_host(args.host)}:{args.port}"
+    url = f"{base_url}/?open-snapshot={quote(snapshot.relative_to(directory).as_posix())}"
+    print(f"Demo burst  {burst}")
+    print(f"Session     {snapshot}")
+    print(f"Open        {url}")
+    print(f"Guide       {GUIDE_URL}", flush=True)
+    if not args.no_browser:
+        threading.Thread(
+            target=_open_browser_when_ready,
+            args=(f"{base_url}/api/health", url),
+            daemon=True,
+        ).start()
+
+    _run_server(args.host, args.port)
     return 0
 
 
 COMMANDS = {
     "serve": serve,
     "replay": replay,
+    "demo": demo,
 }
 
 
@@ -390,6 +493,7 @@ def _print_usage() -> None:
         "\n"
         "commands:\n"
         "  serve    Start the browser interface (default when no command is given)\n"
+        "  demo     Open a prepared example burst in the interface\n"
         "  replay   Re-run a saved session snapshot without a browser\n"
         "\n"
         "Run `flits <command> --help` for command options.\n"
