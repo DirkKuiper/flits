@@ -371,7 +371,7 @@ class DriftDmDegeneracyTest(unittest.TestCase):
                     delta=abs(numeric) * 1e-3 + 1e-9,
                 )
 
-    def test_without_a_dm_uncertainty_the_drift_is_not_publishable(self) -> None:
+    def test_without_a_dm_uncertainty_the_drift_error_is_statistical(self) -> None:
         data, time_axis_ms, freqs_mhz = _drifting_burst(-10.0, noise=0.3, seed=5)
         result = run_drift_analysis(
             _inputs(data, time_axis_ms, freqs_mhz),
@@ -393,7 +393,7 @@ class DriftDmDegeneracyTest(unittest.TestCase):
         self.assertEqual(constrained.drift_rate_status, "ok")
         self.assertEqual(swamped.drift_rate_status, "unconstrained")
 
-    def test_a_dm_uncertainty_promotes_the_drift_and_inflates_the_bar(self) -> None:
+    def test_a_dm_uncertainty_adds_the_dm_term_to_the_bar(self) -> None:
         data, time_axis_ms, freqs_mhz = _drifting_burst(-10.0, noise=0.3, seed=5)
         settings = DriftAnalysisSettings(monte_carlo_trials=16)
         bare = run_drift_analysis(_inputs(data, time_axis_ms, freqs_mhz), settings)

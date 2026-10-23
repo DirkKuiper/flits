@@ -2456,13 +2456,13 @@ function renderDmOptimization(view) {
   const metricContextNote = optimization.snr_metric === "dm_phase"
     ? "Sampled Peak DM is the discrete argmax of the DMphase curve. Best DM is the upstream-style weighted polynomial refinement used for comparison with DM_phase."
     : isStructure
-      ? "Best DM is the trial with the highest structure score. The DM range holds every trial whose score, raised by its noise allowance (dotted curve), reaches the best score. It is a conservative bound, several times wider than a 1-sigma error, so quote it as a range."
+      ? "Best DM is the trial with the highest structure score. The DM range holds every trial whose score, raised by its noise allowance (dotted curve), reaches the best score. The range is conservative: several times the scatter of the best DM."
       : "Sampled Peak DM is the best discrete grid point. Best DM is the local quadratic refinement around that sampled peak."
   const currentDm = view?.meta?.dm
 
   const uncertaintyTile = structure
     ? resultTile("Consistent DM Range", formatDmRange(structure), "primary", {
-      tooltip: "DMs the smoothed-structure noise criterion cannot distinguish from the best DM (Sutinjo et al. 2023, eq. 15). A conservative bound, not a 1-sigma error.",
+      tooltip: "DMs the noise cannot distinguish from the best DM (Sutinjo et al. 2023, eq. 15). A conservative range: several times the scatter of the best DM.",
       detail: bestDmDetail,
     })
     : resultTile("DM Fit Width", formatDetailUncertainty(displayedBestDmDetail, { digits: 6, units: "pc cm^-3" }) || "n/a", "primary", {
@@ -3834,7 +3834,7 @@ function temporalTooltip(topic) {
     waveletScale: "Smallest wavelet scale with significant localized curvature. Useful for sharp peaks, dips, or substructure; it can be unavailable for smooth broad bursts.",
     psdSlope: "Power-law slope of the averaged periodogram. Larger slopes indicate stronger low-frequency/red-noise structure relative to high-frequency fluctuations.",
     crossoverFrequency: "Frequency where the fitted power-law component equals the fitted white-noise floor. Out-of-band values are stored but not drawn as an in-band marker.",
-    crossoverBand: "Yellow band showing the stored diagnostic crossover interval after propagating the fitted PSD covariance. The band is clipped to the plotted frequency range and should not be read as a publishable confidence interval.",
+    crossoverBand: "Yellow band: the approximate 3σ interval on the crossover frequency, propagated from the PSD fit's covariance and clipped to the plotted frequency range.",
     modelFitCrossCheck: "Smallest fitted component width from the optional model fit. This is model-dependent and should be compared with non-parametric width estimates.",
     segmentLength: "Time span used for each averaged periodogram segment. Longer segments improve frequency resolution but reduce the number of averages.",
     segments: "Number of independent event-profile chunks used for the averaged PSD. More segments reduce noise but require shorter segment length.",
@@ -4470,10 +4470,8 @@ function legacyScalarUncertaintyDetail(value, units, basis = "Legacy scalar unce
     value: numericValue,
     units,
     classification: "diagnostic_only",
-    is_formal_1sigma: false,
-    publishable: false,
     basis,
-    tooltip: "This uncertainty came from an older scalar field without current classification metadata, so it is shown as diagnostic-only.",
+    tooltip: "From an older session, which did not record how this uncertainty was computed.",
     warning_flags: ["legacy_scalar_uncertainty"],
   }
 }
@@ -4536,31 +4534,51 @@ function findAcceptedWidthDetail(acceptedWidth, widthAnalysis, results, hasAcfFa
   return null
 }
 
+// Short names for what each kind of uncertainty is. The tooltip says what it
+// includes and, where a known term is missing, how to add it.
 function uncertaintyDetailLabel(detail) {
   const labels = {
-    formal_1sigma: "Formal 1σ",
-    model_hessian: "Model-based",
-    resolution_limit: "Resolution limit",
-    dm_fit_width: "Fit width",
-    heuristic_local_fit: "Heuristic",
-    statistical_only: "Statistical only",
-    diagnostic_only: "Diagnostic only",
+    formal_1sigma: "1σ",
+    statistical_only: "1σ statistical",
+    model_hessian: "1σ fit",
+    resolution_limit: "resolution",
+    dm_fit_width: "fit width",
+    heuristic_local_fit: "fit width",
+    conservative_bound: "range",
+    diagnostic_only: "approximate",
   }
-  return labels[detail?.classification] || "Uncertainty detail"
+  return labels[detail?.classification] || "uncertainty"
 }
 
-function uncertaintyTone(detail) {
-  const tones = {
-    formal_1sigma: "success",
-    model_hessian: "neutral",
-    resolution_limit: "warning",
-    dm_fit_width: "neutral",
-    heuristic_local_fit: "warning",
-    statistical_only: "warning",
-    diagnostic_only: "neutral",
-  }
-  return tones[detail?.classification] || "neutral"
+function uncertaintyTone() {
+  // Every kind of uncertainty is a normal result; data problems are shown by
+  // the measurement's own flags, not by the colour of this badge.
+  return "neutral"
 }
+
+// Flags worth surfacing next to an uncertainty: problems with the data or the
+// selection. Flags that only restate the uncertainty's kind are left out.
+const UNCERTAINTY_DATA_FLAGS = new Set([
+  "low_sn",
+  "heavily_masked",
+  "edge_clipped",
+  "implicit_offpulse",
+  "insufficient_offpulse_bins",
+  "insufficient_successful_trials",
+  "saturation_suspected",
+  "negative_recovery_wing",
+  "negative_event_tail",
+  "zero_noise",
+  "uncertainty_unavailable",
+  "monte_carlo_unavailable",
+  "low_acf_contrast",
+  "peak_on_sweep_edge",
+  "structure_interval_on_sweep_edge",
+  "structure_interval_has_gaps",
+  "underconstrained",
+  "fit_failed",
+  "unstable_covariance",
+])
 
 function uncertaintyTooltip(detail) {
   if (!detail) return ""
@@ -4569,10 +4587,13 @@ function uncertaintyTooltip(detail) {
     parts.push(String(detail.tooltip))
   }
   if (detail.basis) {
-    parts.push(`Basis: ${detail.basis}`)
+    parts.push(`Method: ${detail.basis}`)
   }
-  if (Array.isArray(detail.warning_flags) && detail.warning_flags.length) {
-    parts.push(`Flags: ${detail.warning_flags.map((flag) => formatMeasurementFlag(flag)).join(", ")}`)
+  const dataFlags = (Array.isArray(detail.warning_flags) ? detail.warning_flags : []).filter((flag) =>
+    UNCERTAINTY_DATA_FLAGS.has(flag),
+  )
+  if (dataFlags.length) {
+    parts.push(`Check: ${dataFlags.map((flag) => formatMeasurementFlag(flag)).join(", ")}.`)
   }
   return parts.join(" ")
 }
@@ -4584,13 +4605,7 @@ function uncertaintyBadgeMarkup(detail) {
 
 function dmFitWidthDisplayDetail(detail) {
   if (!detail) return null
-  return {
-    ...detail,
-    classification: "dm_fit_width",
-    tooltip: "Local width from the DM peak-refinement fit.",
-    basis: "Diagnostic local fit width from the selected DM score curve.",
-    warning_flags: [],
-  }
+  return { ...detail, classification: "dm_fit_width" }
 }
 
 function formatDetailUncertainty(detail, { digits = 3, units = null, scientific = false, formatter = null } = {}) {
@@ -7199,6 +7214,15 @@ function formatMeasurementFlag(flag) {
     saturation_suspected: "Saturation suspected",
     negative_recovery_wing: "Negative recovery",
     negative_event_tail: "Negative event tail",
+    zero_noise: "Zero off-pulse noise",
+    monte_carlo_unavailable: "Monte Carlo unavailable",
+    low_acf_contrast: "Low ACF contrast",
+    peak_on_sweep_edge: "Peak on sweep edge",
+    structure_interval_on_sweep_edge: "Range reaches sweep edge",
+    structure_interval_has_gaps: "Range has gaps",
+    underconstrained: "Fit underconstrained",
+    fit_failed: "Fit failed",
+    unstable_covariance: "Unstable covariance",
   }
   return labels[flag] || flag
 }

@@ -46,7 +46,7 @@ Peak flux and fluence are calibrated through the radiometer equation using the
 supplied system-equivalent flux density, effective bandwidth, polarization count
 and sample time. Uncertainties combine the radiometer-noise statistical term
 with the SEFD fractional systematic in quadrature; without the latter, the
-result is reported as statistical-only and flagged as not publishable.
+uncertainty is the radiometer-noise term alone.
 
 - Cordes, J. M. & McLaughlin, M. A. (2003), *Searches for Fast Radio Transients*,
   ApJ 596, 1142. [doi:10.1086/378231](https://doi.org/10.1086/378231)

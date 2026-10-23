@@ -2,9 +2,9 @@
 
 FLITS sweeps trial DMs around the current value, scores each one, and reports
 the DM that maximizes the chosen criterion. Three criteria are available, and
-they answer different questions. Only the smoothed-structure metric also
-reports a DM range derived from the noise; the others report a heuristic fit
-width.
+they answer different questions. The smoothed-structure metric also reports a
+range of DMs derived from the noise; the other two report the width of their
+fitted score peak.
 
 ## How dedispersion works here
 
@@ -107,14 +107,15 @@ Use it when you need a DM range to quote. It also gives an independent check on
 DMphase: the two use different statistics, so agreement between them is
 reassuring.
 
-**The range is a conservative bound, not a 1-sigma error.** FLITS tested it on
-simulated bursts with a known DM, rendered with sub-sample dispersion and swept
-with FLITS's own dedispersion. Across single and multi-component bursts at
-several S/N levels, the range contained the true DM in 98–100% of cases, and
-its half-width was about 4 to 7 times the rms error of the best DM. Quote it as
-a range of consistent DMs, citing the method, and not as ± 1σ. FLITS classifies
-it as `conservative_bound`, so it is never exported as the scalar 1-sigma
-`best_dm_uncertainty`.
+**How wide the range is.** FLITS tested it on simulated bursts with a known
+DM, rendered with sub-sample dispersion and swept with FLITS's own
+dedispersion. Across single and multi-component bursts at several S/N levels,
+the range contained the true DM in 98–100% of cases, and its half-width was
+about 4 to 7 times the rms error of the best DM. It is a conservative range of
+consistent DMs: quote it as a range, citing the method. It is labelled "range"
+(`conservative_bound`) in the uncertainty detail and the export; the plain
+`best_dm_uncertainty` field holds 1σ errors only, so it stays empty. See
+[Uncertainties](../user-guide/uncertainties.md).
 
 **The cutoff k<sub>c</sub>** sets how much of the light curve's DCT spectrum
 counts as signal. Left blank, FLITS picks it where the spectrum falls to its
@@ -141,9 +142,10 @@ Requirements and caveats:
   reports one step as the range half-width and flags
   `structure_interval_within_one_step`. Use a step at or above the DM bin
   resolution described above.
-- If the range reaches the end of the sweep (`structure_interval_on_sweep_edge`)
-  or has gaps (`structure_interval_has_gaps`), it is not marked publishable.
-  Widen the sweep, or inspect the curve.
+- If the range reaches the end of the sweep (`structure_interval_on_sweep_edge`),
+  the true range extends beyond it: widen the sweep. If it has gaps
+  (`structure_interval_has_gaps`), the score curve has more than one acceptable
+  region: inspect the curve.
 
 ## What the sweep depends on
 
@@ -174,7 +176,7 @@ for the inputs and interpretation limits of this example.*
 | Score curve | Should have a clear single maximum. Multiple comparable peaks mean the metric cannot distinguish them. |
 | Preferred DM and fit status | A parabolic fit near the peak; `peak_on_sweep_edge` means the true optimum is outside the range you swept. |
 | Residual arrival time | Structure remaining across the band after dedispersion, at both the applied and optimized DMs. |
-| Consistent DM range | Smoothed structure only: the DMs whose score plus noise allowance (dotted curve) reaches the best score (dashed line), shaded on the plot. A conservative bound, not a 1-sigma error. |
+| Consistent DM range | Smoothed structure only: the DMs whose score plus noise allowance (dotted curve) reaches the best score (dashed line), shaded on the plot. A conservative range. |
 | Warning flags | `integer_bin_dedispersion` always; others as they arise. |
 
 ## Practical guidance

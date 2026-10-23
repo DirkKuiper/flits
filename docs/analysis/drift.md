@@ -151,17 +151,17 @@ $$
 
 evaluated at the mean frequency of the unmasked selected channels.
 
-## When the drift rate is publishable
+## The drift-rate uncertainty
 
-FLITS classifies this measurement the way it classifies every other one.
+The drift-rate uncertainty is described the same way as every other
+[uncertainty](../user-guide/uncertainties.md).
 
-- **Without a DM uncertainty** the drift rate is `statistical_only` and not
-  publishable, and carries the `missing_dm_uncertainty` flag. The number is
-  real; what is missing is the systematic that usually dominates it.
-- **With a DM uncertainty** the DM systematic is propagated through the
-  sensitivity above and combined in quadrature with the statistical term. The
-  result is `formal_1sigma` and publishable, unless one of the blocking flags
-  is raised.
+- **Without a DM uncertainty** it is the 1σ statistical uncertainty from the
+  Monte Carlo (`statistical_only`), with the `missing_dm_uncertainty` flag. The
+  DM term, which usually dominates, is not included.
+- **With a DM uncertainty** the DM term is propagated through the sensitivity
+  above and combined in quadrature with the statistical term
+  (`formal_1sigma`).
 
 `drift_rate_status` reports significance against the bar FLITS would actually
 quote, not against the statistical term alone: `ok` when the drift rate exceeds
@@ -169,10 +169,10 @@ its combined uncertainty, `unconstrained` when it does not, and `unquantified`
 when there is no uncertainty at all — which is what running with the Monte Carlo
 disabled and no DM uncertainty gives you.
 
-The blocking flags are `heavily_masked` (a quarter or more of the selected
-channels are gone), `low_acf_contrast`, `monte_carlo_unavailable`, and
-`implicit_offpulse` (no explicit off-pulse window, so the noise reference is a
-guess).
+Check these flags before quoting a drift rate: `heavily_masked` (a quarter or
+more of the selected channels are gone), `low_acf_contrast`,
+`monte_carlo_unavailable`, and `implicit_offpulse` (no explicit off-pulse
+window, so the noise reference is a guess).
 
 Monte Carlo requests are bounded to 512 trials in the browser, API, and replay
 path so an imported snapshot cannot accidentally turn one measurement into an

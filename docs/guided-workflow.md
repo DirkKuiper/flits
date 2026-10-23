@@ -95,17 +95,16 @@ Click **Compute**. The full-precision outputs are in the downloadable
 | Peak position within the cutout | 240.517120 ms |
 
 These flux estimates use the preset SEFD without an observation-specific SEFD
-uncertainty. FLITS therefore labels their uncertainties `statistical_only`
-and sets the corresponding `publishable` flag to `false`. This is an expected
-limitation of the example. Supply an independently justified calibration and
-its uncertainty before interpreting these as fully calibrated scientific
-measurements. The reference does not supply a source distance or redshift.
+uncertainty, so their uncertainties are 1σ statistical errors from radiometer
+noise alone. Supply an independently justified calibration and its uncertainty
+to include the calibration term; see [Uncertainties](user-guide/uncertainties.md).
+The reference does not supply a source distance or redshift.
 
 ![FLITS Prepare tab showing the GBT selection, measurement cards, signal metrics, and uncertainty flags.](assets/guided-workflow/measurement-summary.png)
 
 *The Prepare tab connects the selected windows to the measured quantities.
-Fluence and peak flux carry a “Statistical only” label because this example
-does not provide an SEFD uncertainty. The displayed TOA fields are outside
+Fluence and peak flux carry a statistical label because this example does not
+provide an SEFD uncertainty. The displayed TOA fields are outside
 the validated reference checks for this already-dedispersed cutout.*
 
 ## 5. Run a residual DM sweep

@@ -81,8 +81,8 @@ def test_replay_recomputes_the_drift_rate_it_finds_in_a_snapshot(drift_snapshot_
     assert report["drift"]["drift_rate_uncertainty_mhz_per_ms"] == pytest.approx(
         stored["drift_rate_uncertainty_mhz_per_ms"], rel=1e-9, abs=1e-9
     )
-    # The DM uncertainty is what makes the bar publishable, so a replay that
-    # silently fell back to the DM sweep would reproduce a different claim.
+    # The DM uncertainty decides whether the bar includes the DM term, so a
+    # replay that silently fell back to the DM sweep would reproduce a different bar.
     assert stored["dm_uncertainty_pc_cm3"] == 0.05
     assert stored["uncertainty_details"]["drift_rate_mhz_per_ms"]["classification"] == "formal_1sigma"
     assert report["drift"]["drift_rate_status"] == stored["drift_rate_status"]

@@ -77,9 +77,8 @@ The drift workflow measures the sub-burst drift rate from the two-dimensional
 autocorrelation of the selected event window, and cross-checks it against the
 component centroids when two or more component regions are marked. Read the
 equivalent DM error before the drift rate: a dedispersion error tilts a burst
-the same way intrinsic drift does, and the drift rate is only marked publishable
-once a DM uncertainty has been folded in. See
-[Sub-Burst Drift](../analysis/drift.md).
+the same way intrinsic drift does, so enter a DM uncertainty to include that
+term in the drift-rate uncertainty. See [Sub-Burst Drift](../analysis/drift.md).
 
 ## Export tab
 

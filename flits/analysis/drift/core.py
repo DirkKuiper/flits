@@ -25,8 +25,8 @@ Drift and DM are degenerate. A dispersion-measure error tilts the burst in the
 time-frequency plane exactly the way intrinsic drift does, so every result here
 carries the DM it was measured at, the sensitivity of the drift rate to that
 DM, and the DM error that would on its own account for the whole measured
-slope. Without a DM uncertainty the drift rate is reported as statistical-only
-and is not marked publishable.
+slope. The drift-rate uncertainty includes the DM term when a DM uncertainty is
+supplied; without one it is the statistical uncertainty alone.
 """
 
 from __future__ import annotations
@@ -87,8 +87,8 @@ class DriftAnalysisInputs:
     dm_pc_cm3
         DM the waterfall is dedispersed at, in pc cm^-3.
     dm_uncertainty_pc_cm3
-        1-sigma DM uncertainty, when one is known. Supplying it is what turns
-        the drift rate from statistical-only into a publishable measurement.
+        1-sigma DM uncertainty, when one is known. Supplying it adds the DM
+        term to the drift-rate uncertainty, usually its largest part.
     """
 
     waterfall: np.ndarray
@@ -613,8 +613,9 @@ def run_drift_analysis(
     sigma and repeats the autocorrelation and the fit. That propagates the
     correlation between neighbouring autocorrelation pixels, which the fit
     covariance alone does not; the covariance value is kept alongside as a
-    diagnostic. The result is publishable only when a DM uncertainty was
-    supplied, because the DM systematic is usually the larger term.
+    diagnostic. When a DM uncertainty is supplied it is propagated through
+    the drift/DM sensitivity and combined in quadrature, because the DM term is
+    usually the larger one.
     """
     settings = (DriftAnalysisSettings() if settings is None else settings).normalized()
     waterfall = np.asarray(inputs.waterfall, dtype=float)
@@ -1007,12 +1008,17 @@ def _build_uncertainty_details(
                 + (
                     ", combined in quadrature with the DM systematic propagated through the drift/DM sensitivity."
                     if dm_uncertainty is not None
-                    else ". No DM uncertainty was supplied, so the DM systematic is missing."
+                    else ". No DM uncertainty was supplied, so the DM term is not included."
                 )
             ),
             tooltip=(
                 "Drift and DM are degenerate: a dedispersion error tilts the burst the same way intrinsic drift "
-                "does. The bar is publishable only once a DM uncertainty is supplied and folded in."
+                "does. "
+                + (
+                    "This uncertainty includes the DM term."
+                    if dm_uncertainty is not None
+                    else "Supply a DM uncertainty to include the DM term, usually the larger one."
+                )
             ),
             publishable=publishable,
             warning_flags=warning_flags,
@@ -1027,12 +1033,17 @@ def _build_uncertainty_details(
                 + (
                     ", combined in quadrature with the DM systematic."
                     if dm_uncertainty is not None
-                    else ". No DM uncertainty was supplied, so the DM systematic is missing."
+                    else ". No DM uncertainty was supplied, so the DM term is not included."
                 )
             ),
             tooltip=(
-                "Inter-component drift from the centroid regression. It shares the DM degeneracy of the ACF "
-                "estimator and is publishable only with a DM uncertainty folded in."
+                "Inter-component drift from the centroid regression, which shares the DM degeneracy of the ACF "
+                "estimator. "
+                + (
+                    "This uncertainty includes the DM term."
+                    if dm_uncertainty is not None
+                    else "Supply a DM uncertainty to include the DM term."
+                )
             ),
             publishable=publishable and component_status in {"ok", "exactly_two_components"},
             warning_flags=[*warning_flags, component_status],

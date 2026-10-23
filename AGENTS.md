@@ -77,3 +77,8 @@ test, `FLITS_DEMO_DIR` pointing at the tutorial burst. They skip otherwise.
   `requirements.txt`, which Dependabot maintains.
 - Session snapshots are a versioned, portable format. Older snapshots must still
   load; `tests/test_historical_compatibility.py` guards this.
+- Describe an uncertainty by what it is and what it includes, never by whether
+  it may be published. Give every `UncertaintyDetail` a `basis` (how it was
+  computed) and a `tooltip` (what it means, and how to add a missing term).
+  `tests/test_uncertainty_language.py` enforces this; the kinds are listed in
+  `docs/user-guide/uncertainties.md`.

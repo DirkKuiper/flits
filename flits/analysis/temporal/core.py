@@ -41,6 +41,26 @@ FWHM_PER_SIGMA = float(2.0 * np.sqrt(2.0 * np.log(2.0)))
 POWER_LAW_ALPHA_BOUNDS = (0.0, 10.0)
 
 
+def _fit_covariance_uncertainty_detail(
+    *,
+    value: float | None,
+    units: str,
+    basis: str,
+    tooltip: str,
+    warning_flags: list[str] | None = None,
+) -> UncertaintyDetail:
+    return UncertaintyDetail(
+        value=None if value is None else float(value),
+        units=units,
+        classification="model_hessian",
+        is_formal_1sigma=False,
+        publishable=False,
+        basis=basis,
+        tooltip=tooltip,
+        warning_flags=[] if warning_flags is None else list(warning_flags),
+    )
+
+
 def _diagnostic_uncertainty_detail(
     *,
     value: float | None,
@@ -659,13 +679,12 @@ def _psd_uncertainty_details(
     crossover: dict[str, float | str | None],
 ) -> dict[str, UncertaintyDetail]:
     basis = (
-        "Derived from the local covariance/Hessian of the FLITS power-law-plus-constant PSD fit. "
-        "These bars remain diagnostic only until the averaged-periodogram likelihood is validated against "
-        "Stingray's PSD treatment for m=segment_count."
+        "Local covariance of the power-law-plus-constant fit to the averaged periodogram, which assumes "
+        "Gaussian errors on the averaged power."
     )
     tooltip = (
-        "Diagnostic PSD-fit uncertainty from the local covariance of the fitted model. It is retained for trend "
-        "inspection but is not currently treated as a publishable physical 1-sigma interval."
+        "1σ from the PSD fit's covariance. Treat it as approximate: averaged periodogram powers are only "
+        "close to Gaussian when many segments are averaged."
     )
     details: dict[str, UncertaintyDetail] = {}
     warning_flags = [str(power_law.get("fit_status", "unavailable")), "psd_likelihood_unvalidated"]
@@ -678,7 +697,7 @@ def _psd_uncertainty_details(
     for field_name, (error_key, units) in parameter_specs.items():
         error_value = power_law.get(error_key)
         if isinstance(error_value, (int, float)) and np.isfinite(error_value):
-            details[field_name] = _diagnostic_uncertainty_detail(
+            details[field_name] = _fit_covariance_uncertainty_detail(
                 value=float(error_value),
                 units=units,
                 basis=basis,
@@ -699,12 +718,12 @@ def _psd_uncertainty_details(
             value=half_width,
             units="Hz",
             basis=(
-                "Stored from the propagated covariance interval of the PSD fit at the power-law/white-noise crossover. "
-                "The interval is diagnostic only until the PSD likelihood is formally validated."
+                "Half-width of the 3σ interval on the power-law/white-noise crossover frequency, propagated from "
+                "the PSD fit's covariance."
             ),
             tooltip=(
-                "Diagnostic crossover interval derived from the fitted PSD covariance. The displayed band is kept for "
-                "context, not as a publishable confidence interval."
+                "Approximate interval on the crossover frequency from the PSD fit's covariance, given as the "
+                "half-width of its 3σ range."
             ),
             warning_flags=[
                 str(crossover.get("crossover_frequency_status", "unavailable")),

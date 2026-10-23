@@ -171,7 +171,7 @@ class SpectralAnalysisTest(unittest.TestCase):
 
     @patch("flits.analysis.spectral.core._fit_crossover_frequency")
     @patch("flits.analysis.spectral.core._fit_power_law_model")
-    def test_run_averaged_spectral_analysis_downgrades_psd_errors_to_diagnostic_metadata(
+    def test_run_averaged_spectral_analysis_reports_psd_errors_from_the_fit_covariance(
         self,
         mock_fit_power_law: object,
         mock_fit_crossover: object,
@@ -204,11 +204,14 @@ class SpectralAnalysisTest(unittest.TestCase):
 
         self.assertEqual(result.status, "ok")
         self.assertEqual(result.power_law_alpha, 2.4)
-        self.assertIsNone(result.power_law_alpha_err)
-        self.assertIsNone(result.power_law_a_err)
-        self.assertIsNone(result.power_law_c_err)
-        self.assertEqual(result.uncertainty_details["power_law_alpha"].classification, "diagnostic_only")
+        # Parameter errors are 1-sigma from the fit covariance, like fitburst's.
+        self.assertEqual(result.power_law_alpha_err, 0.3)
+        self.assertEqual(result.power_law_a_err, 1.2)
+        self.assertEqual(result.power_law_c_err, 0.08)
+        self.assertEqual(result.uncertainty_details["power_law_alpha"].classification, "model_hessian")
+        # The crossover keeps its 3-sigma interval as an approximate range.
         self.assertEqual(result.uncertainty_details["crossover_frequency_hz"].classification, "diagnostic_only")
+        self.assertEqual(result.uncertainty_details["crossover_frequency_hz"].value, 35.0)
         self.assertEqual(result.crossover_frequency_hz_3sigma_low, 90.0)
         self.assertEqual(result.crossover_frequency_hz_3sigma_high, 160.0)
 

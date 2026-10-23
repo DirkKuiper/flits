@@ -33,20 +33,13 @@ or specify an SEFD explicitly.
 Without an SEFD, FLITS can still report selection- and timing-related outputs,
 but not calibrated flux-density values.
 
-## Uncertainties, and what FLITS will not claim
+## Uncertainties
 
-Every reported quantity carries its own uncertainty *and its own classification
-of what that uncertainty means*. FLITS distinguishes two cases, and refuses to
-blur them:
-
-| Classification | Meaning |
-| --- | --- |
-| `formal_1sigma` | The statistical term and the systematic terms it needs were both available, and are combined in quadrature. This is a complete 1-sigma uncertainty. |
-| `statistical_only` | Only the statistical (radiometer-noise) term is known. The systematic contribution is missing, so the stated value is a **lower bound** on the true uncertainty. |
-
-For flux-like quantities the systematic term that matters is the fractional
-uncertainty on the SEFD. Supply it as `sefd_fractional_uncertainty` when opening
-the session:
+Every reported quantity carries its uncertainty together with what that
+uncertainty includes. Flux-like uncertainties always include radiometer noise,
+as a 1σ statistical error (`statistical_only`). Supply the fractional
+uncertainty on the SEFD and FLITS combines the two in quadrature into a
+complete 1σ uncertainty (`formal_1sigma`):
 
 ```python
 session = BurstSession.from_file(
@@ -57,19 +50,19 @@ session = BurstSession.from_file(
 )
 ```
 
-Without it, FLITS still reports a fluence — the statistical part is real and
-useful for relative comparisons — but marks it **not publishable** and records
-why. A fluence quoted from a `statistical_only` result understates its
-uncertainty, often by a large factor, because SEFD uncertainty typically
-dominates.
+Without it, the uncertainty is the radiometer noise alone. That is a genuine
+1σ statistical error, but the SEFD term usually dominates, so quote it as
+statistical and state the calibration uncertainty separately, or supply the
+SEFD uncertainty. [Uncertainties](../user-guide/uncertainties.md) describes every
+kind of uncertainty FLITS reports.
 
 Each quantity also records the *basis* of its uncertainty in words: which noise
 reference was used, and which terms were combined. That text is carried into
 exports, so a number in a table can be traced back to how it was derived
 without rerunning anything.
 
-Distance-dependent quantities behave the same way: isotropic energy needs
-`distance_fractional_uncertainty` before it is reported as a formal uncertainty.
+Distance-dependent quantities behave the same way: isotropic energy includes
+the distance term once `distance_fractional_uncertainty` is supplied as well.
 
 !!! tip "Check the flags before quoting a number"
     `measurement_flags` records what was missing or suspect —

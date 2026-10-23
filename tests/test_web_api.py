@@ -573,9 +573,9 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("Sweep Input DM", app_js)
         self.assertIn("DM Fit Width", app_js)
         self.assertIn("function dmFitWidthDisplayDetail(detail)", app_js)
-        self.assertIn('dm_fit_width: "Fit width"', app_js)
-        self.assertIn("diagnostic local-fit width", app_js)
-        self.assertNotIn("publishable 1-sigma DM error bar", app_js)
+        self.assertIn('dm_fit_width: "fit width"', app_js)
+        # Uncertainties are described by what they are, not judged.
+        self.assertNotIn("publishable", app_js)
         self.assertNotIn("formal 1-sigma uncertainty", app_js)
         self.assertIn("renderDmComponentSummary", app_js)
         self.assertIn("Selected Metric", app_js)
@@ -1261,7 +1261,9 @@ class WebApiTest(unittest.TestCase):
         self.assertIn('saturation_suspected: "Saturation suspected"', source)
         self.assertIn('negative_recovery_wing: "Negative recovery"', source)
         self.assertIn('negative_event_tail: "Negative event tail"', source)
-        self.assertIn("detail.warning_flags.map((flag) => formatMeasurementFlag(flag))", source)
+        # Data-quality flags such as saturation are surfaced next to an uncertainty.
+        self.assertIn('  "saturation_suspected",\n', source)
+        self.assertIn("dataFlags.map((flag) => formatMeasurementFlag(flag))", source)
 
     def test_session_action_run_drift_analysis_merges_settings_and_serializes(self) -> None:
         from flits.models import DriftAnalysisSettings

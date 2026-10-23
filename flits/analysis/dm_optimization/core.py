@@ -174,18 +174,14 @@ def _best_dm_uncertainty_detail(
     metric: str,
     fit_status: str,
 ) -> UncertaintyDetail:
-    metric_basis = (
-        "Weighted-polynomial width from the local DMphase score peak."
-        if metric == "dm_phase"
-        else "Quadratic width from the local DM score peak."
-    )
     basis = (
-        f"{metric_basis} FLITS still evaluates the sweep with integer-bin dedispersion on the active "
-        "analysis grid, so this width is a heuristic local-fit diagnostic rather than a publishable 1-sigma DM uncertainty."
+        "Width of DMphase's weighted polynomial fit to the score peak."
+        if metric == "dm_phase"
+        else "Width of a quadratic fit to the score peak, where the score drops by a fixed amount."
     )
     tooltip = (
-        "Diagnostic width of the local DM fit around the sampled peak. It is retained for comparison and UI context, "
-        "but it is not exported as a formal 1-sigma uncertainty while integer-bin dedispersion sets a quantization floor."
+        "How sharply the metric peaks around the best DM. For a DM range derived from the noise, use the "
+        "smoothed-structure metric."
     )
     warning_flags = ["integer_bin_dedispersion", str(fit_status)]
     if value is None:
@@ -719,7 +715,7 @@ def _structure_uncertainty_detail(
     step: float,
     warning_flags: list[str],
 ) -> UncertaintyDetail:
-    """Describe the smoothed-structure DM interval as a conservative bound."""
+    """Describe the smoothed-structure DM range."""
     half_width = max(best_dm - interval_low, interval_high - best_dm)
     flags = ["integer_bin_dedispersion", *warning_flags]
     value_note = "The value is the larger distance from the best DM to either end."
@@ -730,13 +726,11 @@ def _structure_uncertainty_detail(
         value_note = "Only the best trial passed, so the value is one trial spacing."
     basis = (
         f"DM range {interval_low:g} to {interval_high:g} pc cm^-3: the trials whose smoothed-structure score plus "
-        f"noise allowance reaches the best trial's (Sutinjo et al. 2023, eq. 15). {value_note} It is a "
-        "conservative bound, not a 1-sigma error: on simulated bursts it contained the true DM at least 98% "
-        "of the time and was about 4 to 7 times the rms error of the best DM. Quote it as a range."
+        f"noise allowance reaches the best trial's (Sutinjo et al. 2023, eq. 15). {value_note}"
     )
     tooltip = (
-        "Conservative DM range from the smoothed-structure noise criterion (Sutinjo et al. 2023). "
-        "Not a 1-sigma error bar; quote it as the range of DMs consistent with the best one."
+        "Range of DMs the noise cannot distinguish from the best DM (Sutinjo et al. 2023). It is conservative: "
+        "several times the scatter of the best DM."
     )
     clean = not ({"structure_interval_on_sweep_edge", "structure_interval_has_gaps"} & set(flags))
     return UncertaintyDetail(
