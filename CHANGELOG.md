@@ -4,6 +4,23 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.4.0](https://github.com/DirkKuiper/flits/compare/flits-v1.3.0...flits-v1.4.0) (2026-10-23)
+
+
+### Features
+
+* **cli:** measure bursts without a browser with flits measure ([8b64256](https://github.com/DirkKuiper/flits/commit/8b64256a9a7d652562bdb6839d05c5fda93a81be))
+* measure bursts without a browser with flits measure ([2658389](https://github.com/DirkKuiper/flits/commit/2658389efd323e8390a160a5892f183a8b1f36c6))
+* open a prepared example burst with flits demo ([8863dba](https://github.com/DirkKuiper/flits/commit/8863dba6e7ec46dd3575533ed782b96decea6590))
+
+
+### Documentation
+
+* document scripted and batch measurement ([a0e4c80](https://github.com/DirkKuiper/flits/commit/a0e4c8034dca1636cb327e65adb1962451f5a662))
+* point the docs home page at flits demo and flits measure ([09ef3c1](https://github.com/DirkKuiper/flits/commit/09ef3c1e9a18627155110a999ccb908310e1c9b1))
+* publish llms.txt and add AGENTS.md for coding agents ([b9630ac](https://github.com/DirkKuiper/flits/commit/b9630ac0db51097313d01285f8ac96e443c1c7cf))
+* publish llms.txt and add AGENTS.md for coding agents ([95443ea](https://github.com/DirkKuiper/flits/commit/95443ea33072f4efe19e8b8174a51799adefd416))
+
 ## [1.3.0](https://github.com/DirkKuiper/flits/compare/flits-v1.2.2...flits-v1.3.0) (2026-10-23)
 
 

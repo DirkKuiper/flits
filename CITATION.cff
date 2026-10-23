@@ -16,7 +16,7 @@ abstract: Open-source Python software for interactive fast radio burst analysis,
 repository-code: https://github.com/DirkKuiper/flits
 url: https://github.com/DirkKuiper/flits
 license: GPL-3.0-only
-version: 1.3.0 # x-release-please-version
+version: 1.4.0 # x-release-please-version
 date-released: 2026-10-23 # x-release-please-date
 keywords:
   - fast radio bursts
