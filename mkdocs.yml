@@ -1,5 +1,5 @@
 site_name: FLITS
-site_description: Browser-based FRB filterbank analysis software
+site_description: Interactive and scriptable fast radio burst (FRB) analysis software
 site_url: https://dirkkuiper.github.io/flits/
 repo_url: https://github.com/DirkKuiper/flits
 repo_name: DirkKuiper/flits
@@ -21,6 +21,48 @@ theme:
 
 plugins:
   - search
+  # Publishes llms.txt and llms-full.txt, plain-Markdown indexes of these docs
+  # for language-model tools (https://llmstxt.org).
+  - llmstxt:
+      full_output: llms-full.txt
+      markdown_description: |
+        FLITS (Fast-Look Interactive Transient Suite) measures fast radio bursts
+        (FRBs) in dynamic spectra: SIGPROC filterbank (.fil), PSRFITS (.fits,
+        .sf) and CHIME/FRB HDF5 (.h5) files. It masks interference, localizes
+        the burst in time and frequency, optimizes the DM, and measures S/N,
+        peak flux, fluence, widths, arrival times, sub-burst drift rate and
+        rotation measure, with each uncertainty classified. It starts from a
+        burst you already have; it is not a search pipeline.
+
+        Install with `pip install flits` (Python 3.11+). Three ways to use it:
+
+        - `flits measure FILE... --dm DM` measures bursts without a browser and
+          prints JSON (or `--format jsonl|csv`). Pin choices with `--event`,
+          `--offpulse`, `--band` or `--crop`. Save sessions with
+          `--snapshot-dir`. Exit code 0 means every burst was measured.
+        - Python: `flits.BurstSession.from_file(path, dm=...)`, then
+          `auto_mask_jess()`, `auto_localize()` and `compute_properties()`;
+          or `flits.measure_burst(path, flits.MeasureOptions(dm=...))`.
+        - `flits --data-dir DIR` serves the browser interface; `flits demo`
+          opens a prepared example burst.
+
+        Sessions are saved as JSON snapshots; `flits replay SNAPSHOT --check`
+        recomputes their measurements from the original data.
+      sections:
+        Getting started:
+          - getting-started.md: Install FLITS, try the demo, and load a burst
+          - guided-workflow.md: A complete worked example on a public GBT burst, with reference values
+          - installation.md: Python, Docker, Apptainer, and remote or HPC deployment
+        Scripting:
+          - user-guide/headless-measurement.md: Measure bursts from the command line or Python, in batches
+          - user-guide/headless-replay.md: Recompute and check a saved session without a browser
+          - developer/api-reference.md: The Python API, BurstSession first
+        User guide:
+          - user-guide/session-workflow.md: Working through a session in the interface
+          - user-guide/exports-and-snapshots.md: Export bundles, session snapshots, and provenance
+          - user-guide/supported-formats.md: Supported file formats and telescope presets
+        Analysis methods:
+          - analysis/*.md
   - mkdocstrings:
       handlers:
         python:
