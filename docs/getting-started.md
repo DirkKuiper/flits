@@ -15,7 +15,26 @@ separately:
 pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3ec7bc21951ce1b4a26a0255096b69.tar.gz"
 ```
 
-## 2. Start the local server
+## 2. Try the demo
+
+To see FLITS on a real burst before using your own data:
+
+```bash
+flits demo
+```
+
+The first run downloads the public GBT burst from the
+[Guided Workflow](guided-workflow.md) (42 MB, checked against its published
+SHA-256) into `~/.cache/flits/demo`. FLITS then opens it in your browser with
+the guide's selections and measurements already in place, so you can explore a
+finished session first. Later runs reuse the file and work offline.
+
+Over SSH, add `--no-browser` and open the printed link through a port forward.
+Use `--dir DIR` to keep the demo somewhere else, or to point it at a copy you
+downloaded by hand. Use `--reset` to discard changes you saved to the demo
+session.
+
+## 3. Start the local server
 
 Point FLITS at a directory containing your filterbanks:
 
@@ -29,7 +48,7 @@ The browser opens with a **New Session** form. Choose the source file and DM
 there, then use **Load Session**. The **Session** panel in the left sidebar is
 for saving or reopening a session after it has loaded.
 
-## 3. Load a burst file
+## 4. Load a burst file
 
 FLITS reads SIGPROC filterbank (`.fil`), PSRFITS search/fold data (`.fits`,
 `.sf`), and CHIME/FRB HDF5 (`.h5`, `.hdf5`) files, including CHIME public
@@ -54,7 +73,7 @@ SEFD yourself.
 *The New Session form for the [GBT example](guided-workflow.md). For your own
 data, choose your file and its appropriate DM before loading.*
 
-## 4. Work through the session
+## 5. Work through the session
 
 The typical order is:
 

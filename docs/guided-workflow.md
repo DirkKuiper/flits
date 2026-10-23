@@ -10,6 +10,12 @@ but the upstream absolute dedispersion time reference is not established by
 this example. The reference checks below validate intensity measurements and
 the residual sweep, not absolute or infinite-frequency arrival times.
 
+!!! tip "Skip ahead with `flits demo`"
+    `flits demo` downloads this burst, verifies its checksum, and opens it with
+    the selections from steps 3 and 4 and the DM sweep from step 5 already
+    applied. Use it to see where this guide ends up, then follow the steps
+    below to make the selections yourself.
+
 ## 1. Download the data and reference environment
 
 The filterbank is a public [GitHub release asset](https://github.com/DirkKuiper/flits/releases/tag/tutorial-data-v1).

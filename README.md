@@ -53,10 +53,21 @@ FLITS is not a search pipeline — it starts from a burst you already have.
 
 ## Quick Start
 
-Install the published package:
+Install the published package and open a prepared example burst:
 
 ```bash
 pip install flits
+flits demo
+```
+
+`flits demo` downloads the public GBT burst from the
+[guided workflow](https://dirkkuiper.github.io/flits/guided-workflow/) once
+(42 MB, checksum-verified) and opens it in your browser with the guide's
+selections and measurements in place.
+
+To work on your own data:
+
+```bash
 flits --data-dir /path/to/filterbanks --host 127.0.0.1 --port 8123
 ```
 
