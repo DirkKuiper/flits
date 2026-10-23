@@ -60,13 +60,11 @@ def _fitburst_uncertainty_detail(
     parameter_label: str,
 ) -> UncertaintyDetail:
     basis = (
-        f"{parameter_label} uncertainty reported by fitburst from its local least-squares covariance/Hessian estimate. "
-        "This is model-based, secondary to the non-parametric FLITS measurements, and should not be compared directly "
-        "with formal 1-sigma uncertainties from other estimators."
+        f"{parameter_label} uncertainty from fitburst's least-squares covariance (the inverse Hessian) at the best fit."
     )
     tooltip = (
-        "Model-based fitburst uncertainty. It reflects the local fit covariance of the selected parametric model and "
-        "is retained as a secondary diagnostic rather than a publishable non-parametric error bar."
+        "1σ from the model fit's covariance. It assumes the chosen burst model describes the data, so it can "
+        "differ from the model-independent FLITS measurements."
     )
     warning_flags = ["fitburst_model_hessian"]
     if value is None:

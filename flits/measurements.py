@@ -1,9 +1,9 @@
 """Burst measurement: width, flux, fluence, signal-to-noise and energy.
 
-Measurements are computed against an explicit off-pulse noise reference and
-carry their own uncertainty classification. A quantity is only reported as a
-formal 1-sigma uncertainty when the systematic inputs it requires were supplied;
-otherwise it is marked statistical-only and flagged as not publishable."""
+Measurements are computed against an explicit off-pulse noise reference. Each
+uncertainty records how it was computed and what it includes: flux-like
+uncertainties always include radiometer noise, and include the calibration
+(SEFD) and distance terms when their uncertainties are supplied."""
 
 from __future__ import annotations
 
@@ -810,11 +810,10 @@ def compute_burst_measurements(
     returns width, peak flux, fluence, signal-to-noise and, when a distance is
     supplied, isotropic energy.
 
-    Every quantity carries its own uncertainty classification. A value is
-    reported as ``formal_1sigma`` only when the systematic inputs it needs were
-    supplied -- notably an SEFD fractional uncertainty for flux-like
-    quantities. Without them the value is ``statistical_only`` and is flagged as
-    not publishable, rather than being presented as a complete uncertainty.
+    Every quantity carries an uncertainty detail saying how it was computed
+    and what it includes. Flux-like uncertainties are 1-sigma radiometer noise
+    (``statistical_only``), combined with the SEFD and distance uncertainties
+    when those are supplied (``formal_1sigma``).
 
     Returns
     -------
@@ -946,8 +945,8 @@ def compute_burst_measurements(
             value=float((tsamp_ms / 1e3) / (2 * 86400.0)),
             units="MJD",
             classification="resolution_limit",
-            basis="Half of the effective time bin after reduction; TOA is anchored to the selected peak bin rather than a fitted centroid model.",
-            tooltip="Resolution limit from half of the effective time bin. This is a discretization floor, not a formal statistical 1σ error bar.",
+            basis="Half of the effective time bin after downsampling: the arrival time is the selected peak bin.",
+            tooltip="Resolution of the arrival time: half the effective time bin, since the arrival time is a peak bin.",
             publishable=False,
             warning_flags=resolution_warning_flags,
         )
@@ -962,8 +961,8 @@ def compute_burst_measurements(
             value=float(tsamp_ms * 0.5),
             units="ms",
             classification="resolution_limit",
-            basis="Half of the effective time sample used to evaluate the temporal ACF crossing.",
-            tooltip="Resolution limit from half the effective time sample. The temporal ACF width itself is retained, but this is not treated as a formal 1σ uncertainty.",
+            basis="Half of the effective time sample at which the temporal ACF crossing is evaluated.",
+            tooltip="Resolution of the ACF width: half the effective time sample.",
             publishable=False,
             warning_flags=resolution_warning_flags,
         )
@@ -972,8 +971,8 @@ def compute_burst_measurements(
             value=float(abs(freqres_mhz) * 0.5),
             units="MHz",
             classification="resolution_limit",
-            basis="Half of the effective channel width used to evaluate the spectral ACF crossing.",
-            tooltip="Resolution limit from half the effective channel width. The spectral ACF width is retained as a diagnostic scale, not a formal 1σ uncertainty.",
+            basis="Half of the effective channel width at which the spectral ACF crossing is evaluated.",
+            tooltip="Resolution of the spectral ACF width: half the effective channel width.",
             publishable=False,
             warning_flags=resolution_warning_flags,
         )
@@ -993,12 +992,17 @@ def compute_burst_measurements(
         peak_flux_stat = float(flux_scale)
         peak_flux_value = None
         peak_flux_classification = "statistical_only"
-        peak_flux_basis = "Radiometer-noise statistical term from one off-pulse sigma in the selected band."
+        peak_flux_basis = "Radiometer noise: one off-pulse standard deviation in the selected band, in Jy."
+        peak_flux_tooltip = (
+            "1σ statistical uncertainty from radiometer noise. Supply the SEFD uncertainty to include the "
+            "calibration term."
+        )
         peak_flux_publishable = False
         if sefd_fractional_uncertainty is not None:
             peak_flux_value = float(np.sqrt(peak_flux_stat**2 + (abs(peak_flux_jy) * sefd_fractional_uncertainty) ** 2))
             peak_flux_classification = "formal_1sigma"
-            peak_flux_basis = "Quadrature combination of the radiometer-noise statistical term and the supplied SEFD fractional uncertainty."
+            peak_flux_basis = "Radiometer noise and the supplied SEFD fractional uncertainty, combined in quadrature."
+            peak_flux_tooltip = "1σ uncertainty including radiometer noise and the SEFD calibration uncertainty."
             peak_flux_publishable = noise_publishable
         else:
             peak_flux_value = peak_flux_stat
@@ -1008,24 +1012,26 @@ def compute_burst_measurements(
             units="Jy",
             classification=peak_flux_classification,
             basis=peak_flux_basis,
-            tooltip=(
-                "Peak-flux uncertainty combines radiometer-noise statistics with any supplied SEFD fractional systematic. "
-                "Without an SEFD uncertainty input, this remains statistical-only and non-publishable."
-            ),
+            tooltip=peak_flux_tooltip,
             publishable=peak_flux_publishable and not saturation_suspected,
             warning_flags=flux_like_warning_flags,
         )
     if fluence_jyms is not None and fluence_uncertainty is not None:
         fluence_value = None
         fluence_classification = "statistical_only"
-        fluence_basis = "Radiometer-noise statistical term from the event-window sum over off-pulse-normalized bins."
+        fluence_basis = "Radiometer noise, summed over the event window from the off-pulse noise level."
+        fluence_tooltip = (
+            "1σ statistical uncertainty from radiometer noise. Supply the SEFD uncertainty to include the "
+            "calibration term."
+        )
         fluence_publishable = False
         if sefd_fractional_uncertainty is not None:
             fluence_value = float(
                 np.sqrt(fluence_uncertainty**2 + (abs(fluence_jyms) * sefd_fractional_uncertainty) ** 2)
             )
             fluence_classification = "formal_1sigma"
-            fluence_basis = "Quadrature combination of the radiometer-noise statistical term and the supplied SEFD fractional uncertainty."
+            fluence_basis = "Radiometer noise and the supplied SEFD fractional uncertainty, combined in quadrature."
+            fluence_tooltip = "1σ uncertainty including radiometer noise and the SEFD calibration uncertainty."
             fluence_publishable = noise_publishable
         else:
             fluence_value = float(fluence_uncertainty)
@@ -1034,10 +1040,7 @@ def compute_burst_measurements(
             units="Jy ms",
             classification=fluence_classification,
             basis=fluence_basis,
-            tooltip=(
-                "Fluence uncertainty combines radiometer-noise statistics with any supplied SEFD fractional systematic. "
-                "Without an SEFD uncertainty input, this remains statistical-only and non-publishable."
-            ),
+            tooltip=fluence_tooltip,
             publishable=fluence_publishable and not saturation_suspected,
             warning_flags=flux_like_warning_flags,
         )
@@ -1047,13 +1050,29 @@ def compute_burst_measurements(
             iso_stat = float(uncertainty_details["fluence_jyms"].value) / abs(float(fluence_jyms))
         iso_value = None
         iso_classification = "statistical_only"
-        iso_basis = "Propagated from the fluence statistical term only."
+        iso_basis = "Propagated from the fluence uncertainty."
+        missing_terms = [
+            label
+            for label, value in (("SEFD", sefd_fractional_uncertainty), ("distance", distance_fractional_uncertainty))
+            if value is None
+        ]
+        if missing_terms == ["distance"]:
+            iso_tooltip = (
+                "1σ uncertainty propagated from the fluence. Supply the distance uncertainty to include that term."
+            )
+        else:
+            # The distance term is only combined once the SEFD term is there too.
+            iso_tooltip = (
+                "1σ statistical uncertainty propagated from the fluence. Supply the SEFD and distance "
+                "uncertainties to include the calibration and distance terms."
+            )
         iso_publishable = False
         if sefd_fractional_uncertainty is not None and distance_fractional_uncertainty is not None:
             iso_fractional = float(np.sqrt(iso_stat**2 + (2.0 * distance_fractional_uncertainty) ** 2))
             iso_value = float(abs(iso_e) * iso_fractional)
             iso_classification = "formal_1sigma"
-            iso_basis = "Quadrature combination of the propagated fluence term and the supplied luminosity-distance fractional uncertainty."
+            iso_basis = "The fluence uncertainty and the supplied luminosity-distance fractional uncertainty, combined in quadrature."
+            iso_tooltip = "1σ uncertainty including radiometer noise, the SEFD calibration uncertainty, and the distance uncertainty."
             iso_publishable = noise_publishable
         else:
             iso_value = float(abs(iso_e) * iso_stat) if iso_stat > 0 else None
@@ -1066,10 +1085,7 @@ def compute_burst_measurements(
             units="erg",
             classification=iso_classification,
             basis=iso_basis,
-            tooltip=(
-                "Isotropic-energy uncertainty is only treated as publishable after both calibration (SEFD) and distance systematics are supplied. "
-                "Otherwise it is statistical-only."
-            ),
+            tooltip=iso_tooltip,
             publishable=iso_publishable,
             warning_flags=flux_like_warning_flags,
         )
@@ -1109,8 +1125,8 @@ def compute_burst_measurements(
         calibration_method="radiometer_equation" if flux_scale is not None else "uncalibrated",
         energy_unit="erg" if iso_e is not None else None,
         uncertainty_basis=(
-            "Measurement uncertainty details classify each value as formal, model-based, statistical-only, heuristic, or resolution-limited. "
-            "Formal flux-like uncertainties require explicit off-pulse noise plus supplied calibration and distance systematics where applicable."
+            "Each uncertainty detail says how the value was computed and what it includes. Flux-like uncertainties "
+            "are radiometer noise, combined with the SEFD and distance uncertainties when those are supplied."
         ),
         event_window_ms=[
             float(time_axis_ms[max(0, min(event_rel_start, time_axis_ms.size - 1))]) if time_axis_ms.size else 0.0,

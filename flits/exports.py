@@ -1071,9 +1071,13 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
     polarization = snapshot.polarization or {}
     rm_synthesis = polarization.get("rm_synthesis") or {}
 
-    def uncertainty_columns(prefix: str, detail: dict[str, Any] | None) -> dict[str, str]:
+    def uncertainty_columns(prefix: str, detail: dict[str, Any] | None) -> dict[str, Any]:
         payload = detail or {}
+        value = payload.get("value")
         return {
+            # The number itself, whatever kind of uncertainty it is; the class
+            # and basis columns say what it includes.
+            f"{prefix}_uncertainty_value": "" if value is None else value,
             f"{prefix}_uncertainty_class": str(payload.get("classification", "") or ""),
             f"{prefix}_uncertainty_basis": str(payload.get("basis", "") or ""),
         }

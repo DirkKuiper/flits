@@ -83,7 +83,16 @@ def _array_2d(
     return arr
 
 
-FORMAL_UNCERTAINTY_CLASSIFICATIONS: frozenset[str] = frozenset({"formal_1sigma", "model_hessian"})
+ONE_SIGMA_UNCERTAINTY_CLASSIFICATIONS: frozenset[str] = frozenset(
+    {"formal_1sigma", "statistical_only", "model_hessian"}
+)
+"""Classifications whose value is a 1-sigma error: complete, statistical (a known
+systematic not included), or from a model fit's covariance. Resolution limits,
+fit widths, ranges and approximate intervals are reported in their uncertainty
+detail only."""
+
+# Older name, kept for code that imported it.
+FORMAL_UNCERTAINTY_CLASSIFICATIONS = ONE_SIGMA_UNCERTAINTY_CLASSIFICATIONS
 
 
 def _uncertainty_detail_map_to_dict(values: dict[str, UncertaintyDetail]) -> dict[str, Any]:
@@ -97,15 +106,32 @@ def _uncertainty_detail_map_from_dict(payload: dict[str, Any] | None) -> dict[st
 
 
 def compatible_scalar_uncertainty(detail: UncertaintyDetail | None) -> float | None:
+    """The detail's value when it is a 1-sigma error, for the plain uncertainty fields."""
     if detail is None or detail.value is None:
         return None
-    if detail.classification not in FORMAL_UNCERTAINTY_CLASSIFICATIONS:
+    if detail.classification not in ONE_SIGMA_UNCERTAINTY_CLASSIFICATIONS:
         return None
     return float(detail.value)
 
 
 @dataclass(frozen=True)
 class UncertaintyDetail:
+    """An uncertainty together with how it was computed and what it includes.
+
+    `classification` names the kind of uncertainty: ``formal_1sigma`` (1-sigma,
+    every known term included), ``statistical_only`` (1-sigma statistical; a
+    known systematic such as the SEFD uncertainty was not supplied),
+    ``model_hessian`` (1-sigma from a fit's covariance), ``resolution_limit``
+    (half a time or frequency bin), ``heuristic_local_fit`` (width of a fitted
+    score peak), ``conservative_bound`` (a range that contains the value), or
+    ``diagnostic_only`` (an approximate interval). `basis` says how it was
+    computed and `tooltip` what it means, including how to add a missing term.
+
+    `is_formal_1sigma` and `publishable` are kept so older sessions and scripts
+    still read the same fields; they are deprecated in favour of
+    `classification` and `warning_flags`, which carry the same information.
+    """
+
     value: float | None
     units: str | None
     classification: str
@@ -1218,9 +1244,9 @@ class DriftAnalysisSettings:
     random_seed: int = 20240617
     exclude_zero_lag: bool = True
     # An operator-supplied 1-sigma DM uncertainty, in pc cm^-3. It lives in the
-    # settings rather than in the call because it is what decides whether the
-    # drift rate is publishable, and a replay that quietly fell back to the DM
-    # sweep would reproduce a different classification from the one recorded.
+    # settings rather than in the call because it decides whether the drift-rate
+    # uncertainty includes the DM term, and a replay that quietly fell back to
+    # the DM sweep would reproduce a different uncertainty from the one recorded.
     dm_uncertainty_pc_cm3: float | None = None
 
     def normalized(self) -> DriftAnalysisSettings:

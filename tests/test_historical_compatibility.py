@@ -43,15 +43,15 @@ def test_historical_snapshot_preserves_stored_results_and_selections(release, mo
     reopened.compute_properties()
     differences = _compare_measurements(reopened.results.to_dict(), snapshot["results"], 1e-6)
     if release["tag"] == "flits-v0.2.0":
-        # Release 0.2.1 deliberately reclassified these diagnostic error bars;
-        # retaining old values is supported, silently claiming identical
-        # recalculation with the new uncertainty semantics is not.
+        # Release 0.2.1 moved resolution limits out of the plain uncertainty
+        # fields; retaining old values is supported, silently claiming identical
+        # recalculation with the new semantics is not. The radiometer-noise
+        # errors on peak flux and fluence are 1-sigma statistical values again,
+        # so those recompute to what 0.2.0 stored.
         assert {item["field"] for item in differences} == {
             "uncertainties.toa_topo_mjd",
             "uncertainties.width_ms_acf",
             "uncertainties.spectral_width_mhz_acf",
-            "uncertainties.peak_flux_jy",
-            "uncertainties.fluence_jyms",
         }
     else:
         assert not differences
