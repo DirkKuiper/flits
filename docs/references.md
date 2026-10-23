@@ -160,5 +160,8 @@ decomposition against an empirical off-pulse floor.
 
 ## Citing FLITS
 
-See [CITATION.cff](https://github.com/DirkKuiper/flits/blob/main/CITATION.cff)
-in the repository.
+Please cite the software archive on Zenodo:
+[doi:10.5281/zenodo.23596340](https://doi.org/10.5281/zenodo.23596340). That DOI
+always resolves to the latest release; each release also has its own DOI, listed
+on the Zenodo page, for citing the exact version you used. Author and citation
+metadata are in [CITATION.cff](https://github.com/DirkKuiper/flits/blob/main/CITATION.cff).

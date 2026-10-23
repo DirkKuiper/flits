@@ -1,6 +1,7 @@
 # FLITS
 
 [![Docs](https://img.shields.io/badge/docs-online-0A66C2.svg)](https://dirkkuiper.github.io/flits/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23596340.svg)](https://doi.org/10.5281/zenodo.23596340)
 [![PyPI](https://img.shields.io/pypi/v/flits.svg)](https://pypi.org/project/flits/)
 [![Python](https://img.shields.io/pypi/pyversions/flits.svg)](https://pypi.org/project/flits/)
 [![Tests](https://github.com/DirkKuiper/flits/actions/workflows/tests.yml/badge.svg)](https://github.com/DirkKuiper/flits/actions/workflows/tests.yml)
@@ -154,11 +155,14 @@ sub-burst drift, exports, and release procedures.
 
 ## Citation
 
-If you use FLITS in research, cite the software and link to the repository:
+If you use FLITS in research, please cite the software archive on Zenodo:
+[doi:10.5281/zenodo.23596340](https://doi.org/10.5281/zenodo.23596340). That
+DOI always resolves to the latest release; each release also has its own DOI,
+listed on the Zenodo page, for citing the exact version you used.
 
-- PyPI package: `flits`
-- Repository: `https://github.com/DirkKuiper/flits`
-- Citation metadata: [CITATION.cff](./CITATION.cff)
+Author and citation metadata are in
+[CITATION.cff](https://github.com/DirkKuiper/flits/blob/main/CITATION.cff),
+which GitHub's "Cite this repository" button turns into APA or BibTeX.
 
 ## License
 
