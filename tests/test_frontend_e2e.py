@@ -327,3 +327,32 @@ def test_a_link_naming_an_unknown_session_says_so(page, flits_server) -> None:
     expect(page.locator("#snapshotLibraryMeta")).to_contain_text("Saved session not found", timeout=30_000)
     expect(page.locator("#sessionBadge")).to_contain_text("Not loaded")
     assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
+
+
+def test_a_smoothed_structure_sweep_reports_a_dm_range(page, synthetic_waterfall) -> None:
+    _load_session(page, synthetic_waterfall)
+    _apply_exact_selection(page, "event", 100.0, 160.0)
+    _apply_exact_selection(page, "offpulse", 0.0, 50.0)
+
+    page.click("#analysisDmTab")
+    expect(page.locator("#analysisDmPanel")).to_be_visible()
+    # The cutoff only applies to this metric, so it only shows for it.
+    expect(page.locator("#dmStructureCutoffField")).to_be_hidden()
+    page.select_option("#dmMetricInput", "smoothed_structure")
+    expect(page.locator("#dmStructureCutoffField")).to_be_visible()
+
+    # The synthetic band is narrow: one DM bin is about 6 pc cm^-3.
+    page.fill("#dmHalfRangeInput", "60")
+    page.fill("#dmStepInput", "6")
+    page.click("#optimizeDmButton")
+
+    content = page.locator("#dmOptimizationContent")
+    expect(content).to_contain_text("Consistent DM Range", timeout=60_000)
+    expect(content).to_contain_text("Cutoff k_c")
+    expect(content).to_contain_text("automatic")
+    expect(content).to_contain_text("Sutinjo et al. 2023")
+    expect(page.locator("#dmOptimizationPlot.js-plotly-plot")).to_be_visible()
+
+    page.select_option("#dmMetricInput", "dm_phase")
+    expect(page.locator("#dmStructureCutoffField")).to_be_hidden()
+    assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
