@@ -4,6 +4,14 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.5.1](https://github.com/DirkKuiper/flits/compare/flits-v1.5.0...flits-v1.5.1) (2026-10-23)
+
+
+### Documentation
+
+* cite FLITS by its Zenodo DOI ([c6511b7](https://github.com/DirkKuiper/flits/commit/c6511b75c14c64ea6be8b27e55249dc46686c4da))
+* cite FLITS by its Zenodo DOI ([576e423](https://github.com/DirkKuiper/flits/commit/576e423706d8c3fd3540a8dfb951606814adc458))
+
 ## [1.5.0](https://github.com/DirkKuiper/flits/compare/flits-v1.4.0...flits-v1.5.0) (2026-10-23)
 
 
