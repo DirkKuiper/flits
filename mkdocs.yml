@@ -62,6 +62,7 @@ nav:
   - User Guide:
       - Session Workflow: user-guide/session-workflow.md
       - Exports and Snapshots: user-guide/exports-and-snapshots.md
+      - Headless Measurement: user-guide/headless-measurement.md
       - Headless Replay: user-guide/headless-replay.md
       - Supported Formats: user-guide/supported-formats.md
   - Analysis:

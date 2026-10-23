@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "flits"
 dynamic = ["version"]
-description = "Browser-based FRB burst analysis software (SIGPROC, PSRFITS, CHIME/FRB HDF5)"
+description = "Interactive and scriptable fast radio burst (FRB) analysis: browser interface, CLI and Python API for SIGPROC, PSRFITS and CHIME/FRB HDF5 data"
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 readme = "README.md"
@@ -13,7 +13,7 @@ requires-python = ">=3.11"
 authors = [
   { name = "Dirk Kuiper" },
 ]
-keywords = ["astronomy", "fast radio bursts", "FRB", "radio astronomy", "filterbank", "SIGPROC", "PSRFITS", "HDF5", "CHIME"]
+keywords = ["astronomy", "fast radio bursts", "FRB", "radio astronomy", "radio transients", "filterbank", "dynamic spectrum", "dispersion measure", "fluence", "SIGPROC", "PSRFITS", "HDF5", "CHIME"]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Science/Research",

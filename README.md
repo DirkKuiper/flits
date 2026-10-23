@@ -17,9 +17,12 @@ including public catalog waterfalls and beamformed `BBData`
 `tiedbeam_power` files. The I/O layer is pluggable — third parties can
 register custom formats via `importlib` entry points without forking.
 
-The selected analysis state is recorded in a JSON session snapshot. Given
-the snapshot and original data, `flits replay` restores the selections and
-recomputes supported measurements without a browser.
+The same measurements are available without a browser: `flits measure` runs
+masking, burst localization, and measurement over one file or many and writes
+JSON or CSV, and the `BurstSession` Python API exposes every step the interface
+offers. The selected analysis state is recorded in a JSON session snapshot.
+Given the snapshot and original data, `flits replay` restores the selections
+and recomputes supported measurements.
 
 ![FLITS aligned viewer showing a GBT burst with its time profile, dynamic spectrum, frequency profile, and selected event, off-pulse, and spectral windows.](docs/assets/guided-workflow/prepared-viewer.png)
 
@@ -82,9 +85,42 @@ FLITS:
 pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3ec7bc21951ce1b4a26a0255096b69.tar.gz"
 ```
 
+## Scripting and batch measurement
+
+Measure bursts from the command line: mask interference, localize the burst,
+and measure it, for one file or many:
+
+```bash
+flits measure burst.fil --dm 527.7                 # JSON on stdout
+flits measure data/*.fil --dm 527.7 --format csv --output results.csv \
+  --snapshot-dir data/snapshots                    # one session per burst
+```
+
+Pin any choice instead of automating it with `--event`, `--offpulse`, `--band`,
+or `--crop`. Each saved session can be opened in the interface for review or
+checked with `flits replay --check`. See
+[Headless Measurement](https://dirkkuiper.github.io/flits/user-guide/headless-measurement/).
+
+From Python, every step the interface offers is a method on `BurstSession`:
+
+```python
+from flits import BurstSession
+
+session = BurstSession.from_file("burst.fil", dm=527.7, sefd_jy=10.0)
+session.auto_mask_jess()
+session.auto_localize()
+measurements = session.compute_properties()
+print(measurements.snr_integrated, measurements.fluence_jyms)
+```
+
+`flits.measure_burst` does the same in one call and returns the record that
+`flits measure` prints. See the
+[Python API](https://dirkkuiper.github.io/flits/developer/api-reference/).
+
 ## Highlights
 
 - Browser-based workflow for burst inspection on SIGPROC, PSRFITS, and CHIME/FRB HDF5 data.
+- Headless `flits measure` command and `BurstSession` Python API for scripted and batch measurement, with JSON, JSONL, and CSV output.
 - CHIME support includes public catalog waterfalls and beamformed `BBData` power products.
 - Interactive crop, event, off-pulse, spectral-window, and masking controls.
 - Automatic burst localization in time and frequency (matched-filter event window, spectral extent, and off-pulse placement in one click).
@@ -100,6 +136,7 @@ pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3
 - Full docs: [dirkkuiper.github.io/flits](https://dirkkuiper.github.io/flits/)
 - Getting started: [Quickstart](https://dirkkuiper.github.io/flits/getting-started/)
 - Guided example: [GBT Burst Workflow](https://dirkkuiper.github.io/flits/guided-workflow/)
+- Scripting: [Headless Measurement](https://dirkkuiper.github.io/flits/user-guide/headless-measurement/) and [Python API](https://dirkkuiper.github.io/flits/developer/api-reference/)
 - Installation and deployment: [Installation](https://dirkkuiper.github.io/flits/installation/)
 - Developer testing: [Testing](https://dirkkuiper.github.io/flits/developer/testing/)
 - Developer publishing: [Publishing](https://dirkkuiper.github.io/flits/developer/publishing/)

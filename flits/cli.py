@@ -1,10 +1,11 @@
 """Command line entry point for FLITS.
 
 ``flits`` starts the browser interface. ``flits demo`` opens it on a prepared
-example burst. ``flits replay`` re-runs a saved session snapshot without a
-browser, which is what makes the reproducibility claim checkable: the snapshot
-records the selected analysis state, and replaying it recomputes the
-measurements from the original data file.
+example burst. ``flits measure`` measures bursts without a browser.
+``flits replay`` re-runs a saved session snapshot without a browser, which is
+what makes the reproducibility claim checkable: the snapshot records the
+selected analysis state, and replaying it recomputes the measurements from the
+original data file.
 
 Invoking ``flits`` with server options and no subcommand still starts the
 server, so existing commands and container entrypoints keep working.
@@ -172,6 +173,111 @@ def build_demo_parser(prog: str = "flits demo") -> argparse.ArgumentParser:
         "--reset",
         action="store_true",
         help="Rebuild the demo session, discarding changes saved to it from the interface.",
+    )
+    _add_log_level(parser)
+    return parser
+
+
+def build_measure_parser(prog: str = "flits measure") -> argparse.ArgumentParser:
+    """Return the parser for the measure command."""
+    from flits.measure import MASK_CHOICES
+    from flits.settings import PRESETS
+
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description=(
+            "Measure bursts without a browser. Each file is loaded at --dm, masked "
+            "automatically, localized automatically, and measured; give --event, "
+            "--offpulse, --band or --crop to pin any of those choices instead. "
+            "Times are in ms from the start of the file, frequencies in MHz. "
+            "Results go to stdout (or --output) and progress to stderr. Exit code "
+            "0 means every burst was measured, 1 that at least one was not found "
+            "or failed, 2 an invalid command line."
+        ),
+    )
+    parser.add_argument("files", nargs="+", type=Path, metavar="FILE", help="Burst files to measure.")
+    parser.add_argument("--dm", type=float, required=True, help="Dispersion measure to load each burst at (pc cm^-3).")
+    parser.add_argument(
+        "--telescope",
+        choices=sorted(PRESETS),
+        default=None,
+        help="Telescope preset (default: detected from each file).",
+    )
+    parser.add_argument("--sefd", type=float, default=None, metavar="JY", help="SEFD in Jy (default: the preset's).")
+    parser.add_argument(
+        "--sefd-uncertainty",
+        type=float,
+        default=None,
+        metavar="FRACTION",
+        help="Fractional SEFD uncertainty, carried into the flux and fluence uncertainties.",
+    )
+    parser.add_argument("--crop", nargs=2, type=float, metavar=("START", "END"), help="Restrict to this time range.")
+    parser.add_argument(
+        "--event",
+        nargs=2,
+        type=float,
+        metavar=("START", "END"),
+        help="Event window; skips automatic localization.",
+    )
+    parser.add_argument(
+        "--offpulse",
+        nargs=2,
+        type=float,
+        action="append",
+        default=None,
+        metavar=("START", "END"),
+        help="Off-pulse noise window (repeatable).",
+    )
+    parser.add_argument("--band", nargs=2, type=float, metavar=("LOW", "HIGH"), help="Frequency band to measure over.")
+    parser.add_argument("--time-factor", type=int, default=None, metavar="N", help="Time downsampling factor.")
+    parser.add_argument("--freq-factor", type=int, default=None, metavar="N", help="Frequency downsampling factor.")
+    parser.add_argument(
+        "--mask",
+        choices=MASK_CHOICES,
+        default="auto",
+        help="Automatic interference-masking profile, or none (default: auto).",
+    )
+    parser.add_argument(
+        "--detection-snr",
+        type=float,
+        default=6.0,
+        metavar="SNR",
+        help="Detection threshold for automatic localization (default: 6).",
+    )
+    parser.add_argument("--widths", action="store_true", help="Also run the width analysis.")
+    parser.add_argument(
+        "--diagnostics",
+        action="store_true",
+        help="Include diagnostic profiles and autocorrelations in JSON output.",
+    )
+    parser.add_argument(
+        "--snapshot-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help=(
+            "Save each burst's session here, to open in the interface or check with "
+            "`flits replay`. The interface lists sessions saved in a folder named "
+            "'snapshots' under its data directory."
+        ),
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace existing snapshots instead of saving timestamped copies.",
+    )
+    parser.add_argument(
+        "--format",
+        dest="output_format",
+        choices=("json", "jsonl", "csv"),
+        default="json",
+        help="json: one array; jsonl: one record per line as each burst finishes; csv: a table (default: json).",
+    )
+    parser.add_argument("--output", type=Path, default=None, metavar="PATH", help="Write results here, not stdout.")
+    parser.add_argument(
+        "--data-dir",
+        default=None,
+        help="Data directory that saved snapshots record their burst paths against.",
     )
     _add_log_level(parser)
     return parser
@@ -357,6 +463,76 @@ def replay(argv: Sequence[str]) -> int:
     return 0
 
 
+def measure(argv: Sequence[str]) -> int:
+    """Run the ``flits measure`` command. Returns the process exit code."""
+    import contextlib
+
+    from flits.measure import CSV_COLUMNS, MeasureOptions, csv_row, format_records, measure_bursts
+
+    args = build_measure_parser().parse_args(list(argv))
+    _configure_logging(args.log_level)
+
+    if args.data_dir is not None:
+        os.environ["FLITS_DATA_DIR"] = str(Path(args.data_dir).expanduser().resolve())
+
+    options = MeasureOptions(
+        dm=args.dm,
+        telescope=args.telescope,
+        sefd_jy=args.sefd,
+        sefd_fractional_uncertainty=args.sefd_uncertainty,
+        crop_ms=None if args.crop is None else (args.crop[0], args.crop[1]),
+        event_ms=None if args.event is None else (args.event[0], args.event[1]),
+        offpulse_ms=tuple((start, end) for start, end in (args.offpulse or [])),
+        band_mhz=None if args.band is None else (args.band[0], args.band[1]),
+        time_factor=args.time_factor,
+        freq_factor=args.freq_factor,
+        mask=args.mask,
+        detection_snr=args.detection_snr,
+        widths=args.widths,
+        include_diagnostics=args.diagnostics,
+    )
+
+    with contextlib.ExitStack() as stack:
+        if args.output is None:
+            out = sys.stdout
+        else:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            out = stack.enter_context(args.output.open("w", encoding="utf-8", newline=""))
+
+        if args.output_format == "csv":
+            import csv
+
+            writer = csv.DictWriter(out, fieldnames=CSV_COLUMNS, lineterminator="\n")
+            writer.writeheader()
+
+        records: list[dict[str, Any]] = []
+        total = len(args.files)
+        for index, record in enumerate(
+            measure_bursts(args.files, options, snapshot_dir=args.snapshot_dir, overwrite=args.overwrite),
+            start=1,
+        ):
+            records.append(record)
+            if record["status"] == "error":
+                logger.error("[%d/%d] %s: %s", index, total, record["file"], record["error"])
+            else:
+                logger.info("[%d/%d] %s: %s", index, total, record["file"], record["status"])
+            # Stream line-based formats, so a long batch can be followed and
+            # its finished bursts survive an interruption.
+            if args.output_format == "jsonl":
+                out.write(format_records([record], "jsonl"))
+                out.flush()
+            elif args.output_format == "csv":
+                writer.writerow(csv_row(record))
+                out.flush()
+
+        if args.output_format == "json":
+            out.write(format_records(records, "json"))
+
+    if args.output is not None:
+        logger.info("Wrote %s", args.output)
+    return 0 if all(record["status"] in {"ok", "low_sn"} for record in records) else 1
+
+
 def _print_report(report: dict[str, Any]) -> None:
     print(f"snapshot   {report['snapshot']}")
     print(f"burst      {report['burst_file']}")
@@ -484,6 +660,7 @@ COMMANDS = {
     "serve": serve,
     "replay": replay,
     "demo": demo,
+    "measure": measure,
 }
 
 
@@ -494,6 +671,7 @@ def _print_usage() -> None:
         "commands:\n"
         "  serve    Start the browser interface (default when no command is given)\n"
         "  demo     Open a prepared example burst in the interface\n"
+        "  measure  Measure bursts without a browser (JSON, JSONL or CSV)\n"
         "  replay   Re-run a saved session snapshot without a browser\n"
         "\n"
         "Run `flits <command> --help` for command options.\n"
