@@ -4,6 +4,24 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.5.0](https://github.com/DirkKuiper/flits/compare/flits-v1.4.0...flits-v1.5.0) (2026-10-23)
+
+
+### Features
+
+* describe every uncertainty by what it is, and export its value ([b9874f8](https://github.com/DirkKuiper/flits/commit/b9874f86873eb1ffb598365899fd5a88f40075cf))
+* **dm:** report a DM range with the smoothed-structure metric ([ae7058f](https://github.com/DirkKuiper/flits/commit/ae7058faf0050d91bb60da02ef84d2542b898d7d))
+* report a DM range with the smoothed-structure metric (Sutinjo et al. 2023) ([3e7ef81](https://github.com/DirkKuiper/flits/commit/3e7ef81fab4825dcc464676a9e32ae3cdc1b95f5))
+* **uncertainties:** say what each uncertainty is, and always give its value ([7d78823](https://github.com/DirkKuiper/flits/commit/7d78823a4fc9b9e4d22e3f7e2b5160826a472a24))
+* **web:** label uncertainties by what they are, in neutral badges ([834088f](https://github.com/DirkKuiper/flits/commit/834088f180c241c18ab984c1dca831bb13cffabf))
+* **web:** show the smoothed-structure DM range in the DM panel ([3791c2f](https://github.com/DirkKuiper/flits/commit/3791c2f950c3fe3eb791d837f4e90311ea6d3ca6))
+
+
+### Documentation
+
+* document the smoothed-structure DM metric and its range ([fb6014a](https://github.com/DirkKuiper/flits/commit/fb6014a1af8dbd0a90207343fb97895dc2e563a0))
+* explain the kinds of uncertainty once, in an Uncertainties page ([74c0c91](https://github.com/DirkKuiper/flits/commit/74c0c91e3e04018aa1b495f129e1478db6174865))
+
 ## [1.4.0](https://github.com/DirkKuiper/flits/compare/flits-v1.3.0...flits-v1.4.0) (2026-10-23)
 
 
