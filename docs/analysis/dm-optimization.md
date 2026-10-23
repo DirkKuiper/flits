@@ -1,8 +1,10 @@
 # DM Optimization
 
 FLITS sweeps trial DMs around the current value, scores each one, and reports
-the DM that maximizes the chosen criterion. Two criteria are available, and they
-answer different questions.
+the DM that maximizes the chosen criterion. Three criteria are available, and
+they answer different questions. Only the smoothed-structure metric also
+reports a DM range derived from the noise; the others report a heuristic fit
+width.
 
 ## How dedispersion works here
 
@@ -57,7 +59,7 @@ reported by `flits.signal.dedispersion_edge_bins`. Keep the event and off-pulse
 windows away from it; burst localization raises `event_near_edge` when the burst
 sits too close.
 
-## The two metrics
+## The metrics
 
 ### Integrated-event S/N
 
@@ -88,6 +90,61 @@ It needs structure to work with. On a smooth, low-S/N burst the phase coherence
 is weak and the score curve is correspondingly flat; the reported fit status
 will say so.
 
+### Smoothed structure (Sutinjo et al. 2023)
+
+A clean-room implementation of the method of Sutinjo et al. (2023). For each
+trial DM, FLITS sums the selected, unmasked channels over the event window into
+a light curve, smooths it with a low-pass filter in the discrete cosine
+transform (DCT) domain, and scores it by the 2-norm of the smoothed curve's
+derivative: the sharper the aligned burst, the higher the score.
+
+Because the score is a norm, the noise left over after smoothing bounds how much
+it can change. Every trial whose score, raised by that noise allowance, still
+reaches the best score cannot be distinguished from the best DM (their eq. 15).
+Those trials span the reported **consistent DM range**.
+
+Use it when you need a DM range to quote. It also gives an independent check on
+DMphase: the two use different statistics, so agreement between them is
+reassuring.
+
+**The range is a conservative bound, not a 1-sigma error.** FLITS tested it on
+simulated bursts with a known DM, rendered with sub-sample dispersion and swept
+with FLITS's own dedispersion. Across single and multi-component bursts at
+several S/N levels, the range contained the true DM in 98–100% of cases, and
+its half-width was about 4 to 7 times the rms error of the best DM. Quote it as
+a range of consistent DMs, citing the method, and not as ± 1σ. FLITS classifies
+it as `conservative_bound`, so it is never exported as the scalar 1-sigma
+`best_dm_uncertainty`.
+
+**The cutoff k<sub>c</sub>** sets how much of the light curve's DCT spectrum
+counts as signal. Left blank, FLITS picks it where the spectrum falls to its
+noise floor (the mean of its upper half). Sutinjo et al. recommend checking
+this against the spectrum, which is stored as `dct_envelope` in the result. In
+the simulations the automatic choice gave both the most accurate best DM and
+the narrowest range: halving k<sub>c</sub> or doubling it made both worse,
+doubling much worse. Set it by hand only when the spectrum shows a clearer
+break.
+
+On the [GBT guided workflow](../guided-workflow.md) burst, with the guide's
+selections and a 0.5 step, the metric gives a best residual DM of 5.0 and a
+consistent range of 4.0 to 6.0. That brackets the DMphase value of 5.41.
+
+Requirements and caveats:
+
+- The event window must hold at least 16 time samples at the analysis
+  resolution, so the DCT spectrum has a noise region to judge the cutoff from.
+- Keep the event window close around the burst. Including long stretches of
+  off-pulse data adds noise without structure and widens the range; with a low
+  cutoff it can stretch the range to the edge of the sweep.
+- The best DM is the best sampled trial, and the range ends on sampled trials,
+  so the step sets their resolution. If only the best trial passes, FLITS
+  reports one step as the range half-width and flags
+  `structure_interval_within_one_step`. Use a step at or above the DM bin
+  resolution described above.
+- If the range reaches the end of the sweep (`structure_interval_on_sweep_edge`)
+  or has gaps (`structure_interval_has_gaps`), it is not marked publishable.
+  Widen the sweep, or inspect the curve.
+
 ## What the sweep depends on
 
 The optimization runs against the current session state, not the raw file:
@@ -117,6 +174,7 @@ for the inputs and interpretation limits of this example.*
 | Score curve | Should have a clear single maximum. Multiple comparable peaks mean the metric cannot distinguish them. |
 | Preferred DM and fit status | A parabolic fit near the peak; `peak_on_sweep_edge` means the true optimum is outside the range you swept. |
 | Residual arrival time | Structure remaining across the band after dedispersion, at both the applied and optimized DMs. |
+| Consistent DM range | Smoothed structure only: the DMs whose score plus noise allowance (dotted curve) reaches the best score (dashed line), shaded on the plot. A conservative bound, not a 1-sigma error. |
 | Warning flags | `integer_bin_dedispersion` always; others as they arise. |
 
 ## Practical guidance
@@ -127,5 +185,6 @@ for the inputs and interpretation limits of this example.*
 4. Choose a step at or above the bin resolution above.
 5. If the peak sits at the edge of the sweep, widen the range and re-run.
 6. Pick the metric that suits the burst: structure maximization when there is
-   structure or drift, integrated S/N when there is not.
+   structure or drift, integrated S/N when there is not. Use smoothed structure
+   when you need a DM range to quote, and compare it with DMphase.
 7. Treat the result as local to the analysis state, not as a context-free value.

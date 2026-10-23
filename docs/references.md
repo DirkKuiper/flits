@@ -21,11 +21,14 @@ it — see `flits.signal.dedispersion_bin_resolution` and
 
 ## DM optimization
 
-Two criteria are available. The integrated-event signal-to-noise metric
+Three criteria are available. The integrated-event signal-to-noise metric
 maximizes the S/N of the summed burst profile. The structure-maximizing metric
 is a clean-room implementation of the DM\_phase algorithm, which maximizes the
 coherence of the burst's Fourier phases across the band and is preferable for
-bursts with sharp temporal structure.
+bursts with sharp temporal structure. The smoothed-structure metric is a
+clean-room implementation of the method of Sutinjo et al. (2023), which
+maximizes the derivative norm of the DCT-smoothed event light curve and reports
+the DM range consistent with the best DM.
 
 - Seymour, A., Michilli, D. & Pleunis, Z. (2019), *DM\_phase: Algorithm for
   correcting dispersion of radio signals*. Astrophysics Source Code Library,
@@ -33,6 +36,9 @@ bursts with sharp temporal structure.
 - Hessels, J. W. T. et al. (2019), *FRB 121102 Bursts Show Complex Single-pulse
   Structures Consistent with Strong Propagation Effects*, ApJL 876, L23.
   [doi:10.3847/2041-8213/ab13ae](https://doi.org/10.3847/2041-8213/ab13ae)
+- Sutinjo, A. T., Scott, D. R., James, C. W. et al. (2023), *Calculation and
+  Uncertainty of Fast Radio Burst Structure Based on Smoothed Data*, ApJ 954, 37.
+  [doi:10.3847/1538-4357/ace774](https://doi.org/10.3847/1538-4357/ace774)
 
 ## Calibration and fluence
 

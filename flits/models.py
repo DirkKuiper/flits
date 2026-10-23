@@ -429,22 +429,88 @@ class DmOptimizationSettings:
     half_range: float
     step: float
     metric: str = "integrated_event_snr"
+    # Smoothed-structure metric only: the low-pass cutoff k_c (None picks it
+    # automatically) and the filter order.
+    structure_cutoff: int | None = None
+    structure_filter_order: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "center_dm": float(self.center_dm),
             "half_range": float(self.half_range),
             "step": float(self.step),
             "metric": self.metric,
         }
+        # Written only for the metric that uses them, so sweeps with the other
+        # metrics serialize exactly as before.
+        if self.structure_cutoff is not None or self.structure_filter_order is not None:
+            payload["structure_cutoff"] = self.structure_cutoff
+            payload["structure_filter_order"] = self.structure_filter_order
+        return payload
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> DmOptimizationSettings:
+        cutoff = payload.get("structure_cutoff")
+        order = payload.get("structure_filter_order")
         return cls(
             center_dm=float(payload.get("center_dm", 0.0)),
             half_range=float(payload.get("half_range", payload.get("requested_half_range", 0.0))),
             step=float(payload.get("step", 0.0)),
             metric=str(payload.get("metric", "integrated_event_snr")),
+            structure_cutoff=None if cutoff is None else int(cutoff),
+            structure_filter_order=None if order is None else int(order),
+        )
+
+
+@dataclass(frozen=True)
+class DmStructureDiagnostics:
+    """What the smoothed-structure DM metric decided, and on what grounds.
+
+    `consistent` marks the trials whose structure plus noise allowance reaches
+    the best trial's (Sutinjo et al. 2023, eq. 15); `interval_low_dm` and
+    `interval_high_dm` are the outermost of them. `dct_envelope` is the largest
+    DCT coefficient magnitude across trials at each index, the spectrum the
+    cutoff `cutoff` is read from, and `noise_floor` its noise level.
+    """
+
+    cutoff: int
+    cutoff_source: str
+    filter_order: int
+    interval_low_dm: float
+    interval_high_dm: float
+    noise_terms: np.ndarray
+    consistent: np.ndarray
+    dct_envelope: np.ndarray
+    noise_floor: float
+    warning_flags: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "cutoff": int(self.cutoff),
+            "cutoff_source": self.cutoff_source,
+            "filter_order": int(self.filter_order),
+            "interval_low_dm": float(self.interval_low_dm),
+            "interval_high_dm": float(self.interval_high_dm),
+            "noise_terms": _jsonable_1d(self.noise_terms, digits=6),
+            "consistent": [bool(value) for value in np.asarray(self.consistent, dtype=bool)],
+            "dct_envelope": _jsonable_1d(self.dct_envelope, digits=6),
+            "noise_floor": _float_or_none(self.noise_floor),
+            "warning_flags": [str(flag) for flag in self.warning_flags],
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> DmStructureDiagnostics:
+        return cls(
+            cutoff=int(payload["cutoff"]),
+            cutoff_source=str(payload.get("cutoff_source", "unknown")),
+            filter_order=int(payload.get("filter_order", 3)),
+            interval_low_dm=float(payload["interval_low_dm"]),
+            interval_high_dm=float(payload["interval_high_dm"]),
+            noise_terms=_array_1d(payload.get("noise_terms"), dtype=float),
+            consistent=np.asarray(payload.get("consistent", []), dtype=bool),
+            dct_envelope=_array_1d(payload.get("dct_envelope"), dtype=float),
+            noise_floor=float(payload.get("noise_floor") or 0.0),
+            warning_flags=[str(flag) for flag in payload.get("warning_flags", [])],
         )
 
 
@@ -516,9 +582,10 @@ class DmComponentOptimizationResult:
     best_value: float
     fit_status: str
     uncertainty_details: dict[str, UncertaintyDetail] = field(default_factory=dict)
+    structure: DmStructureDiagnostics | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "component_id": self.component_id,
             "label": self.label,
             "event_window_ms": [float(value) for value in self.event_window_ms],
@@ -533,6 +600,9 @@ class DmComponentOptimizationResult:
             "fit_status": self.fit_status,
             "uncertainty_details": _uncertainty_detail_map_to_dict(self.uncertainty_details),
         }
+        if self.structure is not None:
+            payload["structure"] = self.structure.to_dict()
+        return payload
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> DmComponentOptimizationResult:
@@ -550,6 +620,9 @@ class DmComponentOptimizationResult:
             best_value=float(payload.get("best_value", payload.get("best_sn", 0.0))),
             fit_status=str(payload.get("fit_status", "unknown")),
             uncertainty_details=_uncertainty_detail_map_from_dict(payload.get("uncertainty_details")),
+            structure=(
+                None if payload.get("structure") is None else DmStructureDiagnostics.from_dict(payload["structure"])
+            ),
         )
 
 
@@ -817,9 +890,10 @@ class DmOptimizationResult:
     component_results: list[DmComponentOptimizationResult] = field(default_factory=list)
     settings: DmOptimizationSettings | None = None
     provenance: DmOptimizationProvenance | None = None
+    structure: DmStructureDiagnostics | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "center_dm": self.center_dm,
             "requested_half_range": self.requested_half_range,
             "actual_half_range": self.actual_half_range,
@@ -849,6 +923,11 @@ class DmOptimizationResult:
             "settings": None if self.settings is None else self.settings.to_dict(),
             "provenance": None if self.provenance is None else self.provenance.to_dict(),
         }
+        # Only the smoothed-structure metric produces this, so results from the
+        # other metrics serialize exactly as before.
+        if self.structure is not None:
+            payload["structure"] = self.structure.to_dict()
+        return payload
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> DmOptimizationResult:
@@ -886,6 +965,9 @@ class DmOptimizationResult:
             ),
             provenance=(
                 None if payload.get("provenance") is None else DmOptimizationProvenance.from_dict(payload["provenance"])
+            ),
+            structure=(
+                None if payload.get("structure") is None else DmStructureDiagnostics.from_dict(payload["structure"])
             ),
         )
 

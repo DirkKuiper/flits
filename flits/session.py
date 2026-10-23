@@ -18,7 +18,13 @@ from typing import Any
 
 import numpy as np
 
-from flits.analysis.dm_optimization import DMMetricInput, available_dm_metrics, optimize_dm_trials
+from flits.analysis.dm_optimization import (
+    DEFAULT_FILTER_ORDER,
+    STRUCTURE_METRIC,
+    DMMetricInput,
+    available_dm_metrics,
+    optimize_dm_trials,
+)
 from flits.analysis.drift import DriftAnalysisInputs, run_drift_analysis
 from flits.analysis.fitting import fit_model_selected_band
 from flits.analysis.fitting.fitburst_adapter import ModelFitRequestConfig
@@ -2252,12 +2258,27 @@ class BurstSession:
         half_range: float,
         step: float,
         metric: str = "integrated_event_snr",
+        *,
+        structure_cutoff: int | None = None,
+        structure_filter_order: int = DEFAULT_FILTER_ORDER,
     ) -> DmOptimizationResult:
         """Sweep DM around a centre value and score each trial.
 
-        `metric` selects the criterion: integrated event signal-to-noise, or the
-        structure-maximizing DM_phase score.
+        `metric` selects the criterion: integrated event signal-to-noise
+        (``integrated_event_snr``), the structure-maximizing DM_phase score
+        (``dm_phase``), or the smoothed-structure score of Sutinjo et al. (2023)
+        (``smoothed_structure``), which also reports a conservative DM interval.
+        For that metric, `structure_cutoff` sets the low-pass cutoff k_c (None
+        chooses it from the DCT spectrum) and `structure_filter_order` the
+        filter order.
         """
+        # Structure metrics score the reduced analysis grid, so they respect the
+        # time and frequency downsampling the user is analysing at.
+        reduced_grid_metric = metric in {"dm_phase", STRUCTURE_METRIC}
+        structure_options = {
+            "structure_cutoff": structure_cutoff,
+            "structure_filter_order": structure_filter_order,
+        }
         grid, context = self._build_measurement_context_for_data(self.data)
         reduced_metric_data = np.asarray(grid.masked, dtype=float)
         reduced_metric_freqs = np.asarray(grid.freqs_mhz, dtype=float)
@@ -2267,10 +2288,10 @@ class BurstSession:
             current_dm=float(self.dm),
             freqs_mhz=self.freqs,
             tsamp_sec=self.tsamp,
-            score_data=reduced_metric_data if metric == "dm_phase" else None,
-            score_current_dm=float(self.dm) if metric == "dm_phase" else None,
-            score_freqs_mhz=reduced_metric_freqs if metric == "dm_phase" else None,
-            score_tsamp_sec=reduced_metric_tsamp_sec if metric == "dm_phase" else None,
+            score_data=reduced_metric_data if reduced_grid_metric else None,
+            score_current_dm=float(self.dm) if reduced_grid_metric else None,
+            score_freqs_mhz=reduced_metric_freqs if reduced_grid_metric else None,
+            score_tsamp_sec=reduced_metric_tsamp_sec if reduced_grid_metric else None,
             center_dm=float(center_dm),
             half_range=float(half_range),
             step=float(step),
@@ -2280,7 +2301,7 @@ class BurstSession:
                         data, context=context, tsamp_sec=reduced_metric_tsamp_sec
                     )
                 )
-                if metric == "dm_phase"
+                if reduced_grid_metric
                 else (lambda data: self._dm_metric_input_for_data(data))
             ),
             residuals=lambda data: self._subband_residuals_for_data(data),
@@ -2290,6 +2311,7 @@ class BurstSession:
                 freqres_mhz=grid.effective_freqres_mhz,
             ),
             metric=metric,
+            **structure_options,
         )
         component_results: list[DmComponentOptimizationResult] = []
         for index, (label, event_bounds_abs) in enumerate(self._dm_component_windows(), start=1):
@@ -2305,10 +2327,10 @@ class BurstSession:
                 current_dm=float(self.dm),
                 freqs_mhz=self.freqs,
                 tsamp_sec=self.tsamp,
-                score_data=component_reduced_metric_data if metric == "dm_phase" else None,
-                score_current_dm=float(self.dm) if metric == "dm_phase" else None,
-                score_freqs_mhz=component_reduced_metric_freqs if metric == "dm_phase" else None,
-                score_tsamp_sec=component_reduced_metric_tsamp_sec if metric == "dm_phase" else None,
+                score_data=component_reduced_metric_data if reduced_grid_metric else None,
+                score_current_dm=float(self.dm) if reduced_grid_metric else None,
+                score_freqs_mhz=component_reduced_metric_freqs if reduced_grid_metric else None,
+                score_tsamp_sec=component_reduced_metric_tsamp_sec if reduced_grid_metric else None,
                 center_dm=float(center_dm),
                 half_range=float(half_range),
                 step=float(step),
@@ -2322,7 +2344,7 @@ class BurstSession:
                             )
                         )
                     )
-                    if metric == "dm_phase"
+                    if reduced_grid_metric
                     else (
                         lambda data, bounds=event_bounds_abs: self._dm_metric_input_for_data(
                             data,
@@ -2340,6 +2362,7 @@ class BurstSession:
                     freqres_mhz=component_grid.effective_freqres_mhz,
                 ),
                 metric=metric,
+                **structure_options,
             )
             component_results.append(
                 DmComponentOptimizationResult(
@@ -2361,6 +2384,7 @@ class BurstSession:
                     best_value=float(component_optimization.best_sn),
                     fit_status=component_optimization.fit_status,
                     uncertainty_details=dict(component_optimization.uncertainty_details),
+                    structure=component_optimization.structure,
                 )
             )
 

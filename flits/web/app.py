@@ -883,11 +883,13 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
         elif action == "apply_best_dm":
             session.apply_best_dm()
         elif action == "optimize_dm":
+            structure_cutoff = payload.get("structure_cutoff")
             session.optimize_dm(
                 float(payload["center_dm"]),
                 float(payload["half_range"]),
                 float(payload["step"]),
                 metric=str(payload.get("metric", "integrated_event_snr")),
+                structure_cutoff=None if structure_cutoff in (None, "") else int(structure_cutoff),
             )
         elif action == "compute_widths":
             session.compute_widths()

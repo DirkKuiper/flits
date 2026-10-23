@@ -92,6 +92,9 @@ const autoMaskProfileInput = document.getElementById("autoMaskProfileInput")
 const dmMetricInput = document.getElementById("dmMetricInput")
 const dmHalfRangeInput = document.getElementById("dmHalfRangeInput")
 const dmStepInput = document.getElementById("dmStepInput")
+const dmStructureCutoffField = document.getElementById("dmStructureCutoffField")
+const dmStructureCutoffInput = document.getElementById("dmStructureCutoffInput")
+const STRUCTURE_METRIC = "smoothed_structure"
 const detectionHint = document.getElementById("detectionHint")
 const resolutionLabel = document.getElementById("resolutionLabel")
 const appliedDmLabel = document.getElementById("appliedDmLabel")
@@ -559,6 +562,7 @@ function bindControls() {
   refreshSnapshotsButton.addEventListener("click", () => loadSnapshotLibrary({ refresh: true }))
   openSnapshotButton.addEventListener("click", () => openStoredSession(state.selectedSnapshotId))
   dmMetricInput.addEventListener("change", () => {
+    syncDmStructureCutoffField()
     if (state.view) {
       renderDmOptimization(state.view)
     }
@@ -580,12 +584,18 @@ function bindControls() {
     if (centerDm === null) {
       return
     }
-    postAction("optimize_dm", {
+    const metric = dmMetricInput.value || "integrated_event_snr"
+    const payload = {
       center_dm: centerDm,
       half_range: Number(dmHalfRangeInput.value),
       step: Number(dmStepInput.value),
-      metric: dmMetricInput.value || "integrated_event_snr",
-    })
+      metric,
+    }
+    if (metric === STRUCTURE_METRIC) {
+      const cutoff = dmStructureCutoffInput.value.trim()
+      payload.structure_cutoff = cutoff === "" ? null : Number(cutoff)
+    }
+    postAction("optimize_dm", payload)
   })
   applyBestDmButton.addEventListener("click", () => {
     const bestDm = state.view?.dm_optimization?.best_dm
@@ -1764,7 +1774,12 @@ function dmMetricOptions(view) {
   return [
     { key: "integrated_event_snr", label: "Integrated-event S/N", summary: "Legacy sweep metric.", formula: "", origin: "", references: [] },
     { key: "dm_phase", label: "DMphase", summary: "Use the automatic DMphase coherent-power curve on the selected reduced waterfall.", formula: "", origin: "", references: [] },
+    { key: STRUCTURE_METRIC, label: "Smoothed structure", summary: "Maximize the sharpness of the smoothed event light curve and report a conservative DM range.", formula: "", origin: "", references: [] },
   ]
+}
+
+function syncDmStructureCutoffField() {
+  dmStructureCutoffField.hidden = dmMetricInput.value !== STRUCTURE_METRIC
 }
 
 function syncDmMetricOptions(view) {
@@ -1778,6 +1793,7 @@ function syncDmMetricOptions(view) {
     .join("")
   const availableValues = new Set(options.map((option) => option.key))
   dmMetricInput.value = availableValues.has(currentValue) ? currentValue : "integrated_event_snr"
+  syncDmStructureCutoffField()
 }
 
 function findDmMetricDefinition(view, metricKey) {
@@ -2422,7 +2438,9 @@ function renderDmOptimization(view) {
   dmOptimizeBadge.textContent = fitTone === "success" ? "Fit Ready" : "Sweep Ready"
   dmOptimizeBadge.dataset.tone = fitTone
   const snrLabel = snrMetricLabel(optimization.snr_metric)
-  const scoreLabel = optimization.snr_metric === "dm_phase" ? "DMphase Score" : snrLabel
+  const isStructure = optimization.snr_metric === STRUCTURE_METRIC
+  const structure = isStructure ? optimization.structure || null : null
+  const scoreLabel = optimization.snr_metric === "dm_phase" ? "DMphase Score" : isStructure ? "Structure Score" : snrLabel
   const metricSummary = definition?.summary || snrMetricSummary(optimization.snr_metric)
   const residualTone = residualStatusTone(optimization.residual_status)
   const residualBandCount = Array.isArray(optimization.subband_freqs_mhz) ? optimization.subband_freqs_mhz.length : 0
@@ -2437,15 +2455,23 @@ function renderDmOptimization(view) {
   const displayedBestDmDetail = dmFitWidthDisplayDetail(bestDmDetail)
   const metricContextNote = optimization.snr_metric === "dm_phase"
     ? "Sampled Peak DM is the discrete argmax of the DMphase curve. Best DM is the upstream-style weighted polynomial refinement used for comparison with DM_phase."
-    : "Sampled Peak DM is the best discrete grid point. Best DM is the local quadratic refinement around that sampled peak."
+    : isStructure
+      ? "Best DM is the trial with the highest structure score. The DM range holds every trial whose score, raised by its noise allowance (dotted curve), reaches the best score. It is a conservative bound, several times wider than a 1-sigma error, so quote it as a range."
+      : "Sampled Peak DM is the best discrete grid point. Best DM is the local quadratic refinement around that sampled peak."
   const currentDm = view?.meta?.dm
 
-  const primaryTiles = [
-    resultTile("Best DM From Sweep", fmt(optimization.best_dm, 6), "primary", "Refined best-fit DM reported by the selected metric model for this retained sweep."),
-    resultTile("DM Fit Width", formatDetailUncertainty(displayedBestDmDetail, { digits: 6, units: "pc cm^-3" }) || "n/a", "primary", {
+  const uncertaintyTile = structure
+    ? resultTile("Consistent DM Range", formatDmRange(structure), "primary", {
+      tooltip: "DMs the smoothed-structure noise criterion cannot distinguish from the best DM (Sutinjo et al. 2023, eq. 15). A conservative bound, not a 1-sigma error.",
+      detail: bestDmDetail,
+    })
+    : resultTile("DM Fit Width", formatDetailUncertainty(displayedBestDmDetail, { digits: 6, units: "pc cm^-3" }) || "n/a", "primary", {
       tooltip: "Local width from the DM peak-refinement fit.",
       detail: displayedBestDmDetail,
-    }),
+    })
+  const primaryTiles = [
+    resultTile("Best DM From Sweep", fmt(optimization.best_dm, 6), "primary", "Refined best-fit DM reported by the selected metric model for this retained sweep."),
+    uncertaintyTile,
     resultTile(`Best ${scoreLabel}`, fmt(optimization.best_sn, 3), "primary", `Best fitted ${scoreLabel.toLowerCase()} at the refined DM solution.`),
   ]
 
@@ -2459,6 +2485,17 @@ function renderDmOptimization(view) {
     resultTile("Step", fmt(optimization.step, 3), "secondary", "Spacing between adjacent trial DMs in the sweep."),
     resultTile("Sweep Input DM", fmt(optimization.applied_dm, 6), "secondary", "Historical DM that was applied to the session data before this retained sweep was run."),
   ]
+  if (structure) {
+    secondaryTiles.push(
+      resultTile(
+        "Cutoff k_c",
+        `${structure.cutoff} (${structure.cutoff_source === "manual" ? "set by hand" : "automatic"})`,
+        "secondary",
+        "Low-pass cutoff index of the DCT smoothing. Automatic choices sit where the DCT spectrum of the event light curve falls to its noise floor.",
+      ),
+      resultTile("Filter Order", String(structure.filter_order), "secondary", "Order of the Butterworth-like low-pass filter."),
+    )
+  }
 
   dmOptimizationContent.innerHTML = `
     <div class="results-primary">
@@ -2515,19 +2552,28 @@ function renderDmOptimization(view) {
   dmComponentsContent.innerHTML = renderDmComponentSummary(optimization)
 }
 
+function formatDmRange(structure) {
+  const low = Number(structure?.interval_low_dm)
+  const high = Number(structure?.interval_high_dm)
+  if (!Number.isFinite(low) || !Number.isFinite(high)) {
+    return "n/a"
+  }
+  return `${fmt(low, 4)} to ${fmt(high, 4)} pc cm^-3`
+}
+
 function renderDmMetricDefinition(definition) {
   if (!definition) {
     return ""
   }
   const references = Array.isArray(definition.references) ? definition.references : []
-  const showReferences = definition.key === "dm_phase" && references.length
+  const showReferences = references.length > 0
   const referencesMarkup = showReferences
     ? `<ul class="reference-list">${references.map(renderDmMetricReference).join("")}</ul>`
     : ""
   const referencesSection = showReferences
     ? `
       <div class="references-block">
-        <h5>DMphase Reference</h5>
+        <h5>${escapeHtml(definition.key === "dm_phase" ? "DMphase Reference" : "Method Reference")}</h5>
         ${referencesMarkup}
       </div>
     `
@@ -2573,12 +2619,15 @@ function renderDmComponentSummary(optimization) {
         "Legacy component-DM scalar uncertainty carried by an older session or API response.",
       )
     )
+    const uncertaintyText = component?.structure
+      ? formatDmRange(component.structure)
+      : formatDetailUncertainty(detail, { digits: 6, units: "pc cm^-3" }) || "n/a"
     return (
       `<tr>` +
       `<td>${escapeHtml(component.label || component.component_id || "Component")}</td>` +
       `<td>${escapeHtml(`${fmt(component.event_window_ms?.[0], 3)} to ${fmt(component.event_window_ms?.[1], 3)} ms`)}</td>` +
       `<td>${escapeHtml(fmt(component.best_dm, 6))}</td>` +
-      `<td>${escapeHtml(formatDetailUncertainty(detail, { digits: 6, units: "pc cm^-3" }) || "n/a")}</td>` +
+      `<td>${escapeHtml(uncertaintyText)}</td>` +
       `<td>${escapeHtml(fmt(component.best_value, 3))}</td>` +
       `<td>${escapeHtml(fitStatusLabel(component.fit_status))}</td>` +
       `</tr>`
@@ -2595,7 +2644,7 @@ function renderDmComponentSummary(optimization) {
               <th>Component</th>
               <th>Window</th>
               <th>Best DM</th>
-              <th>Fit Width</th>
+              <th>${escapeHtml(optimization.snr_metric === STRUCTURE_METRIC ? "DM Range" : "Fit Width")}</th>
               <th>Best ${escapeHtml(snrMetricLabel(optimization.snr_metric))}</th>
               <th>Fit Status</th>
             </tr>
@@ -4819,19 +4868,21 @@ async function renderDmOptimizationPlot(optimization, appliedDm) {
   const componentCurves = Array.isArray(optimization.component_results)
     ? optimization.component_results.map((component) => component.metric_values || [])
     : []
-  const yRange = dmOptimizationYRange([optimization.snr, ...componentCurves].flat())
+  const structureNoise = optimization.snr_metric === STRUCTURE_METRIC && Array.isArray(optimization.structure?.noise_terms)
+    ? optimization.snr.map((value, index) => Number(value) + Number(optimization.structure.noise_terms[index]))
+    : []
+  const yRange = dmOptimizationYRange([optimization.snr, ...componentCurves, structureNoise].flat())
   const traces = []
   const snrLabel = snrMetricLabel(optimization.snr_metric)
   const bestDmFitWidth = Number(optimization?.uncertainty_details?.best_dm?.value)
+  const structure = optimization.snr_metric === STRUCTURE_METRIC ? optimization.structure || null : null
+  // The smoothed-structure range is asymmetric, so shade it as reported.
+  const bandLow = structure ? Number(structure.interval_low_dm) : optimization.best_dm - bestDmFitWidth
+  const bandHigh = structure ? Number(structure.interval_high_dm) : optimization.best_dm + bestDmFitWidth
 
-  if (Number.isFinite(bestDmFitWidth) && bestDmFitWidth > 0) {
+  if (structure ? Number.isFinite(bandLow) && Number.isFinite(bandHigh) : Number.isFinite(bestDmFitWidth) && bestDmFitWidth > 0) {
     traces.push({
-      x: [
-        optimization.best_dm - bestDmFitWidth,
-        optimization.best_dm + bestDmFitWidth,
-        optimization.best_dm + bestDmFitWidth,
-        optimization.best_dm - bestDmFitWidth,
-      ],
+      x: [bandLow, bandHigh, bandHigh, bandLow],
       y: [yRange[0], yRange[0], yRange[1], yRange[1]],
       type: "scatter",
       mode: "lines",
@@ -4853,6 +4904,19 @@ async function renderDmOptimizationPlot(optimization, appliedDm) {
     hovertemplate: `DM %{x:.6f}<br>${escapeHtml(snrLabel)} %{y:.3f}<extra></extra>`,
     name: `${snrLabel} sweep`,
   })
+
+  if (structure && Array.isArray(structure.noise_terms) && structure.noise_terms.length === optimization.snr.length) {
+    // A trial is consistent with the best DM where this curve reaches the best score.
+    traces.push({
+      x: optimization.trial_dms,
+      y: optimization.snr.map((value, index) => Number(value) + Number(structure.noise_terms[index])),
+      mode: "lines",
+      type: "scattergl",
+      line: { color: plotTheme.accentAlt, width: 1.6, dash: "dot" },
+      hovertemplate: "DM %{x:.6f}<br>Score + noise allowance %{y:.3f}<extra></extra>",
+      name: "Score + noise allowance",
+    })
+  }
 
   ;(optimization.component_results || []).forEach((component, index) => {
     traces.push({
@@ -6282,21 +6346,29 @@ function buildViewerAnnotations() {
 }
 
 function buildDmOptimizationShapes(optimization, appliedDm, yRange) {
-  return [
+  const shapes = [
     verticalLine(optimization.center_dm, yRange[0], yRange[1], plotTheme.neutral, "dot"),
     verticalLine(optimization.sampled_best_dm, yRange[0], yRange[1], plotTheme.accentAlt, "dash"),
     verticalLine(optimization.best_dm, yRange[0], yRange[1], plotTheme.accent, "solid"),
     verticalLine(appliedDm, yRange[0], yRange[1], plotTheme.alert, "dot"),
   ]
+  const dms = Array.isArray(optimization.trial_dms) ? optimization.trial_dms : []
+  if (optimization.snr_metric === STRUCTURE_METRIC && dms.length) {
+    // The best score: trials whose score + noise allowance reach it are consistent.
+    shapes.push(horizontalLine(optimization.sampled_best_sn, dms[0], dms[dms.length - 1], plotTheme.neutral, "dash"))
+  }
+  return shapes
 }
 
 function buildDmOptimizationAnnotations(optimization, yRange) {
   const y = yRange[1]
-  return [
-    dmOptimizationLabel("Center", optimization.center_dm, y, plotTheme.neutral),
-    dmOptimizationLabel("Sampled", optimization.sampled_best_dm, y, plotTheme.accentAlt),
-    dmOptimizationLabel("Best", optimization.best_dm, y, plotTheme.accent),
-  ]
+  const labels = [dmOptimizationLabel("Center", optimization.center_dm, y, plotTheme.neutral)]
+  // When the refined and sampled DMs coincide the two labels would overprint.
+  if (Math.abs(Number(optimization.sampled_best_dm) - Number(optimization.best_dm)) > 1e-9) {
+    labels.push(dmOptimizationLabel("Sampled", optimization.sampled_best_dm, y, plotTheme.accentAlt))
+  }
+  labels.push(dmOptimizationLabel("Best", optimization.best_dm, y, plotTheme.accent))
+  return labels
 }
 
 function dmOptimizationLabel(text, x, y, color) {
@@ -6508,6 +6580,7 @@ function updateControlStates() {
   syncScintillationParameterControls(!hasSession || isBusy)
   notesInput.disabled = !hasSession || isBusy
   dmMetricInput.disabled = !hasSession || isBusy
+  dmStructureCutoffInput.disabled = !hasSession || isBusy
   exportPlotPng.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("plots")
   exportPlotSvg.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("plots")
   exportWindowNpz.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("window")
@@ -6903,6 +6976,7 @@ function snrMetricLabel(metric) {
   const labels = {
     integrated_event_snr: "Integrated Event S/N",
     dm_phase: "DMphase",
+    smoothed_structure: "Smoothed Structure",
     peak_snr: "Peak S/N",
     profile_sharpness: "Profile Sharpness",
     burst_compactness: "Burst Compactness",
@@ -6916,6 +6990,7 @@ function snrMetricSummary(metric) {
   const labels = {
     integrated_event_snr: "Sum the event-profile S/N across the selected event window. This is the legacy FLITS DM sweep metric.",
     dm_phase: "Use the automatic DMphase coherent-power curve on the selected reduced waterfall.",
+    smoothed_structure: "Maximize the sharpness of the DCT-smoothed event light curve (Sutinjo et al. 2023) and report the DM range the noise cannot distinguish from the best trial.",
     peak_snr: "Use the single highest-S/N time bin inside the selected event window.",
     profile_sharpness: "Use the smoothed in-window profile power to favor temporally sharp dedispersion solutions.",
     burst_compactness: "Use a fluence-to-width compactness score so broader smeared solutions are penalized.",
@@ -6990,6 +7065,7 @@ function fitStatusTone(status) {
   if (status === "quadratic_peak_fit_uncertainty_unavailable") return "warning"
   if (status === "dmphase_weighted_polyfit") return "success"
   if (status === "dmphase_weighted_polyfit_uncertainty_unavailable") return "warning"
+  if (status === "structure_noise_interval") return "success"
   return "warning"
 }
 
@@ -7039,6 +7115,9 @@ function fitStatusLabel(status) {
     quadratic_fit_failed: "Quadratic fit failed",
     quadratic_not_concave: "Local peak fit is not concave",
     fit_vertex_outside_peak_window: "Fitted peak moved outside the local window",
+    structure_noise_interval: "Smoothed-structure DM range found",
+    structure_interval_on_sweep_edge: "DM range reaches the sweep edge",
+    structure_interval_has_gaps: "DM range has gaps",
   }
   return labels[status] || "DM sweep completed"
 }
@@ -7056,6 +7135,9 @@ function fitStatusCopy(status) {
     quadratic_fit_failed: "The sampled S/N curve could not support a stable local quadratic fit.",
     quadratic_not_concave: "The sampled S/N curve near the discrete peak does not resemble a local maximum.",
     fit_vertex_outside_peak_window: "The local quadratic fit shifted the maximum outside the sampled peak window, so the discrete best DM was retained.",
+    structure_noise_interval: "Every trial DM whose structure score, raised by its noise allowance, reaches the best score is consistent with the best DM. That set spans the reported range.",
+    structure_interval_on_sweep_edge: "Trials at the edge of the sweep are still consistent with the best DM, so the true range extends beyond it. Widen the half-range and run the sweep again.",
+    structure_interval_has_gaps: "Some trials inside the range fail the noise criterion, so the score curve has more than one acceptable region. Inspect the curve before quoting a range.",
   }
   return labels[status] || "Review the sampled S/N curve before applying a new DM."
 }

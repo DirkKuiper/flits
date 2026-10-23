@@ -367,6 +367,10 @@ body::before {
   gap: 8px;
 }
 
+.field[hidden] {
+  display: none;
+}
+
 .field-row {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
