@@ -60,6 +60,7 @@ plugins:
         User guide:
           - user-guide/session-workflow.md: Working through a session in the interface
           - user-guide/exports-and-snapshots.md: Export bundles, session snapshots, and provenance
+          - user-guide/uncertainties.md: What each kind of uncertainty is and how to add missing terms
           - user-guide/supported-formats.md: Supported file formats and telescope presets
         Analysis methods:
           - analysis/*.md
@@ -104,6 +105,7 @@ nav:
   - User Guide:
       - Session Workflow: user-guide/session-workflow.md
       - Exports and Snapshots: user-guide/exports-and-snapshots.md
+      - Uncertainties: user-guide/uncertainties.md
       - Headless Measurement: user-guide/headless-measurement.md
       - Headless Replay: user-guide/headless-replay.md
       - Supported Formats: user-guide/supported-formats.md
