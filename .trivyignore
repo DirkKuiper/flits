@@ -4,16 +4,23 @@
 
 # GHSA-6v7p-g79w-8964 - msgpack out-of-bounds read on Unpacker reuse.
 # CVE-2025-47273      - setuptools path traversal in PackageIndex.
+# CVE-2026-97687      - urllib3 traffic interception via HTTPS proxy TLS
+#                       configuration override.
+# CVE-2026-97689      - urllib3 denial of service via unbounded memory
+#                       allocation in the chunk parser.
 #
-# Both are reported against copies vendored inside pip itself
-# (site-packages/pip/_vendor/vendor.txt pins msgpack==1.1.2 and
-# setuptools==70.3.0). The installed top-level packages are current -- the
-# Dockerfile floors them and asserts the result -- but pip's private copies
-# cannot be upgraded independently of pip, and pip is already at the latest
-# release.
+# All are reported against copies vendored inside pip itself
+# (site-packages/pip/_vendor/vendor.txt pins msgpack==1.1.2,
+# setuptools==70.3.0 and urllib3==2.7.0, still true of pip 26.2.2). The
+# installed top-level msgpack and setuptools are current -- the Dockerfile
+# floors them and asserts the result -- and the image installs no top-level
+# urllib3 at all. pip's private copies cannot be upgraded independently of pip,
+# and pip is already at the latest release.
 #
-# Neither is reachable from FLITS: the vendored code runs only when pip itself
+# None is reachable from FLITS: the vendored code runs only when pip itself
 # installs packages, which does not happen at runtime. Drop these entries once
 # a pip release ships updated vendored versions.
 GHSA-6v7p-g79w-8964
 CVE-2025-47273
+CVE-2026-97687
+CVE-2026-97689
