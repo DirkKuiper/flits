@@ -39,6 +39,19 @@ with open("burst_flits_session.json", "w") as handle:
 
 ::: flits.session.BurstSession
 
+## Headless measurement
+
+The one-call form behind `flits measure`; see
+[Headless Measurement](../user-guide/headless-measurement.md).
+
+::: flits.measure
+    options:
+      members:
+        - MeasureOptions
+        - measure_burst
+        - measure_bursts
+        - STATUSES
+
 ## Input
 
 ::: flits.io
