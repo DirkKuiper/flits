@@ -18,6 +18,7 @@ __all__ = [
     "ExportPreviewArtifact",
     "FilterbankMetadata",
     "GaussianFit1D",
+    "MeasureOptions",
     "MeasurementDiagnostics",
     "MeasurementProvenance",
     "MeasurementUncertainties",
@@ -27,9 +28,12 @@ __all__ = [
     "available_presets",
     "detect_preset",
     "get_preset",
+    "measure_burst",
+    "measure_bursts",
 ]
 
 if TYPE_CHECKING:
+    from flits.measure import MeasureOptions, measure_burst, measure_bursts
     from flits.models import (
         BurstMeasurements,
         DmOptimizationResult,
@@ -71,6 +75,11 @@ def __getattr__(name: str):
         settings = importlib.import_module("flits.settings")
 
         return getattr(settings, name)
+
+    if name in {"MeasureOptions", "measure_burst", "measure_bursts"}:
+        measure = importlib.import_module("flits.measure")
+
+        return getattr(measure, name)
 
     if name == "BurstSession":
         BurstSession = importlib.import_module("flits.session").BurstSession
