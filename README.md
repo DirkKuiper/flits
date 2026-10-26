@@ -118,6 +118,20 @@ print(measurements.snr_integrated, measurements.fluence_jyms)
 `flits measure` prints. See the
 [Python API](https://dirkkuiper.github.io/flits/developer/api-reference/).
 
+### With a coding agent
+
+Coding agents tend to write their own dedispersion and measurement code. The
+FLITS skill tells them to use FLITS instead, and how. In Claude Code:
+
+```text
+/plugin marketplace add DirkKuiper/flits
+/plugin install flits@flits
+```
+
+The skill follows the [Agent Skills](https://agentskills.io) standard, so other
+agents can use it too. See
+[Coding Agents](https://dirkkuiper.github.io/flits/user-guide/coding-agents/).
+
 ## Highlights
 
 - Browser-based workflow for burst inspection on SIGPROC, PSRFITS, and CHIME/FRB HDF5 data.
