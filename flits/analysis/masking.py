@@ -21,6 +21,7 @@ https://github.com/josephwkania/jess), which FLITS used before.
 from __future__ import annotations
 
 import numpy as np
+from scipy.ndimage import median_filter
 
 CHANNEL_TESTS = ("skew", "stand-dev")
 DEFAULT_SIGMA = 3.0
@@ -64,14 +65,28 @@ def running_median(values: np.ndarray, width: int) -> np.ndarray:
     NaN gives NaN.
     """
     values = np.asarray(values, dtype=np.float64)
+    n = values.size
     half = max(0, int(width) // 2)
-    padded = np.concatenate([np.full(half, np.nan), values, np.full(half, np.nan)])
-    windows = np.sort(np.lib.stride_tricks.sliding_window_view(padded, 2 * half + 1), axis=1)
-    count = np.count_nonzero(~np.isnan(windows), axis=1)
-    rows = np.arange(values.size)
-    low = windows[rows, np.maximum(count - 1, 0) // 2]
-    high = windows[rows, count // 2]
-    return np.where(count > 0, (low + high) / 2, np.nan)
+    size = 2 * half + 1
+    missing = np.isnan(values)
+    # Full windows without NaN, the usual case, go to scipy's median filter.
+    result = median_filter(np.where(missing, 0.0, values), size=size, mode="nearest")
+    if n <= 2 * half:
+        slow = np.ones(n, dtype=bool)
+    else:
+        slow = np.convolve(missing, np.ones(size, dtype=bool), mode="same")
+        slow[:half] = True
+        slow[n - half :] = True
+    rows = np.flatnonzero(slow)
+    if rows.size:
+        padded = np.concatenate([np.full(half, np.nan), values, np.full(half, np.nan)])
+        windows = np.sort(np.lib.stride_tricks.sliding_window_view(padded, size)[rows], axis=1)
+        count = np.count_nonzero(~np.isnan(windows), axis=1)
+        index = np.arange(rows.size)
+        low = windows[index, np.maximum(count - 1, 0) // 2]
+        high = windows[index, count // 2]
+        result[rows] = np.where(count > 0, (low + high) / 2, np.nan)
+    return result
 
 
 def _theil_sen_line(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
@@ -129,7 +144,9 @@ def flag_outlying_channels(
     width = max(1, min(int(trend_channels), nchan))
     for _ in range(MAX_ITERATIONS):
         trend = bandpass_trend(np.where(flagged, np.nan, statistic), width)
-        trend = np.where(np.isfinite(trend), trend, bandpass_trend(statistic, width))
+        unknown = ~np.isfinite(trend)
+        if unknown.any():
+            trend[unknown] = bandpass_trend(statistic, width)[unknown]
         residual = statistic - trend
         centre = float(np.median(residual))
         spread = _MAD_TO_SIGMA * float(np.median(np.abs(residual - centre)))
