@@ -5,8 +5,8 @@ built-in readers cover the formats most common in the FRB community:
 
 | Format                | Extensions       | Backend                              | Notes                                |
 |-----------------------|------------------|--------------------------------------|--------------------------------------|
-| SIGPROC               | `.fil`           | `your` (filterbank)                  | Canonical input; fully supported.    |
-| PSRFITS (search)      | `.fits`, `.sf`   | `your` + `astropy.io.fits` fallback  | Search-mode dynamic spectra.         |
+| SIGPROC               | `.fil`           | native                               | Canonical input; 8-, 16- or 32-bit samples, 1, 2 or 4 IFs. |
+| PSRFITS (search)      | `.fits`, `.sf`   | native, via `astropy.io.fits`        | Search-mode dynamic spectra; 1- to 32-bit samples. |
 | PSRFITS (folded/PSR)  | `.fits`, `.sf`   | `astropy.io.fits`                    | Phase bins are loaded as pseudo-time bins. |
 | CHIME/FRB HDF5        | `.h5`, `.hdf5`   | `h5py` (native)                      | `flits_chime_v1`, public catalog, and beamformed `BBData` `tiedbeam_power`. |
 
@@ -51,13 +51,18 @@ UI surfaces which signal was used via the "Detected: …" label and basis.
 - **Folded/PSR-mode** PSRFITS files are supported as a burst-analysis view:
   FLITS combines subintegrations and treats folded phase bins as pseudo-time
   bins. It does not perform pulsar timing analysis.
-- Some non-canonical files (MeerKAT, Parkes variants) leave `TSTART`,
-  `TELESCOP`, or `SRC_NAME` unset at the layer `your` reads. FLITS
-  automatically patches these in from the FITS primary header via
-  `astropy.io.fits`. If a required field is genuinely absent, a
-  `MetadataMissingError` names the missing fields so you can fix the file.
+- **Search-mode** samples are read as the PSRFITS standard defines them:
+  calibrated as `(raw - ZERO_OFF) * DAT_SCL + DAT_OFFS` for each channel and
+  polarization, multiplied by `DAT_WTS`, read as signed bytes when
+  `SIGNINT = 1`, and, below 8 bits, unpacked with the first sample in the most
+  significant bits. Before FLITS read these files itself, it used the `your`
+  package, which ignores `ZERO_OFF`, `SIGNINT` and the per-polarization
+  scales, wraps scaled 8-bit values above 255, and misorders the channels of
+  2- and 4-bit data; files affected by any of these now read differently.
+- If a required header field is absent, a `MetadataMissingError` names the
+  missing fields so you can fix the file.
 - FLITS promotes common source-position and timing-frame metadata when present:
-  SIGPROC/`your` RA and Dec fields, PSRFITS `RAJ`/`DECJ` fallbacks, and
+  SIGPROC `src_raj`/`src_dej`, PSRFITS `RA`/`DEC` and `RAJ`/`DECJ`, and
   barycentric/pulsarcentric header flags. Existing barycentric or pulsarcentric
   inputs are not barycenter-corrected a second time.
 

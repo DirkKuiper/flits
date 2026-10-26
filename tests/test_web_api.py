@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from fastapi import HTTPException
 
-from flits.io.filterbank import FilterbankInspection, your
+from flits.io.filterbank import FilterbankInspection
 from flits.models import FilterbankMetadata, SpectralAnalysisResult, TemporalStructureResult, UncertaintyDetail
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
@@ -130,7 +130,7 @@ class WebApiTest(unittest.TestCase):
         self.assertEqual([profile["key"] for profile in payload["profiles"]], ["fast", "auto", "thorough"])
         self.assertEqual(payload["profiles"][1]["label"], "Auto")
 
-    @unittest.skipUnless(SAMPLE.exists() and your.Your is not None, "Sample filterbank reader is not available")
+    @unittest.skipUnless(SAMPLE.exists(), "Sample filterbank reader is not available")
     def test_detect_endpoint_reports_gbt_for_sample_filterbank(self) -> None:
         payload = detect_filterbank(DetectFilterbankRequest(bfile=str(SAMPLE)))
 
@@ -142,7 +142,7 @@ class WebApiTest(unittest.TestCase):
         self.assertIsNone(payload["suggested_dm"])
         self.assertIsNone(payload["dm_guidance"])
 
-    @unittest.skipUnless(SAMPLE.exists() and your.Your is not None, "Sample filterbank reader is not available")
+    @unittest.skipUnless(SAMPLE.exists(), "Sample filterbank reader is not available")
     @patch("flits.web.app.inspect_filterbank")
     def test_detect_endpoint_unknown_id_falls_back_to_generic(self, mock_inspect: object) -> None:
         mock_inspect.return_value = FilterbankInspection(

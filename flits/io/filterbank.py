@@ -12,12 +12,11 @@ from flits.io.reader import (
     inspect_filterbank,
     load_filterbank_data,
 )
-from flits.io.your_reader import YourFilterbankReader, your
+from flits.io.your_reader import YourFilterbankReader
 
 __all__ = [
     "FilterbankInspection",
     "YourFilterbankReader",
     "inspect_filterbank",
     "load_filterbank_data",
-    "your",
 ]

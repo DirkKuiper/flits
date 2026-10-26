@@ -165,7 +165,8 @@ def _build_stokes_i(
         return aa, 2
     if raw.shape[1] >= 2:
         bb = raw[:, 1, :].T
-        return aa + bb, 2
+        # Sum in floating point: integer samples, such as 8-bit data, would wrap.
+        return aa.astype(np.result_type(aa.dtype, np.float32)) + bb, 2
     return aa, 1
 
 

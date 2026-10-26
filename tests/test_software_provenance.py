@@ -274,7 +274,7 @@ def test_real_environment_records_python_flits_and_installed_dependencies():
     result = provenance.capture_environment()
     assert result["python_version"]
     assert result["flits_version"]
-    for name in ("numpy", "scipy", "your", "jess", "fitburst"):
+    for name in ("numpy", "scipy", "jess", "fitburst"):
         assert "version" in result["packages"][name]
     assert result["flits_source"]["python_source_sha256"]
     json.dumps(result, allow_nan=False)

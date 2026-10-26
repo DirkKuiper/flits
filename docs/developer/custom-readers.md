@@ -10,7 +10,9 @@ The built-in implementations keep container integration separate from format
 interpretation:
 
 - `reader.py` owns discovery, sniffing, and the public reader protocol.
-- `your_reader.py` adapts the `your` package for SIGPROC and search-mode data.
+- `search_data.py` reads SIGPROC filterbank and PSRFITS search-mode files.
+- `your_reader.py` turns those, and folded PSRFITS, into FLITS data. It keeps
+  the name of the `your` package it used to wrap.
 - `psrfits.py` owns PSRFITS detection, header coercion, and folded-data loading.
 - `chime_hdf5_reader.py` coordinates HDF5 inspection and loading.
 - `chime.py` owns CHIME schema detection, metadata coercion, and alignment helpers.

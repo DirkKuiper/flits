@@ -8,6 +8,8 @@ from unittest.mock import patch
 import numpy as np
 
 from flits.io.filterbank import FilterbankInspection, load_filterbank_data
+from flits.io.psrfits import _build_stokes_i
+from flits.io.search_data import SearchHeader
 from flits.models import FilterbankMetadata
 from flits.session import BurstSession, _adaptive_jess_time_bin_limit
 from flits.settings import ObservationConfig, get_auto_mask_profile
@@ -24,25 +26,19 @@ def _mock_reader(
     poln_order: str | None = None,
 ) -> SimpleNamespace:
     nchan = raw.shape[-1] if raw.ndim == 3 else raw.shape[1]
-    header = SimpleNamespace(
-        tsamp=tsamp,
-        foff=foff,
-        tstart=60000.0,
-        bw=abs(foff) * nchan,
-        npol=npol,
-        poln_order=poln_order,
-        fch1=fch1,
+    header = SearchHeader(
         nchans=nchan,
         nspectra=raw.shape[0],
-    )
-    return SimpleNamespace(
-        your_header=header,
-        telescope_id=None,
-        machine_id=None,
+        npol=npol,
+        nbits=32,
+        tsamp=tsamp,
+        fch1=fch1,
+        foff=foff,
+        tstart=60000.0,
+        poln_order=poln_order,
         source_name="synthetic",
-        fp=None,
-        get_data=lambda nstart, nread, npoln=1: raw[nstart : nstart + nread],
     )
+    return SimpleNamespace(header=header, read=lambda nstart, nread: raw[nstart : nstart + nread])
 
 
 def _synthetic_inspection(path: str) -> FilterbankInspection:
@@ -57,8 +53,8 @@ def _synthetic_inspection(path: str) -> FilterbankInspection:
 
 
 class ViewerAndMaskingTest(unittest.TestCase):
-    @patch("flits.io.your_reader.your.Your")
-    def test_legacy_mode_matches_existing_fixed_tail_normalization(self, mock_your: object) -> None:
+    @patch("flits.io.your_reader.open_search_file")
+    def test_legacy_mode_matches_existing_fixed_tail_normalization(self, mock_open: object) -> None:
         raw = np.array(
             [
                 [10.0, 20.0, 30.0, 40.0],
@@ -72,7 +68,7 @@ class ViewerAndMaskingTest(unittest.TestCase):
             ],
             dtype=float,
         )
-        mock_your.return_value = _mock_reader(raw)
+        mock_open.return_value = _mock_reader(raw)
         config = ObservationConfig.from_preset(dm=0.0, preset_key="generic", sefd_jy=1.0)
 
         data, _ = load_filterbank_data(
@@ -86,8 +82,8 @@ class ViewerAndMaskingTest(unittest.TestCase):
         self.assertEqual(data.dtype, np.float32)
         np.testing.assert_allclose(data, expected)
 
-    @patch("flits.io.your_reader.your.Your")
-    def test_load_filterbank_data_applies_npol_override_to_metadata(self, mock_your: object) -> None:
+    @patch("flits.io.your_reader.open_search_file")
+    def test_load_filterbank_data_applies_npol_override_to_metadata(self, mock_open: object) -> None:
         raw = np.array(
             [
                 [[1.0, 2.0], [3.0, 4.0]],
@@ -97,7 +93,7 @@ class ViewerAndMaskingTest(unittest.TestCase):
             ],
             dtype=float,
         )
-        mock_your.return_value = _mock_reader(raw, npol=2)
+        mock_open.return_value = _mock_reader(raw, npol=2)
         config = ObservationConfig.from_preset(dm=0.0, preset_key="generic", sefd_jy=1.0, npol_override=1)
 
         _, metadata = load_filterbank_data(
@@ -109,8 +105,8 @@ class ViewerAndMaskingTest(unittest.TestCase):
         self.assertEqual(metadata.header_npol, 2)
         self.assertEqual(metadata.npol, 1)
 
-    @patch("flits.io.your_reader.your.Your")
-    def test_load_filterbank_data_uses_stokes_i_plane_for_iquv(self, mock_your: object) -> None:
+    @patch("flits.io.your_reader.open_search_file")
+    def test_load_filterbank_data_uses_stokes_i_plane_for_iquv(self, mock_open: object) -> None:
         stokes_i = np.array(
             [
                 [10.0, 20.0, 30.0],
@@ -129,7 +125,7 @@ class ViewerAndMaskingTest(unittest.TestCase):
         raw[:, 1, :] = 100.0 + np.arange(stokes_i.size, dtype=float).reshape(stokes_i.shape)
         raw[:, 2, :] = -5.0
         raw[:, 3, :] = 2.0
-        mock_your.return_value = _mock_reader(raw, npol=4, poln_order="IQUV")
+        mock_open.return_value = _mock_reader(raw, npol=4, poln_order="IQUV")
         config = ObservationConfig.from_preset(dm=0.0, preset_key="generic", sefd_jy=1.0)
 
         data, metadata = load_filterbank_data(
@@ -152,14 +148,14 @@ class ViewerAndMaskingTest(unittest.TestCase):
         self.assertEqual(metadata.npol, 2)
         self.assertEqual(metadata.polarization_order, "IQUV")
 
-    @patch("flits.io.your_reader.your.Your")
-    def test_load_filterbank_data_sums_aa_bb_for_nrt_iquv_header_typo(self, mock_your: object) -> None:
+    @patch("flits.io.your_reader.open_search_file")
+    def test_load_filterbank_data_sums_aa_bb_for_nrt_iquv_header_typo(self, mock_open: object) -> None:
         raw = np.zeros((8, 4, 3), dtype=float)
         raw[:, 0, :] = np.arange(24, dtype=float).reshape(8, 3)
         raw[:, 1, :] = 100.0 + np.arange(24, dtype=float).reshape(8, 3)
         raw[:, 2, :] = -5.0
         raw[:, 3, :] = 2.0
-        mock_your.return_value = _mock_reader(raw, npol=4, poln_order="IQUV")
+        mock_open.return_value = _mock_reader(raw, npol=4, poln_order="IQUV")
         config = ObservationConfig.from_preset(dm=0.0, preset_key="nrt", sefd_jy=1.0)
 
         data, metadata = load_filterbank_data(
@@ -176,8 +172,8 @@ class ViewerAndMaskingTest(unittest.TestCase):
         self.assertEqual(metadata.npol, 2)
         self.assertEqual(metadata.polarization_order, "IQUV")
 
-    @patch("flits.io.your_reader.your.Your")
-    def test_load_filterbank_data_preserves_non_iquv_first_two_plane_sum(self, mock_your: object) -> None:
+    @patch("flits.io.your_reader.open_search_file")
+    def test_load_filterbank_data_preserves_non_iquv_first_two_plane_sum(self, mock_open: object) -> None:
         raw = np.array(
             [
                 [[1.0, 2.0, 3.0], [10.0, 20.0, 30.0], [100.0, 200.0, 300.0], [5.0, 5.0, 5.0]],
@@ -191,7 +187,7 @@ class ViewerAndMaskingTest(unittest.TestCase):
             ],
             dtype=float,
         )
-        mock_your.return_value = _mock_reader(raw, npol=4, poln_order="AABB")
+        mock_open.return_value = _mock_reader(raw, npol=4, poln_order="AABB")
         config = ObservationConfig.from_preset(dm=0.0, preset_key="generic", sefd_jy=1.0)
 
         data, metadata = load_filterbank_data(
@@ -208,6 +204,16 @@ class ViewerAndMaskingTest(unittest.TestCase):
         self.assertEqual(metadata.header_npol, 4)
         self.assertEqual(metadata.npol, 2)
         self.assertEqual(metadata.polarization_order, "AABB")
+
+    def test_summing_8bit_polarizations_does_not_wrap(self) -> None:
+        raw = np.zeros((8, 4, 3), dtype=np.uint8)
+        raw[:, 0, :] = 200
+        raw[:, 1, :] = 100
+
+        stokes_i, npol = _build_stokes_i(raw, polarization_order="AABB")
+
+        self.assertEqual(npol, 2)
+        np.testing.assert_array_equal(stokes_i, np.full((3, 8), 300.0))
 
     def test_view_flattens_static_channel_offsets_for_display(self) -> None:
         config = ObservationConfig.from_preset(dm=0.0, preset_key="generic")
