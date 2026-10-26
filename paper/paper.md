@@ -193,11 +193,12 @@ User documentation and reproducible examples are available at
 
 # Research impact statement
 
-D. Kuiper and J. Huang used FLITS to measure the bursts in a study of the
-brightest bursts of the repeating FRB 20240114A, combining observations from
-several telescopes (Kuiper et al., in prep.). FLITS is also used in a pulsar
-study (Kuiper et al., in prep.) and by A. Moroianu to analyse how the DM and
-burst morphology of precisely localized repeating FRBs evolve over time
+FLITS made the burst measurements for a study of the brightest bursts of the
+repeating FRB 20240114A, combining observations from several telescopes
+(Kuiper et al., in prep.), and J. Huang uses it in a separate study of the
+same source (Huang et al., in prep.). It is also used in a pulsar study
+(Kuiper et al., in prep.) and by A. Moroianu to analyse how the DM and burst
+morphology of precisely localized repeating FRBs evolve over time
 (Moroianu et al., in prep.).
 
 Researchers outside the development team have contributed code. M. A. Fine
