@@ -723,10 +723,10 @@ class WebApiTest(unittest.TestCase):
         finally:
             SESSIONS.pop(payload["session_id"], None)
 
-    def test_session_action_auto_mask_jess_passes_profile_override(self) -> None:
+    def test_session_action_auto_mask_passes_profile_override(self) -> None:
         session_id = "synthetic-mask-profile"
         session = _synthetic_session()
-        session.auto_mask_jess = Mock()
+        session.auto_mask = Mock()
         SESSIONS[session_id] = session
         try:
             session_action(
@@ -739,7 +739,7 @@ class WebApiTest(unittest.TestCase):
         finally:
             SESSIONS.pop(session_id, None)
 
-        session.auto_mask_jess.assert_called_once_with("fast")
+        session.auto_mask.assert_called_once_with("fast")
 
     def test_session_action_auto_localize_updates_selections(self) -> None:
         session_id = "synthetic-localize"

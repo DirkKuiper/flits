@@ -129,7 +129,7 @@ def measure_burst(
     if options.crop_ms is not None:
         session.set_crop_ms(*options.crop_ms)
     if mask_profile is not None:
-        session.auto_mask_jess(mask_profile)
+        session.auto_mask(mask_profile)
 
     localization = None
     if options.event_ms is None:

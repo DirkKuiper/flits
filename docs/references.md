@@ -135,12 +135,6 @@ decomposition against an empirical off-pulse floor.
 
 ## Software FLITS depends on
 
-- Aggarwal, K. et al. (2020), *Your: Your Unified Reader*, JOSS 5(55), 2750.
-  [doi:10.21105/joss.02750](https://doi.org/10.21105/joss.02750) — read
-  FLITS's filterbank and PSRFITS input until FLITS gained its own readers, and
-  is the reference those readers are tested against.
-- `jess` — statistical interference mitigation.
-  <https://github.com/josephwkania/jess>
 - Harris, C. R. et al. (2020), *Array programming with NumPy*, Nature 585, 357.
   [doi:10.1038/s41586-020-2649-2](https://doi.org/10.1038/s41586-020-2649-2)
 - Virtanen, P. et al. (2020), *SciPy 1.0*, Nature Methods 17, 261.
@@ -149,6 +143,17 @@ decomposition against an empirical off-pulse floor.
   [doi:10.3847/1538-4357/ac7c74](https://doi.org/10.3847/1538-4357/ac7c74)
 - Hunter, J. D. (2007), *Matplotlib: A 2D graphics environment*, CiSE 9, 90.
   [doi:10.1109/MCSE.2007.55](https://doi.org/10.1109/MCSE.2007.55)
+
+## Software FLITS used before
+
+- Aggarwal, K. et al. (2020), *Your: Your Unified Reader*, JOSS 5(55), 2750.
+  [doi:10.21105/joss.02750](https://doi.org/10.21105/joss.02750) — read
+  FLITS's filterbank and PSRFITS input until FLITS gained its own readers, and
+  is the reference those readers are tested against.
+- `jess` — statistical interference mitigation,
+  <https://github.com/josephwkania/jess>. FLITS used it for automatic masking
+  until it gained its own masker, which applies the same kind of per-channel
+  statistical tests (`flits.analysis.masking`).
 
 ## Background
 

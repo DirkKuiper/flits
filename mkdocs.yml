@@ -41,7 +41,7 @@ plugins:
           `--offpulse`, `--band` or `--crop`. Save sessions with
           `--snapshot-dir`. Exit code 0 means every burst was measured.
         - Python: `flits.BurstSession.from_file(path, dm=...)`, then
-          `auto_mask_jess()`, `auto_localize()` and `compute_properties()`;
+          `auto_mask()`, `auto_localize()` and `compute_properties()`;
           or `flits.measure_burst(path, flits.MeasureOptions(dm=...))`.
         - `flits --data-dir DIR` serves the browser interface; `flits demo`
           opens a prepared example burst.

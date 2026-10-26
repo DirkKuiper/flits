@@ -11,7 +11,7 @@ from flits.io.filterbank import FilterbankInspection, load_filterbank_data
 from flits.io.psrfits import _build_stokes_i
 from flits.io.search_data import SearchHeader
 from flits.models import FilterbankMetadata
-from flits.session import BurstSession, _adaptive_jess_time_bin_limit
+from flits.session import BurstSession, _adaptive_mask_time_bin_limit
 from flits.settings import ObservationConfig, get_auto_mask_profile
 from flits.signal import normalize
 
@@ -302,13 +302,13 @@ class ViewerAndMaskingTest(unittest.TestCase):
         self.assertEqual(view["plot"]["spectrum"]["x"], [18.0, 9.0, 4.5])
         self.assertFalse(np.allclose(view["plot"]["spectrum"]["x"], 0.0))
 
-    @patch("flits.session.jess.channel_masks.channel_masker")
-    def test_auto_mask_jess_uses_profile_budget_for_sampling(self, mock_channel_masker: object) -> None:
+    @patch("flits.session.flag_outlying_channels")
+    def test_auto_mask_uses_profile_budget_for_sampling(self, mock_flagger: object) -> None:
         num_channels = 1024
         num_time_bins = 10_000
         data = np.random.default_rng(1234).normal(size=(num_channels, num_time_bins)).astype(np.float32)
         metadata = FilterbankMetadata(
-            source_path=Path("jess-large.fil"),
+            source_path=Path("mask-large.fil"),
             source_name="synthetic",
             tsamp=1e-3,
             freqres=1.0,
@@ -337,16 +337,16 @@ class ViewerAndMaskingTest(unittest.TestCase):
             channel_mask=np.zeros(num_channels, dtype=bool),
         )
         fast_profile = get_auto_mask_profile("fast")
-        expected_samples = _adaptive_jess_time_bin_limit(num_channels, fast_profile.memory_budget_mb)
+        expected_samples = _adaptive_mask_time_bin_limit(num_channels, fast_profile.memory_budget_mb)
 
-        def _fake_masker(dynamic_spectra: np.ndarray, **_: object) -> np.ndarray:
+        def _fake_flagger(dynamic_spectra: np.ndarray, test: str) -> np.ndarray:
             self.assertEqual(dynamic_spectra.shape[1], num_channels)
             self.assertEqual(dynamic_spectra.shape[0], expected_samples)
             return np.zeros(num_channels, dtype=bool)
 
-        mock_channel_masker.side_effect = _fake_masker
+        mock_flagger.side_effect = _fake_flagger
 
-        session.auto_mask_jess("fast")
+        session.auto_mask("fast")
 
         self.assertEqual(np.flatnonzero(session.channel_mask).tolist(), [])
         self.assertIsNotNone(session.last_auto_mask)
@@ -355,8 +355,8 @@ class ViewerAndMaskingTest(unittest.TestCase):
         self.assertEqual(session.last_auto_mask.candidate_time_bins, 9_000)
         self.assertEqual(session.last_auto_mask.test_used, "stand-dev")
 
-    @patch("flits.session.jess.channel_masks.channel_masker")
-    def test_auto_mask_jess_falls_back_from_skew_and_masks_constant_channels(self, mock_channel_masker: object) -> None:
+    @patch("flits.session.flag_outlying_channels")
+    def test_auto_mask_falls_back_from_skew_and_masks_constant_channels(self, mock_flagger: object) -> None:
         data = np.array(
             [
                 np.full(128, 7.0),
@@ -367,7 +367,7 @@ class ViewerAndMaskingTest(unittest.TestCase):
             dtype=float,
         )
         metadata = FilterbankMetadata(
-            source_path=Path("jess-fallback.fil"),
+            source_path=Path("mask-fallback.fil"),
             source_name="synthetic",
             tsamp=1e-3,
             freqres=1.0,
@@ -395,12 +395,12 @@ class ViewerAndMaskingTest(unittest.TestCase):
             spec_ex_hi=data.shape[0] - 1,
             channel_mask=np.zeros(data.shape[0], dtype=bool),
         )
-        mock_channel_masker.side_effect = [
+        mock_flagger.side_effect = [
             np.array([False, False, False], dtype=bool),
             np.array([False, True, False], dtype=bool),
         ]
 
-        session.auto_mask_jess("auto")
+        session.auto_mask("auto")
 
         self.assertEqual(np.flatnonzero(session.channel_mask).tolist(), [0, 2])
         self.assertIsNotNone(session.last_auto_mask)

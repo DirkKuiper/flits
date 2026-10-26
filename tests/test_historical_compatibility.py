@@ -11,9 +11,9 @@ from xml.etree import ElementTree
 import numpy as np
 import pytest
 from PIL import Image
-from your import Your
 
 from flits.cli import _compare_measurements
+from flits.io.search_data import SigprocFile
 from flits.session import BurstSession
 
 FIXTURES = Path(__file__).parent / "fixtures" / "compatibility"
@@ -78,8 +78,8 @@ def test_historical_exports_are_readable_with_independent_readers(release):
     for path in directory.glob("*.svg"):
         assert ElementTree.parse(path).getroot().tag.endswith("svg")
     metadata = json.loads((directory / "window_native.meta.json").read_text())
-    reader = Your(str(directory / "window_native.fil"))
-    raw = reader.get_data(nstart=0, nsamp=reader.your_header.nspectra).T
+    window = SigprocFile.open(directory / "window_native.fil")
+    raw = window.read(0, window.header.nspectra).T
     with np.load(directory / "window_native.npz", allow_pickle=False) as arrays:
         assert raw.shape == arrays["dynamic_spectrum"].shape
         np.testing.assert_allclose(raw, np.nan_to_num(arrays["dynamic_spectrum"]), rtol=1e-6, atol=1e-6)

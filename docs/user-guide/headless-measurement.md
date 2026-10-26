@@ -4,7 +4,8 @@
 same steps the interface offers, in the order a user takes them:
 
 1. Load at the given DM, with the telescope preset detected from the file.
-2. Mask interference automatically with `jess` (`--mask auto`).
+2. Mask interference automatically (`--mask auto`): channels whose off-burst
+   statistics stand out from the bandpass.
 3. Localize the burst automatically, choosing the event window, the frequency
    band, and off-pulse noise windows on either side.
 4. Measure S/N, peak flux, fluence, widths, and arrival times, with the same
