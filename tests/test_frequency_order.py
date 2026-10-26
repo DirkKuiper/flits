@@ -8,6 +8,7 @@ from unittest.mock import patch
 import numpy as np
 
 from flits.io.filterbank import FilterbankInspection, load_filterbank_data
+from flits.io.search_data import SearchHeader
 from flits.models import FilterbankMetadata
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
@@ -72,29 +73,23 @@ def _descending_frequency_session() -> BurstSession:
 
 
 class FilterbankFrequencyOrderTest(unittest.TestCase):
-    @patch("flits.io.your_reader.your.Your")
-    def test_load_filterbank_preserves_native_order_for_negative_foff(self, mock_your: object) -> None:
-        header = SimpleNamespace(
-            tsamp=0.01,
-            foff=-200.0,
-            tstart=60000.0,
-            bw=800.0,
-            npol=1,
-            fch1=2000.0,
+    @patch("flits.io.your_reader.open_search_file")
+    def test_load_filterbank_preserves_native_order_for_negative_foff(self, mock_open: object) -> None:
+        header = SearchHeader(
             nchans=4,
             nspectra=64,
+            npol=1,
+            nbits=32,
+            tsamp=0.01,
+            fch1=2000.0,
+            foff=-200.0,
+            tstart=60000.0,
+            source_name="synthetic",
         )
         native_freqs = np.array([2000.0, 1800.0, 1600.0, 1400.0])
         raw = _synthetic_dispersed_raw(native_freqs, dm=100.0, tsamp=header.tsamp, num_time_bins=64, aligned_bin=20)
 
-        mock_your.return_value = SimpleNamespace(
-            your_header=header,
-            telescope_id=None,
-            machine_id=None,
-            source_name="synthetic",
-            fp=None,
-            get_data=lambda nstart, nread, npoln=1: raw[nstart : nstart + nread],
-        )
+        mock_open.return_value = SimpleNamespace(header=header, read=lambda nstart, nread: raw[nstart : nstart + nread])
         inspection = FilterbankInspection(
             source_path=Path("synthetic-negative-foff.fil"),
             source_name="synthetic",

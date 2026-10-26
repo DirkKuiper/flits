@@ -38,7 +38,6 @@ dependencies = [
   "scipy>=1.11.4,<2",
   "astropy>=6.0,<9",
   "pydantic>=2.7,<3",
-  "your>=0.6.7,<0.7",
   "jess>=0.3.1,<0.4",
   "matplotlib>=3.8,<4",
   "h5py>=3.10,<4",
@@ -61,6 +60,8 @@ dev = [
   "pytest-playwright>=0.5",
   "ruff>=0.6",
   "twine>=6.2.0",
+  # Reference reader for the SIGPROC/PSRFITS equivalence tests and their PSRFITS fixtures.
+  "your>=0.6.7,<0.7",
 ]
 docs = [
   "mkdocs-llmstxt>=0.5",

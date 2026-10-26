@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from flits.io.filterbank import your
 from flits.session import BurstSession
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,7 +11,7 @@ _SAMPLE_CANDIDATES = (ROOT / _SAMPLE_NAME, ROOT / "data" / "GBT-L" / _SAMPLE_NAM
 SAMPLE = next((path for path in _SAMPLE_CANDIDATES if path.exists()), _SAMPLE_CANDIDATES[0])
 
 
-@unittest.skipUnless(SAMPLE.exists() and your.Your is not None, "Sample filterbank reader is not available")
+@unittest.skipUnless(SAMPLE.exists(), "Sample filterbank reader is not available")
 class BurstSessionSmokeTest(unittest.TestCase):
     def test_session_auto_detects_gbt_when_telescope_is_omitted(self) -> None:
         session = BurstSession.from_file(str(SAMPLE), dm=527.851)

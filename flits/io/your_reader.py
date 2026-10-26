@@ -1,16 +1,14 @@
-"""Reader for SIGPROC filterbank and PSRFITS data, backed by ``your``."""
+"""Reader for SIGPROC filterbank and PSRFITS data.
+
+The module keeps its historical name: it used to wrap the ``your`` package,
+and ``YourFilterbankReader`` is the entry point registered for these formats.
+Search-mode files are now read by :mod:`flits.io.search_data`.
+"""
 
 from __future__ import annotations
 
-import errno
-import os
-import shutil
 import struct
-import tempfile
-from collections.abc import Iterator
-from contextlib import contextmanager, suppress
 from pathlib import Path
-from types import SimpleNamespace
 from typing import ClassVar
 
 import numpy as np
@@ -45,69 +43,16 @@ from flits.io.psrfits import (
     resolve_stokes_basis,
 )
 from flits.io.reader import FilterbankInspection
+from flits.io.search_data import open_search_file
 from flits.io.validation import validate_metadata
 from flits.models import FilterbankMetadata
 from flits.settings import ObservationConfig, detect_preset, resolve_default_sefd_jy
 from flits.signal import normalize, normalize_stokes
 from flits.stokes import basis_from_psrfits, stokes_from_products
 
-try:
-    import your as _your
-
-    _YOUR_IMPORT_ERROR: Exception | None = None
-except Exception as exc:  # pragma: no cover - depends on optional runtime stack
-    _your = SimpleNamespace(Your=None)
-    _YOUR_IMPORT_ERROR = exc
-
-your = _your
-
-
 _SIGPROC_MAGIC = struct.pack("i", 12) + b"HEADER_START"
 _FITS_MAGIC = b"SIMPLE  ="
 _PSRFITS_FOLD_MODES = frozenset({"PSR", "FOLD"})
-
-
-def _is_mmap_deadlock(exc: BaseException) -> bool:
-    return isinstance(exc, OSError) and exc.errno == errno.EDEADLK
-
-
-def _close_reader(reader: object | None) -> None:
-    if reader is None:
-        return
-    fp = getattr(reader, "fp", None)
-    if fp is not None and not getattr(fp, "closed", True):
-        with suppress(OSError):
-            fp.close()
-
-
-@contextmanager
-def _open_your(source_path: Path) -> Iterator[object]:
-    """Open a your.Your reader, falling back to a local copy on mmap EDEADLK.
-
-    Some network/FUSE mounts (sshfs, SMB, iCloud) return EDEADLK from mmap();
-    copying to a local tempdir sidesteps this without changing the read path.
-    """
-    if your.Your is None:
-        raise RuntimeError("The 'your' package is unavailable in the active environment.") from _YOUR_IMPORT_ERROR
-
-    temp_path: Path | None = None
-    reader: object | None = None
-    try:
-        try:
-            reader = your.Your(str(source_path))
-        except OSError as exc:
-            if not _is_mmap_deadlock(exc):
-                raise
-            tmp_dir = Path(tempfile.gettempdir())
-            temp_path = tmp_dir / f"flits_fb_{os.getpid()}_{source_path.name}"
-            shutil.copyfile(source_path, temp_path)
-            reader = your.Your(str(temp_path))
-        yield reader
-    finally:
-        _close_reader(reader)
-        if temp_path is not None:
-            with suppress(OSError):
-                temp_path.unlink(missing_ok=True)
 
 
 def _coerce_header_field(
@@ -140,7 +85,7 @@ def _header_polarization_basis(
     """Return the polarization basis the file's own header establishes.
 
     SIGPROC has no field that records which four products a ``nifs=4`` file
-    holds -- ``your`` reports ``IQUV`` for every such filterbank regardless of
+    holds -- the reader reports ``IQUV`` for every such filterbank regardless of
     what is in it -- so a filterbank header establishes nothing and returns
     None. PSRFITS does record it, in ``POL_TYPE`` plus ``FD_POLN``.
     """
@@ -150,7 +95,7 @@ def _header_polarization_basis(
 
 
 class YourFilterbankReader:
-    """Reader backed by `your` for SIGPROC/search PSRFITS and Astropy for folded PSRFITS.
+    """Reader for SIGPROC filterbank and search-mode or folded PSRFITS data.
 
     Folded PSRFITS files are exposed as pseudo-time waterfalls by treating phase
     bins as time bins and averaging subintegrations.
@@ -185,25 +130,19 @@ class YourFilterbankReader:
 
         fits_fallback = _psrfits_primary_fallback(source_path) if is_fits else {}
 
-        with _open_your(source_path) as reader:
-            telescope_id = _safe_int(getattr(reader, "telescope_id", None))
-            machine_id = _safe_int(getattr(reader, "machine_id", None))
-            source_name = _decode_source_name(getattr(reader, "source_name", None))
-            telescope_name = _decode_telescope_name(
-                getattr(reader, "telescope_name", None)
-                or getattr(getattr(reader, "your_header", None), "telescope", None)
-            )
-            freq_lo, freq_hi = _peek_header_freq_range(getattr(reader, "your_header", None))
-            timing_metadata = _reader_timing_metadata(reader)
-            header = getattr(reader, "your_header", None)
-            product_count = max(1, int(_safe_int(getattr(header, "npol", None)) or 1))
-            header_basis = _header_polarization_basis(
-                source_path,
-                is_fits=is_fits,
-                polarization_order=_normalise_polarization_order(
-                    _decode_source_name(getattr(header, "poln_order", None))
-                ),
-            )
+        header = open_search_file(source_path, is_fits=is_fits).header
+        telescope_id = _safe_int(header.telescope_id)
+        machine_id = _safe_int(header.machine_id)
+        source_name = _decode_source_name(header.source_name)
+        telescope_name = _decode_telescope_name(header.telescope_name)
+        freq_lo, freq_hi = _peek_header_freq_range(header)
+        timing_metadata = _reader_timing_metadata(header)
+        product_count = max(1, header.npol)
+        header_basis = _header_polarization_basis(
+            source_path,
+            is_fits=is_fits,
+            polarization_order=_normalise_polarization_order(_decode_source_name(header.poln_order)),
+        )
 
         if is_fits and source_name is None:
             source_name = fits_fallback.get("source_name")  # type: ignore[assignment]
@@ -309,146 +248,144 @@ class YourFilterbankReader:
             fits_fallback = {}
 
         filterbank_inspection = inspection
-        with _open_your(source_path) as reader:
-            header = reader.your_header
-            timing_metadata = _reader_timing_metadata(reader)
-            for key in (
-                "source_ra_deg",
-                "source_dec_deg",
-                "source_position_basis",
-                "barycentric_header_flag",
-                "pulsarcentric_header_flag",
-            ):
-                if key not in timing_metadata and key in fits_fallback:
-                    timing_metadata[key] = fits_fallback[key]
-            if filterbank_inspection is None:
-                telescope_id = _safe_int(getattr(reader, "telescope_id", None))
-                machine_id = _safe_int(getattr(reader, "machine_id", None))
-                source_name = _decode_source_name(getattr(reader, "source_name", None))
-                telescope_name = _decode_telescope_name(
-                    getattr(reader, "telescope_name", None) or getattr(header, "telescope", None)
-                )
-                if is_fits and source_name is None:
-                    source_name = fits_fallback.get("source_name")  # type: ignore[assignment]
-                if telescope_name is None:
-                    telescope_name = fits_fallback.get("telescope_name")  # type: ignore[assignment]
-                freq_lo_hint, freq_hi_hint = _peek_header_freq_range(header)
-                schema_version = "psrfits_search" if is_fits else "sigproc_search"
-                detected_preset_key, detection_basis = detect_preset(
-                    telescope_id,
-                    machine_id,
-                    telescope_name=telescope_name,
-                    schema_version=schema_version,
-                    freq_lo_mhz=freq_lo_hint,
-                    freq_hi_mhz=freq_hi_hint,
-                )
-                filterbank_inspection = FilterbankInspection(
-                    source_path=source_path,
-                    source_name=source_name,
-                    telescope_id=telescope_id,
-                    machine_id=machine_id,
-                    detected_preset_key=detected_preset_key,
-                    detection_basis=detection_basis,
-                    telescope_name=telescope_name,
-                    schema_version=schema_version,
-                    freq_lo_mhz=freq_lo_hint,
-                    freq_hi_mhz=freq_hi_hint,
-                    source_ra_deg=_safe_float(timing_metadata.get("source_ra_deg")),
-                    source_dec_deg=_safe_float(timing_metadata.get("source_dec_deg")),
-                    source_position_basis=timing_metadata.get("source_position_basis"),  # type: ignore[arg-type]
-                    time_scale="utc",
-                    time_reference_frame="topocentric",
-                    barycentric_header_flag=_safe_bool_flag(timing_metadata.get("barycentric_header_flag")),
-                    pulsarcentric_header_flag=_safe_bool_flag(timing_metadata.get("pulsarcentric_header_flag")),
-                )
-
-            tsamp = float(
-                _coerce_header_field(
-                    header,
-                    "tsamp",
-                    fallback=fits_fallback.get("tsamp") if is_fits else None,
-                    path=source_path,
-                )
+        data_file = open_search_file(source_path, is_fits=is_fits)
+        header = data_file.header
+        timing_metadata = _reader_timing_metadata(header)
+        for key in (
+            "source_ra_deg",
+            "source_dec_deg",
+            "source_position_basis",
+            "barycentric_header_flag",
+            "pulsarcentric_header_flag",
+        ):
+            if key not in timing_metadata and key in fits_fallback:
+                timing_metadata[key] = fits_fallback[key]
+        if filterbank_inspection is None:
+            telescope_id = _safe_int(header.telescope_id)
+            machine_id = _safe_int(header.machine_id)
+            source_name = _decode_source_name(header.source_name)
+            telescope_name = _decode_telescope_name(header.telescope_name)
+            if is_fits and source_name is None:
+                source_name = fits_fallback.get("source_name")  # type: ignore[assignment]
+            if telescope_name is None:
+                telescope_name = fits_fallback.get("telescope_name")  # type: ignore[assignment]
+            freq_lo_hint, freq_hi_hint = _peek_header_freq_range(header)
+            schema_version = "psrfits_search" if is_fits else "sigproc_search"
+            detected_preset_key, detection_basis = detect_preset(
+                telescope_id,
+                machine_id,
+                telescope_name=telescope_name,
+                schema_version=schema_version,
+                freq_lo_mhz=freq_lo_hint,
+                freq_hi_mhz=freq_hi_hint,
             )
-            foff_raw = _coerce_header_field(header, "foff", path=source_path)
-            freqres = float(abs(float(foff_raw)))
-            start_mjd_raw = _coerce_header_field(
+            filterbank_inspection = FilterbankInspection(
+                source_path=source_path,
+                source_name=source_name,
+                telescope_id=telescope_id,
+                machine_id=machine_id,
+                detected_preset_key=detected_preset_key,
+                detection_basis=detection_basis,
+                telescope_name=telescope_name,
+                schema_version=schema_version,
+                freq_lo_mhz=freq_lo_hint,
+                freq_hi_mhz=freq_hi_hint,
+                source_ra_deg=_safe_float(timing_metadata.get("source_ra_deg")),
+                source_dec_deg=_safe_float(timing_metadata.get("source_dec_deg")),
+                source_position_basis=timing_metadata.get("source_position_basis"),  # type: ignore[arg-type]
+                time_scale="utc",
+                time_reference_frame="topocentric",
+                barycentric_header_flag=_safe_bool_flag(timing_metadata.get("barycentric_header_flag")),
+                pulsarcentric_header_flag=_safe_bool_flag(timing_metadata.get("pulsarcentric_header_flag")),
+            )
+
+        tsamp = float(
+            _coerce_header_field(
                 header,
-                "tstart",
-                fallback=fits_fallback.get("tstart") if is_fits else None,
+                "tsamp",
+                fallback=fits_fallback.get("tsamp") if is_fits else None,
                 path=source_path,
             )
-            start_mjd = float(start_mjd_raw)
-            bw = float(abs(float(_coerce_header_field(header, "bw", path=source_path))))
-            header_npol = max(1, int(_coerce_header_field(header, "npol", fallback=1, path=source_path)))
-            polarization_order = _normalise_polarization_order(_decode_source_name(getattr(header, "poln_order", None)))
-            fch1 = float(_coerce_header_field(header, "fch1", path=source_path))
-            nchans = int(_coerce_header_field(header, "nchans", path=source_path))
-            nspectra = int(_coerce_header_field(header, "nspectra", path=source_path))
+        )
+        foff_raw = _coerce_header_field(header, "foff", path=source_path)
+        freqres = float(abs(float(foff_raw)))
+        start_mjd_raw = _coerce_header_field(
+            header,
+            "tstart",
+            fallback=fits_fallback.get("tstart") if is_fits else None,
+            path=source_path,
+        )
+        start_mjd = float(start_mjd_raw)
+        bw = float(abs(float(_coerce_header_field(header, "bw", path=source_path))))
+        header_npol = max(1, int(_coerce_header_field(header, "npol", fallback=1, path=source_path)))
+        polarization_order = _normalise_polarization_order(_decode_source_name(getattr(header, "poln_order", None)))
+        fch1 = float(_coerce_header_field(header, "fch1", path=source_path))
+        nchans = int(_coerce_header_field(header, "nchans", path=source_path))
+        nspectra = int(_coerce_header_field(header, "nspectra", path=source_path))
 
-            freqs_mhz = fch1 + (float(foff_raw) * np.arange(nchans, dtype=float))
-            freq_lo = float(np.min(freqs_mhz))
-            freq_hi = float(np.max(freqs_mhz))
-            sefd_jy = config.sefd_jy
-            if sefd_jy is None:
-                sefd_jy = resolve_default_sefd_jy(config.preset_key, freq_lo, freq_hi)
+        freqs_mhz = fch1 + (float(foff_raw) * np.arange(nchans, dtype=float))
+        freq_lo = float(np.min(freqs_mhz))
+        freq_hi = float(np.max(freqs_mhz))
+        sefd_jy = config.sefd_jy
+        if sefd_jy is None:
+            sefd_jy = resolve_default_sefd_jy(config.preset_key, freq_lo, freq_hi)
 
-            read_start_sec = config.read_start_for_file(source_path.name)
-            nstart = min(max(int(read_start_sec / tsamp), 0), max(nspectra - 1, 0))
-            nread = max(1, int(nspectra - nstart))
+        read_start_sec = config.read_start_for_file(source_path.name)
+        nstart = min(max(int(read_start_sec / tsamp), 0), max(nspectra - 1, 0))
+        nread = max(1, int(nspectra - nstart))
 
-            if config.read_end_sec is not None:
-                nend = max(nstart + 1, int(config.read_end_sec / tsamp))
-                requested_nread = nend - nstart
-                nread = min(nread, requested_nread)
+        if config.read_end_sec is not None:
+            nend = max(nstart + 1, int(config.read_end_sec / tsamp))
+            requested_nread = nend - nstart
+            nread = min(nread, requested_nread)
 
-            raw = reader.get_data(nstart, nread, npoln=header_npol)
-            stokes_basis: str | None = None
-            stokes_basis_source: str | None = None
-            if want_stokes:
-                stokes_basis, stokes_basis_source = require_stokes_basis(
-                    config=config,
-                    preset_key=_effective_preset_key(config, filterbank_inspection),
-                    header_basis=_header_polarization_basis(
-                        source_path,
-                        is_fits=is_fits,
-                        polarization_order=polarization_order,
-                    ),
-                    product_count=header_npol,
-                    path=source_path,
-                )
-                products = np.asarray(raw)
-                if products.ndim != 3 or products.shape[1] < 4:
-                    raise PolarizationUnavailableError(
-                        f"Expected four polarization products from the file, got shape {products.shape}.",
-                        path=source_path,
-                        reason="insufficient_products",
-                    )
-                # (time, product, channel) -> (product, channel, time)
-                values = stokes_from_products(products.transpose(1, 2, 0), stokes_basis)
-                effective_npol = 2
-            else:
-                values, effective_npol = _build_stokes_i(
-                    raw,
+        raw = data_file.read(nstart, nread)
+        stokes_basis: str | None = None
+        stokes_basis_source: str | None = None
+        if want_stokes:
+            stokes_basis, stokes_basis_source = require_stokes_basis(
+                config=config,
+                preset_key=_effective_preset_key(config, filterbank_inspection),
+                header_basis=_header_polarization_basis(
+                    source_path,
+                    is_fits=is_fits,
                     polarization_order=polarization_order,
-                    preset_key=_effective_preset_key(config, filterbank_inspection),
-                )
-            effective_npol = max(1, int(config.npol_override)) if config.npol_override is not None else effective_npol
-
-            if values.shape[-2] != nchans:
-                raise CorruptedDataError(
-                    f"Data channel count {values.shape[-2]} does not match header nchans={nchans}",
-                    path=source_path,
-                )
-
-            values = _dedisperse_any(values, config.dm, freqs_mhz, tsamp)
-
-            tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
-            offpulse_start = min(values.shape[-1] - 1, int((1 - tail_fraction) * values.shape[-1]))
-            offpulse = values[..., offpulse_start:]
-            values = (normalize_stokes(values, offpulse) if want_stokes else normalize(values, offpulse)).astype(
-                np.float32, copy=False
+                ),
+                product_count=header_npol,
+                path=source_path,
             )
+            products = np.asarray(raw)
+            if products.ndim != 3 or products.shape[1] < 4:
+                raise PolarizationUnavailableError(
+                    f"Expected four polarization products from the file, got shape {products.shape}.",
+                    path=source_path,
+                    reason="insufficient_products",
+                )
+            # (time, product, channel) -> (product, channel, time)
+            values = stokes_from_products(products.transpose(1, 2, 0), stokes_basis)
+            effective_npol = 2
+        else:
+            values, effective_npol = _build_stokes_i(
+                raw,
+                polarization_order=polarization_order,
+                preset_key=_effective_preset_key(config, filterbank_inspection),
+            )
+        effective_npol = max(1, int(config.npol_override)) if config.npol_override is not None else effective_npol
+
+        if values.shape[-2] != nchans:
+            raise CorruptedDataError(
+                f"Data channel count {values.shape[-2]} does not match header nchans={nchans}",
+                path=source_path,
+            )
+
+        values = _dedisperse_any(values, config.dm, freqs_mhz, tsamp)
+
+        tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
+        offpulse_start = min(values.shape[-1] - 1, int((1 - tail_fraction) * values.shape[-1]))
+        offpulse = values[..., offpulse_start:]
+        values = (normalize_stokes(values, offpulse) if want_stokes else normalize(values, offpulse)).astype(
+            np.float32, copy=False
+        )
 
         metadata = FilterbankMetadata(
             source_path=source_path,

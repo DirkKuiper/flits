@@ -122,7 +122,7 @@ def _process_environment() -> dict[str, Any]:
     packages.setdefault("fitburst", {"version": None, "status": "not_installed"})
     # A checkout on sys.path can shadow an installed distribution. Identify
     # the modules actually imported for the specialist wrappers as well.
-    for name in ("your", "jess", "fitburst"):
+    for name in ("jess", "fitburst"):
         module = sys.modules.get(name)
         package = packages.setdefault(name, {"version": None, "status": "metadata_unavailable"})
         package["loaded"] = module is not None
