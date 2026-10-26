@@ -56,6 +56,7 @@ plugins:
         Scripting:
           - user-guide/headless-measurement.md: Measure bursts from the command line or Python, in batches
           - user-guide/headless-replay.md: Recompute and check a saved session without a browser
+          - user-guide/coding-agents.md: Have coding agents use FLITS, with the FLITS skill
           - developer/api-reference.md: The Python API, BurstSession first
         User guide:
           - user-guide/session-workflow.md: Working through a session in the interface
@@ -108,6 +109,7 @@ nav:
       - Uncertainties: user-guide/uncertainties.md
       - Headless Measurement: user-guide/headless-measurement.md
       - Headless Replay: user-guide/headless-replay.md
+      - Coding Agents: user-guide/coding-agents.md
       - Supported Formats: user-guide/supported-formats.md
   - Analysis:
       - Burst Localization: analysis/localization.md

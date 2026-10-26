@@ -1,0 +1,15 @@
+{
+  "name": "flits",
+  "description": "Plugins for analysing fast radio bursts with FLITS",
+  "owner": {
+    "name": "Dirk Kuiper",
+    "url": "https://github.com/DirkKuiper"
+  },
+  "plugins": [
+    {
+      "name": "flits",
+      "source": "./plugins/flits",
+      "description": "Measure fast radio bursts with FLITS instead of writing dedispersion and measurement code by hand"
+    }
+  ]
+}

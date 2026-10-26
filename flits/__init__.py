@@ -1,4 +1,25 @@
-"""FLITS: Fast-Look Interactive Transient Suite."""
+"""FLITS: Fast-Look Interactive Transient Suite.
+
+FLITS measures fast radio bursts that have already been detected, in SIGPROC
+filterbank (``.fil``), PSRFITS (``.fits``, ``.sf``) and CHIME/FRB HDF5 (``.h5``)
+files. It masks interference, localizes the burst in time and frequency,
+optimizes the DM, and measures S/N, peak flux density, fluence, widths, arrival
+times, sub-burst drift rate and rotation measure, classifying each uncertainty.
+
+There are three entry points:
+
+- ``flits measure FILE... --dm DM`` on the command line prints one JSON record
+  per burst (``--format jsonl`` or ``csv`` also work).
+- ``flits.measure_burst(path, flits.MeasureOptions(dm=...))`` returns the same
+  record in Python.
+- ``flits.BurstSession.from_file(path, dm=...)`` gives full control. Every
+  action in the browser interface is a method on it.
+
+Check each record's ``status`` and ``localization.warning_flags`` before using
+its numbers. Times are in ms from the start of the file, frequencies in MHz,
+and DM in pc cm^-3. Documentation: https://dirkkuiper.github.io/flits/, and for
+language models https://dirkkuiper.github.io/flits/llms.txt.
+"""
 
 from __future__ import annotations
 
