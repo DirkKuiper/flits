@@ -194,18 +194,18 @@ User documentation and reproducible examples are available at
 # Research impact statement
 
 FLITS made the burst measurements for a study of the brightest bursts of the
-repeating FRB 20240114A, combining observations from several telescopes
+repeating FRB 20240114A observed with several telescopes
 (Kuiper et al., in prep.), and J. Huang uses it in a separate study of the
 same source (Huang et al., in prep.). It is also used in a pulsar study
 (Kuiper et al., in prep.) and by A. Moroianu to analyse how the DM and burst
 morphology of precisely localized repeating FRBs evolve over time
-(Moroianu et al., in prep.).
+(Moroianu et al., in prep.). C. Makarytchev, an undergraduate at McGill
+University, used it to model bursts with `fitburst` in a summer project.
 
 Researchers outside the development team have contributed code. M. A. Fine
 added support for folded PSRFITS pulsar data, treating pulse phase as the time
 axis so that `fitburst` can model it. J. Huang corrected how FLITS reads
-Nançay Radio Telescope data, whose headers mislabel the recorded polarization
-products; total intensity had previously omitted half of the signal.
+polarization data from the Nançay Radio Telescope.
 
 The [public GBT reference workflow](https://dirkkuiper.github.io/flits/guided-workflow/)
 provides a downloadable burst cutout, a saved session, expected measurements,
