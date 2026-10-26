@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import unittest
+import warnings
 
 import numpy as np
 
-from flits.analysis.localization import localize_burst
+from flits.analysis.localization import _boxcar_snr, _moving_sum, _normalize_channels, _row_nanmedian, localize_burst
 
 
 def _noise(nchan: int, ntime: int, seed: int) -> np.ndarray:
@@ -162,6 +163,64 @@ class LocalizeBurstTest(unittest.TestCase):
         self.assertEqual(payload["spec_hi"], result.spec_hi)
         self.assertIsNone(payload["search_window_bins"])
         self.assertIsInstance(payload["offpulse_regions"], list)
+
+
+class FastStatisticsTest(unittest.TestCase):
+    """The fast paths must give the numbers the direct numpy calls give."""
+
+    def test_row_median_is_identical_to_nanmedian(self) -> None:
+        rng = np.random.default_rng(0)
+        for shape in ((3, 4), (64, 256), (300, 1000)):
+            for dtype in (np.float32, np.float64):
+                values = rng.standard_normal(shape).astype(dtype)
+                values[1] = np.nan
+                values[2, ::3] = np.nan
+                values[0, 0] = np.inf
+                with self.subTest(shape=shape, dtype=dtype), warnings.catch_warnings():
+                    warnings.simplefilter("ignore", RuntimeWarning)
+                    expected = np.nanmedian(values, axis=1, keepdims=True)
+                    result = _row_nanmedian(values)
+                self.assertEqual(result.dtype, expected.dtype)
+                np.testing.assert_array_equal(result, expected)
+
+    def test_moving_sum_matches_same_mode_convolution(self) -> None:
+        rng = np.random.default_rng(1)
+        for n in (5, 16, 17, 1001, 20000):
+            values = rng.standard_normal(n)
+            for width in sorted({w for w in (1, 2, 3, 8, n // 4, n // 2, n) if 1 <= w <= n}):
+                with self.subTest(n=n, width=width):
+                    expected = np.convolve(values, np.ones(width), mode="same")
+                    np.testing.assert_allclose(_moving_sum(values, width), expected, rtol=1e-12, atol=1e-9)
+
+    def test_boxcar_keeps_nan_local(self) -> None:
+        profile = np.random.default_rng(2).standard_normal(500)
+        profile[100] = np.nan
+        snr = _boxcar_snr(profile, 5)
+        self.assertTrue(np.isnan(snr[100]))
+        self.assertTrue(np.isfinite(snr[300]))
+
+    def test_channel_normalization_matches_direct_statistics(self) -> None:
+        # Quantized channels have zero MAD and fall back to the standard
+        # deviation; a column slice makes the float32 array non-contiguous,
+        # where the summation order of np.nanstd matters.
+        rng = np.random.default_rng(3)
+        full = rng.standard_normal((48, 6000)).astype(np.float32)
+        full[:16] = np.round(full[:16] * 0.3)
+        full[20] = np.nan
+        masked = full[:, 500:5500]
+        self.assertFalse(masked.flags.c_contiguous)
+
+        keep = np.ones(masked.shape[1], dtype=bool)
+        keep[2000:2100] = False
+        reference = masked[:, keep]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            center = np.nanmedian(reference, axis=1, keepdims=True)
+            scale = 1.4826 * np.nanmedian(np.abs(reference - center), axis=1, keepdims=True)
+            scale = np.where(np.isfinite(scale) & (scale > 0), scale, np.nanstd(reference, axis=1, keepdims=True))
+        expected = (masked - center) / scale
+
+        np.testing.assert_array_equal(_normalize_channels(masked, exclude=(2000, 2100)), expected)
 
 
 if __name__ == "__main__":

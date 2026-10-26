@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import sys
+import textwrap
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, NoReturn
@@ -28,6 +29,10 @@ logger = logging.getLogger("flits")
 
 LOG_LEVELS = ("debug", "info", "warning", "error")
 
+DOCS_URL = "https://dirkkuiper.github.io/flits/"
+# Plain-Markdown index of the docs for language-model tools (https://llmstxt.org).
+LLMS_TXT_URL = f"{DOCS_URL}llms.txt"
+
 # Analyses that a snapshot can record, in the order they must be recomputed.
 # Each entry maps the snapshot key to the method that regenerates it.
 _REPLAYABLE_ANALYSES: tuple[tuple[str, str], ...] = (
@@ -36,6 +41,23 @@ _REPLAYABLE_ANALYSES: tuple[tuple[str, str], ...] = (
     ("drift_analysis", "run_drift_analysis"),
     ("polarization", "run_polarization_analysis"),
 )
+
+
+class _HelpFormatter(argparse.HelpFormatter):
+    """Wrap help text at spaces only, so options and URLs are never split."""
+
+    def _fill_text(self, text: str, width: int, indent: str) -> str:
+        return textwrap.fill(
+            " ".join(text.split()),
+            width,
+            initial_indent=indent,
+            subsequent_indent=indent,
+            break_on_hyphens=False,
+            break_long_words=False,
+        )
+
+    def _split_lines(self, text: str, width: int) -> list[str]:
+        return textwrap.wrap(" ".join(text.split()), width, break_on_hyphens=False, break_long_words=False)
 
 
 def _configure_logging(level: str) -> None:
@@ -57,7 +79,7 @@ def _add_log_level(parser: argparse.ArgumentParser) -> None:
 
 def build_serve_parser(prog: str = "flits") -> argparse.ArgumentParser:
     """Return the parser for the server command."""
-    parser = argparse.ArgumentParser(prog=prog, description="Run the FLITS interface.")
+    parser = argparse.ArgumentParser(prog=prog, description="Run the FLITS interface.", formatter_class=_HelpFormatter)
     parser.add_argument(
         "--data-dir",
         default=None,
@@ -92,6 +114,7 @@ def build_replay_parser(prog: str = "flits replay") -> argparse.ArgumentParser:
     """Return the parser for the replay command."""
     parser = argparse.ArgumentParser(
         prog=prog,
+        formatter_class=_HelpFormatter,
         description=(
             "Re-run a saved session snapshot without a browser: reopen the burst "
             "it names, restore every selection it records, recompute the "
@@ -146,6 +169,7 @@ def build_demo_parser(prog: str = "flits demo") -> argparse.ArgumentParser:
     """Return the parser for the demo command."""
     parser = argparse.ArgumentParser(
         prog=prog,
+        formatter_class=_HelpFormatter,
         description=(
             "Open a prepared example burst in the interface. The first run downloads "
             "the public GBT burst from the guided workflow (42 MB, checked against its "
@@ -185,6 +209,7 @@ def build_measure_parser(prog: str = "flits measure") -> argparse.ArgumentParser
 
     parser = argparse.ArgumentParser(
         prog=prog,
+        formatter_class=_HelpFormatter,
         description=(
             "Measure bursts without a browser. Each file is loaded at --dm, masked "
             "automatically, localized automatically, and measured; give --event, "
@@ -193,6 +218,13 @@ def build_measure_parser(prog: str = "flits measure") -> argparse.ArgumentParser
             "Results go to stdout (or --output) and progress to stderr. Exit code "
             "0 means every burst was measured, 1 that at least one was not found "
             "or failed, 2 an invalid command line."
+        ),
+        epilog=(
+            "Example: flits measure burst.fil --dm 527.7 --snapshot-dir snapshots. "
+            "Check each record's status and localization.warning_flags before "
+            "using its numbers. From Python: "
+            "flits.measure_burst(path, flits.MeasureOptions(dm=...)) returns the "
+            f"same record. Docs: {DOCS_URL}user-guide/headless-measurement/"
         ),
     )
     parser.add_argument("files", nargs="+", type=Path, metavar="FILE", help="Burst files to measure.")
@@ -674,8 +706,16 @@ def _print_usage() -> None:
         "  measure  Measure bursts without a browser (JSON, JSONL or CSV)\n"
         "  replay   Re-run a saved session snapshot without a browser\n"
         "\n"
+        "examples:\n"
+        "  flits measure burst.fil --dm 527.7\n"
+        "  flits measure data/*.fil --dm 527.7 --format csv --output results.csv\n"
+        "  flits --data-dir data\n"
+        "  flits demo\n"
+        "\n"
         "Run `flits <command> --help` for command options.\n"
-        "Server options may also be passed directly: `flits --data-dir DIR`."
+        "Server options may also be passed directly: `flits --data-dir DIR`.\n"
+        f"Docs: {DOCS_URL}\n"
+        f"Docs for language models: {LLMS_TXT_URL}"
     )
 
 

@@ -1,0 +1,13 @@
+{
+  "name": "flits",
+  "displayName": "FLITS",
+  "description": "Measure fast radio bursts with FLITS instead of writing dedispersion and measurement code by hand",
+  "author": {
+    "name": "Dirk Kuiper",
+    "url": "https://github.com/DirkKuiper"
+  },
+  "homepage": "https://dirkkuiper.github.io/flits/",
+  "repository": "https://github.com/DirkKuiper/flits",
+  "license": "GPL-3.0-only",
+  "keywords": ["fast radio bursts", "FRB", "radio astronomy", "pulsars", "filterbank", "PSRFITS", "CHIME"]
+}

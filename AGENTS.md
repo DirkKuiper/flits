@@ -27,7 +27,9 @@ have; it does not search for bursts.
   MHz, DM in pc cm^-3.
 
 Docs for language models: <https://dirkkuiper.github.io/flits/llms.txt> (index)
-and <https://dirkkuiper.github.io/flits/llms-full.txt> (everything).
+and <https://dirkkuiper.github.io/flits/llms-full.txt> (everything). The same
+guidance ships as an Agent Skill for agents in other projects:
+`plugins/flits/skills/frb-analysis/SKILL.md`.
 
 ## Repository layout
 
@@ -40,6 +42,7 @@ and <https://dirkkuiper.github.io/flits/llms-full.txt> (everything).
 | `flits/measurements.py`, `flits/models.py` | Measurement computation and the result dataclasses. |
 | `flits/web/app.py`, `flits/web_static/` | FastAPI server and the plain-JavaScript interface (no build step). |
 | `tests/` | pytest suite; `conftest.py` synthesizes every input file it needs. |
+| `.claude-plugin/`, `plugins/flits/` | Claude Code plugin marketplace and the FLITS skill for coding agents; `tests/test_agent_guidance.py` checks the skill against the code. |
 | `docs/`, `mkdocs.yml` | Documentation site. |
 | `paper/` | JOSS manuscript. |
 
