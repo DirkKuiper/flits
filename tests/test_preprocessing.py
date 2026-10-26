@@ -8,6 +8,7 @@ from unittest.mock import patch
 import numpy as np
 
 from flits.io.filterbank import FilterbankInspection, load_filterbank_data
+from flits.io.psrfits import _build_stokes_i
 from flits.io.search_data import SearchHeader
 from flits.models import FilterbankMetadata
 from flits.session import BurstSession, _adaptive_jess_time_bin_limit
@@ -203,6 +204,16 @@ class ViewerAndMaskingTest(unittest.TestCase):
         self.assertEqual(metadata.header_npol, 4)
         self.assertEqual(metadata.npol, 2)
         self.assertEqual(metadata.polarization_order, "AABB")
+
+    def test_summing_8bit_polarizations_does_not_wrap(self) -> None:
+        raw = np.zeros((8, 4, 3), dtype=np.uint8)
+        raw[:, 0, :] = 200
+        raw[:, 1, :] = 100
+
+        stokes_i, npol = _build_stokes_i(raw, polarization_order="AABB")
+
+        self.assertEqual(npol, 2)
+        np.testing.assert_array_equal(stokes_i, np.full((3, 8), 300.0))
 
     def test_view_flattens_static_channel_offsets_for_display(self) -> None:
         config = ObservationConfig.from_preset(dm=0.0, preset_key="generic")
