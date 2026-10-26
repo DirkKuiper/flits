@@ -25,7 +25,7 @@ affiliations:
     index: 3
   - name: Trottier Space Institute, McGill University, 3550 University Street, Montreal, Quebec H3A 2A7, Canada
     index: 4
-date: 25 September 2026
+date: 26 October 2026
 bibliography: paper.bib
 ---
 
@@ -127,6 +127,13 @@ the data and analysis settings; the calculations can also run without opening
 a browser. This allows automated tests to exercise the measurement routines
 directly.
 
+For larger samples, `flits measure` applies the same steps to a list of files
+without a browser: it masks interference with `jess`, locates the burst in time
+and frequency, and measures signal-to-noise, peak flux density, fluence,
+widths, and arrival times. Each result records a status and warning flags, so
+bursts whose automatic selections need checking can be reopened in the
+interface. `flits demo` downloads a reference burst and opens it in the browser.
+
 FLITS reads SIGPROC filterbank files and PSRFITS search and folded data
 [@Hotan2004], and supports CHIME/FRB HDF5 products, including public catalogue
 dynamic spectra [@CHIMEFRB2021] and beamformed power data. These readers convert
@@ -165,6 +172,11 @@ still requires preserving its software environment: version records identify
 software but do not archive it. The repository supplies pinned dependencies,
 including a specific `fitburst` revision, and a public reference workflow.
 
+Trial DMs can be scored by signal-to-noise, by the burst-structure criterion of
+DM\_phase [@dmphase], or by the smoothed-structure metric of @Sutinjo2023,
+which also reports the range of DMs that the noise cannot distinguish from the
+best one.
+
 Polarization analysis accepts suitable full-Stokes polarization input files
 with known conventions, or separately prepared $Q/U$ spectra. FLITS performs weighted
 RM synthesis [@Brentjens2005; @Heald2009], which combines the polarization
@@ -181,14 +193,17 @@ User documentation and reproducible examples are available at
 
 # Research impact statement
 
-FLITS is used for FRB research within the
-[AstroFlash group](https://astroflash-frb.github.io/) and the CHIME/FRB
-Collaboration. It supports studies of burst energetics, structure in time and
-frequency, and propagation effects by bringing intensity and polarization
-measurements into a consistent workflow. Researchers can compare bursts across
-observing epochs and instruments, assess how analysis choices affect the
-results, and share reproducible analyses through saved sessions and the
-original data.
+D. Kuiper and J. Huang used FLITS to measure the bursts in a study of the
+brightest bursts of the repeating FRB 20240114A, combining observations from
+several telescopes (Kuiper et al., in prep.). FLITS is also used in a pulsar
+study (Kuiper et al., in prep.) and by A. Moroianu to fit and analyse bursts
+detected with the CHIME/FRB Outriggers (Moroianu et al., in prep.).
+
+Researchers outside the development team have contributed code. M. A. Fine
+added support for folded PSRFITS pulsar data, treating pulse phase as the time
+axis so that `fitburst` can model it. J. Huang corrected how FLITS reads
+Nançay Radio Telescope data, whose headers mislabel the recorded polarization
+products; total intensity had previously omitted half of the signal.
 
 The [public GBT reference workflow](https://dirkkuiper.github.io/flits/guided-workflow/)
 provides a downloadable burst cutout, a saved session, expected measurements,
