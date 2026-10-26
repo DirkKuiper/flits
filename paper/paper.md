@@ -196,8 +196,9 @@ User documentation and reproducible examples are available at
 D. Kuiper and J. Huang used FLITS to measure the bursts in a study of the
 brightest bursts of the repeating FRB 20240114A, combining observations from
 several telescopes (Kuiper et al., in prep.). FLITS is also used in a pulsar
-study (Kuiper et al., in prep.) and by A. Moroianu to fit and analyse bursts
-detected with the CHIME/FRB Outriggers (Moroianu et al., in prep.).
+study (Kuiper et al., in prep.) and by A. Moroianu to analyse how the DM and
+burst morphology of precisely localized repeating FRBs evolve over time
+(Moroianu et al., in prep.).
 
 Researchers outside the development team have contributed code. M. A. Fine
 added support for folded PSRFITS pulsar data, treating pulse phase as the time
