@@ -213,11 +213,11 @@ class SigprocFile:
         count = max(0, min(int(nsamp), header.nspectra - nstart))
         values_per_spectrum = header.nchans * header.npol
         offset = self.header_size + nstart * values_per_spectrum * self.dtype.itemsize
-        data = np.fromfile(self.path, dtype=self.dtype, count=count * values_per_spectrum, offset=offset)
-        if data.size != count * values_per_spectrum:
+        flat = np.fromfile(self.path, dtype=self.dtype, count=count * values_per_spectrum, offset=offset)
+        if flat.size != count * values_per_spectrum:
             raise CorruptedDataError("SIGPROC data block is shorter than its header implies", path=self.path)
-        data = data.reshape(count, header.npol, header.nchans)
-        return data[:, 0, :] if header.npol == 1 else data
+        spectra = flat.reshape(count, header.npol, header.nchans)
+        return spectra[:, 0, :] if header.npol == 1 else spectra
 
 
 @contextmanager
