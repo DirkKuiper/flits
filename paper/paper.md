@@ -41,12 +41,11 @@ material through which its radiation has travelled.
 FLITS (Fast-Look Interactive Transient Suite) is an open-source Python package
 with a browser interface for analysing detected bursts. It brings data
 inspection, interference removal, measurement, and modelling into a single
-interactive session. It also acts as a wrapper around existing tools, including
-`your` [@Aggarwal2020] for reading data, `jess` [@Kania2026] for interference
-mitigation, and optional `fitburst` [@fitburst] modelling, so users can apply
-them to the same selected data without moving between separate programs.
-This approach can be extended to other analysis packages by writing adapters
-that use the same prepared data and session settings.
+interactive session. It reads the data and masks interference itself, and
+wraps optional `fitburst` [@fitburst] modelling, so users can apply it to the
+same selected data without moving between separate programs. Other analysis
+packages can be added through adapters that use the same prepared data and
+session settings.
 
 FLITS saves the measurement settings, selected data regions, excluded frequency
 channels, and calibration inputs in a portable session file. Together with the
@@ -107,15 +106,16 @@ and statistical modelling of astronomical light curves. These tools provide
 complementary ways to study transient signals.
 
 FLITS connects data preparation, selected specialist tools, and its own
-measurements through a shared session. It uses `your` [@Aggarwal2020] to read
-common radio data formats and `jess` [@Kania2026] for interference mitigation,
-and passes the selected dynamic spectrum to `fitburst` for optional modelling.
+measurements through a shared session. Its readers are tested against `your`
+[@Aggarwal2020], its automatic masking follows the per-channel statistical
+tests of `jess` [@Kania2026], and it passes the selected dynamic spectrum to
+`fitburst` for optional modelling.
 Its own RM-synthesis implementation is checked against an RM-Tools [@rmtools]
 reference dataset. A separate workbench is useful because the shared preparation and
-analysis record span several specialist packages and file formats. The existing
-wrappers are examples of this architecture: developers can integrate further
-tools through Python adapters, following the `fitburst` integration, while
-reusing the session's selections and calibration. Its main contribution is to
+analysis record span several specialist packages and file formats. The
+`fitburst` integration is an example of this architecture: developers can add
+further tools through Python adapters that reuse the session's selections and
+calibration. Its main contribution is to
 retain those choices alongside measurements, so the interactive workflow can
 be inspected and supported calculations repeated.
 
@@ -128,7 +128,7 @@ a browser. This allows automated tests to exercise the measurement routines
 directly.
 
 For larger samples, `flits measure` applies the same steps to a list of files
-without a browser: it masks interference with `jess`, locates the burst in time
+without a browser: it masks interference, locates the burst in time
 and frequency, and measures signal-to-noise, peak flux density, fluence,
 widths, and arrival times. Each result records a status and warning flags, so
 bursts whose automatic selections need checking can be reopened in the
@@ -220,8 +220,8 @@ Generative AI tools (OpenAI Codex/ChatGPT, Anthropic Claude Code, Google Gemini,
 
 FLITS builds on the scientific Python ecosystem, particularly NumPy
 [@Harris2020], SciPy [@Virtanen2020], Astropy [@Astropy2022], and Matplotlib
-[@Hunter2007], and on `your` [@Aggarwal2020] and `jess` [@Kania2026] for data
-input and interference mitigation.
+[@Hunter2007]. Its readers and interference masking replace `your`
+[@Aggarwal2020] and `jess` [@Kania2026], which earlier versions used.
 
 The AstroFlash research group at McGill University, University of Amsterdam,
 ASTRON, and JIVE is supported by: a Canada Excellence Research Chair in
