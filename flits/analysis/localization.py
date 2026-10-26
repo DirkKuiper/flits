@@ -88,6 +88,37 @@ def _robust_stats(values: np.ndarray) -> tuple[float, float]:
     return center, scale
 
 
+def _row_nanmedian(values: np.ndarray) -> np.ndarray:
+    """``np.nanmedian(values, axis=1, keepdims=True)``, without its slow path.
+
+    Masked channels are whole NaN rows, and any NaN sends ``np.nanmedian``
+    through a Python loop over rows. Complete rows go to ``np.median`` in one
+    call instead, and only rows with some values missing use ``np.nanmedian``.
+    """
+    present = ~np.isnan(values)
+    complete = present.all(axis=1)
+    partial = present.any(axis=1) & ~complete
+    result = np.full((values.shape[0], 1), np.nan, dtype=np.result_type(values.dtype, np.float16))
+    if complete.any():
+        result[complete, 0] = np.median(values[complete], axis=1)
+    if partial.any():
+        result[partial, 0] = np.nanmedian(values[partial], axis=1)
+    return result
+
+
+def _moving_sum(values: np.ndarray, width: int) -> np.ndarray:
+    """``np.convolve(values, np.ones(width), mode="same")`` from a running sum.
+
+    Direct convolution costs grow with `width`, and the boxcar search reaches a
+    quarter of the time series; a running sum costs the same for every width.
+    """
+    n = values.size
+    offset = (width - 1) // 2
+    running = np.concatenate(([0.0], np.cumsum(values, dtype=float)))
+    index = np.arange(n)
+    return running[np.minimum(index + offset, n - 1) + 1] - running[np.maximum(index + offset - width + 1, 0)]
+
+
 def _normalize_channels(masked: np.ndarray, exclude: tuple[int, int] | None) -> np.ndarray:
     """Per-channel robust z-scores, with stats taken outside `exclude`."""
     reference = masked
@@ -99,10 +130,15 @@ def _normalize_channels(masked: np.ndarray, exclude: tuple[int, int] | None) -> 
             reference = masked[:, keep]
     with np.errstate(invalid="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
-        center = np.nanmedian(reference, axis=1, keepdims=True)
-        scale = 1.4826 * np.nanmedian(np.abs(reference - center), axis=1, keepdims=True)
-        fallback = np.nanstd(reference, axis=1, keepdims=True)
-    scale = np.where(np.isfinite(scale) & (scale > 0), scale, fallback)
+        center = _row_nanmedian(reference)
+        scale = 1.4826 * _row_nanmedian(np.abs(reference - center))
+        # The standard deviation is only needed where the MAD is unusable,
+        # such as quantized channels. It is taken over the whole array, not
+        # the rows that need it: on a non-contiguous float32 array the two
+        # sum in different orders and differ by up to ~1e-3.
+        unusable = ~(np.isfinite(scale) & (scale > 0))
+        if unusable.any():
+            scale = np.where(unusable, np.nanstd(reference, axis=1, keepdims=True), scale)
     valid = np.isfinite(scale) & (scale > 0)
     # Keep the input precision: multi-GB float32 waterfalls must not be
     # silently doubled in memory.
@@ -146,8 +182,12 @@ def _boxcar_snr(profile_sn: np.ndarray, width: int) -> np.ndarray:
     """
     if width <= 1:
         return profile_sn.copy()
-    kernel = np.ones(int(width), dtype=float) / np.sqrt(float(width))
-    smoothed = np.convolve(profile_sn, kernel, mode="same")
+    if width <= profile_sn.size and np.isfinite(profile_sn).all():
+        smoothed = _moving_sum(profile_sn, int(width)) / np.sqrt(float(width))
+    else:
+        # A running sum would carry a NaN to every later sample.
+        kernel = np.ones(int(width), dtype=float) / np.sqrt(float(width))
+        smoothed = np.convolve(profile_sn, kernel, mode="same")
     center, scale = _robust_stats(smoothed)
     return (smoothed - center) / scale
 
