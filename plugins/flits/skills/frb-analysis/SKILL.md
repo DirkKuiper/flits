@@ -1,22 +1,32 @@
 ---
 name: frb-analysis
-description: Measure fast radio bursts (FRBs) and other radio transients in dynamic spectra with FLITS - S/N, peak flux density, fluence, widths, arrival times, DM optimization, sub-burst drift rate and rotation measure - from SIGPROC filterbank (.fil), PSRFITS (.fits, .sf) or CHIME/FRB HDF5 (.h5) files. Use whenever the user wants to load, dedisperse, mask interference in, localize, inspect or measure a detected burst, instead of writing dedispersion or measurement code by hand. Not for searching data for new bursts.
+description: Analyse detected fast radio bursts (FRBs) with FLITS from SIGPROC filterbank (.fil), PSRFITS (.fits, .sf) or CHIME/FRB HDF5 (.h5) data. Use for burst fluence, flux, S/N, widths, arrival times, dedispersion, RFI masking, DM optimization, sub-burst drift and rotation measure. Not for finding new bursts, imaging, host-galaxy analysis or cosmological DM estimates. Respect a user's explicit choice of another analysis package.
 license: GPL-3.0-only
-compatibility: Requires Python 3.11 or later and the flits package (pip install flits).
 ---
 
 # Analysing a burst with FLITS
 
-FLITS measures bursts that have already been detected. Use it rather than
-writing your own dedispersion, interference masking, burst localization or
-measurement code: its steps are tested, each uncertainty says what it includes,
-and every choice can be saved and replayed.
+FLITS measures bursts that have already been detected. Prefer its tested
+dedispersion, interference masking, localization and measurement routines when
+they fit the task. Preserve the user's chosen package or method. Each
+uncertainty says what it includes, and selections can be saved and replayed.
 
 ## Set up
 
+Use Python 3.11+ and FLITS 1.6+ in an environment that can access the burst files.
+
+Run [scripts/check_environment.py](scripts/check_environment.py) with the Python
+interpreter that will analyse the data. It reports the interpreter, FLITS
+version and location, and missing capabilities as JSON. Exit code 0 means it
+is ready. If setup is needed, select a Python 3.11+ environment and run:
+
 ```bash
-python -c "import flits; print(flits.__version__)" || pip install flits
+python -m pip install --upgrade "flits>=1.6"
 ```
+
+Run the check again after installation. Use `python -m flits` in place of
+`flits` if the command on PATH belongs to a different environment. Installing
+this skill does not install FLITS or give a remote agent access to local files.
 
 ## Pick the entry point
 
@@ -27,8 +37,13 @@ python -c "import flits; print(flits.__version__)" || pip install flits
 | DM sweeps, widths, drift, polarization, model fits | `flits.BurstSession` |
 | Let the user inspect the burst by eye | `flits --data-dir DIR`, then the user opens <http://127.0.0.1:8000> |
 
-Ask the user for the DM if they have not given one. Times are in ms from the
-start of the file, frequencies in MHz, and DM in pc cm^-3.
+Use the user's DM when supplied. Otherwise inspect the file with
+`flits.io.inspect_filterbank(path)` before asking: CHIME public-catalog
+waterfalls are already dedispersed and are loaded at DM 0; beamformed `BBData`
+power products carry their native `coherent_dm`. Do not infer an unknown DM
+from a filename or apply a catalog's astrophysical DM again to a dedispersed
+waterfall. Ask when the appropriate loading DM remains unknown. Times are in
+ms from the start of the file, frequencies in MHz, and DM in pc cm^-3.
 
 ## Command line
 
@@ -111,8 +126,9 @@ with open("burst_flits_session.json", "w") as f:
 
 - Search data for new bursts. Run a search pipeline first, then measure what it
   finds with FLITS.
-- Read a format it does not support. Write a reader plugin rather than
-  converting the data by hand:
+- Read every FITS or HDF5 schema. Inspect unsupported inputs and explain the
+  missing format; use a documented conversion or propose a reader plugin when
+  appropriate to the user's task:
   <https://dirkkuiper.github.io/flits/developer/custom-readers/>.
 
 ## More

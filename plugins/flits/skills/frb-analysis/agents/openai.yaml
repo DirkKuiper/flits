@@ -1,0 +1,4 @@
+interface:
+  display_name: "FLITS radio burst analysis"
+  short_description: "Measure detected radio bursts with FLITS"
+  default_prompt: "Use $frb-analysis to inspect and measure my detected radio burst with FLITS."

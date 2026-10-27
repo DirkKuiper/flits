@@ -3,5 +3,13 @@ include README.md
 include requirements*.txt
 graft flits/web_static
 graft docs
+graft plugins/flits
+include .agents/plugins/marketplace.json
+include .claude-plugin/marketplace.json
+include tools/install_agent_skill.py
+include tools/evaluate_agent_skill.py
+graft evals/agent-skill
+include tests/conftest.py
 graft tests/fixtures/compatibility
 global-exclude .DS_Store
+global-exclude *.pyc *.pyo

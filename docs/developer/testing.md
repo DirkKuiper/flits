@@ -89,6 +89,15 @@ python -m pytest -m "not e2e"
 These are behavioural tests. The older `test_frontend_*.py` files assert on the
 text of `app.js` and are gradually being replaced by these.
 
+## Agent integration
+
+`tests/test_agent_guidance.py` runs the skill's analysis examples and checks its
+entry points. `tests/test_agent_installation.py` installs the complete skill into
+temporary projects for each supported agent and checks setup failures. These
+tests verify the package and instructions; they do not establish how often a
+model selects FLITS. Use the separate [Agent Evaluations](agent-evaluations.md)
+protocol to measure selection and scientific use from recorded agent runs.
+
 ## Lint, format and type check
 
 ```bash
