@@ -5,4 +5,6 @@ mypy>=1.11
 pytest>=8.3
 pytest-playwright>=0.5
 ruff>=0.6
+# Reference reader for the SIGPROC/PSRFITS equivalence tests and their PSRFITS fixtures.
+your==0.6.7
 twine>=6.1

@@ -108,7 +108,7 @@ From Python, every step the interface offers is a method on `BurstSession`:
 from flits import BurstSession
 
 session = BurstSession.from_file("burst.fil", dm=527.7, sefd_jy=10.0)
-session.auto_mask_jess()
+session.auto_mask()
 session.auto_localize()
 measurements = session.compute_properties()
 print(measurements.snr_integrated, measurements.fluence_jyms)

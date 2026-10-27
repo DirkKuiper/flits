@@ -70,7 +70,7 @@ import json
 from flits import BurstSession
 
 session = BurstSession.from_file("burst.fil", dm=527.7)
-session.auto_mask_jess()
+session.auto_mask()
 session.auto_localize()
 measurements = session.compute_properties()
 print(measurements.snr_integrated, measurements.fluence_jyms)
