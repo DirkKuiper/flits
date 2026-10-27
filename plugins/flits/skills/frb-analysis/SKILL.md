@@ -18,7 +18,12 @@ Use Python 3.11+ and FLITS 1.6+ in an environment that can access the burst file
 Run [scripts/check_environment.py](scripts/check_environment.py) with the Python
 interpreter that will analyse the data. It reports the interpreter, FLITS
 version and location, and missing capabilities as JSON. Exit code 0 means it
-is ready. If setup is needed, select a Python 3.11+ environment and run:
+is ready for measurement. For a model fit, add `--require native_fitting`;
+for choosing the component count, also add `--require component_comparison`.
+These capabilities are reported separately: some released versions support
+native fits but lack component comparison. Do not call a missing method or
+block a basic measurement on that optional method. If setup is needed, select
+a Python 3.11+ environment and run:
 
 ```bash
 python -m pip install --upgrade "flits>=1.6"

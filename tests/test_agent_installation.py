@@ -75,6 +75,38 @@ def test_environment_check_accepts_the_supported_checkout() -> None:
     report = runpy.run_path(str(CHECK))["check_environment"]()
     assert report["ready"], report["problems"]
     assert Path(report["flits_path"]).resolve() == ROOT / "flits" / "__init__.py"
+    assert all(report["capabilities"].values())
+
+
+def test_optional_component_comparison_does_not_block_basic_measurement(monkeypatch) -> None:
+    import flits
+
+    check = runpy.run_path(str(CHECK))["check_environment"]
+    # Published FLITS 1.6 includes the native fitter but not the newer comparison method.
+    session = type(
+        "PublishedSession",
+        (),
+        {
+            name: getattr(flits.BurstSession, name)
+            for name in ("from_file", "auto_mask", "auto_localize", "compute_properties", "fit_model")
+        },
+    )
+    package = SimpleNamespace(
+        __version__="1.6.0",
+        __file__=flits.__file__,
+        BurstSession=session,
+        MeasureOptions=flits.MeasureOptions,
+        measure_burst=flits.measure_burst,
+        measure_bursts=flits.measure_bursts,
+    )
+    monkeypatch.setitem(sys.modules, "flits", package)
+    report = check()
+    assert report["ready"], report["problems"]
+    assert report["capabilities"] == {"native_fitting": True, "component_comparison": False}
+    assert check(("native_fitting",))["ready"]
+    missing = check(("component_comparison",))
+    assert not missing["ready"]
+    assert any("component_comparison" in problem for problem in missing["problems"])
 
 
 def test_environment_check_explains_an_unsupported_interpreter(monkeypatch) -> None:

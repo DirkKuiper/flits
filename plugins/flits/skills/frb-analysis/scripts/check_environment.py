@@ -6,6 +6,7 @@ useful result. It never installs packages or changes the environment itself.
 
 from __future__ import annotations
 
+import argparse
 import importlib
 import json
 import re
@@ -14,9 +15,10 @@ from typing import Any
 
 MINIMUM_VERSION = (1, 6, 0)
 INSTALL_COMMAND = 'python -m pip install --upgrade "flits>=1.6"'
+OPTIONAL_CAPABILITIES = ("native_fitting", "component_comparison")
 
 
-def check_environment() -> dict[str, Any]:
+def check_environment(required: tuple[str, ...] = ()) -> dict[str, Any]:
     report: dict[str, Any] = {
         "ready": False,
         "python": sys.executable,
@@ -24,6 +26,7 @@ def check_environment() -> dict[str, Any]:
         "flits_version": None,
         "flits_path": None,
         "problems": [],
+        "capabilities": dict.fromkeys(OPTIONAL_CAPABILITIES, False),
         "install_command": INSTALL_COMMAND,
     }
     problems: list[str] = report["problems"]
@@ -41,17 +44,34 @@ def check_environment() -> dict[str, Any]:
             if not callable(getattr(flits, name, None)):
                 problems.append(f"Missing Python entry point: flits.{name}")
         session = getattr(flits, "BurstSession", None)
-        for name in ("from_file", "auto_mask", "auto_localize", "compute_properties", "compare_model_components"):
+        for name in ("from_file", "auto_mask", "auto_localize", "compute_properties"):
             if not callable(getattr(session, name, None)):
                 problems.append(f"Missing session method: BurstSession.{name}")
+        report["capabilities"]["component_comparison"] = callable(getattr(session, "compare_model_components", None))
+        if callable(getattr(session, "fit_model", None)):
+            try:
+                fitter = importlib.import_module("flits.analysis.fitting.model_fit")
+                report["capabilities"]["native_fitting"] = getattr(fitter, "FITTER_NAME", None) == "flits"
+            except Exception:
+                # A fitting dependency must not block an otherwise usable measurement environment.
+                pass
     except Exception as exc:
         problems.append(f"Cannot load FLITS: {type(exc).__name__}: {exc}")
+    for name in required:
+        if not report["capabilities"].get(name, False):
+            problems.append(
+                f"Installed FLITS lacks requested capability: {name}. "
+                "Use a FLITS release or source checkout that provides it; basic measurement may still be available."
+            )
     report["ready"] = not problems
     return report
 
 
-def main() -> int:
-    report = check_environment()
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--require", action="append", choices=OPTIONAL_CAPABILITIES, default=[])
+    args = parser.parse_args(argv)
+    report = check_environment(tuple(args.require))
     print(json.dumps(report, indent=2))
     return 0 if report["ready"] else 1
 

@@ -132,6 +132,11 @@ to save a session with `--snapshot-dir` so its selections can be inspected
 in the interface. See [Headless Measurement](headless-measurement.md) and
 [Uncertainties](uncertainties.md).
 
+The checker reports optional fitting capabilities separately. Basic measurement
+does not require component comparison, which is absent from some releases.
+For a fitting task, pass `--require native_fitting`; add
+`--require component_comparison` only when choosing a component count.
+
 ## Project instructions and documentation
 
 If an agent does not support skills, put a scoped instruction in the research
