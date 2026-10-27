@@ -1,5 +1,6 @@
 include LICENSE
 include README.md
+include AGENTS.md CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md CITATION.cff
 include requirements*.txt
 graft flits/web_static
 graft flits/schemas
