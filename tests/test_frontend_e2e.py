@@ -171,6 +171,35 @@ def test_a_model_fit_runs_from_the_fitting_tab(page, synthetic_waterfall) -> Non
     assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
 
 
+def test_a_capped_fit_can_resume_from_its_candidate(page, synthetic_waterfall) -> None:
+    _load_session(page, synthetic_waterfall)
+    page.click("#autoLocalizeButton")
+    page.click("#analysisFittingTab")
+    expect(page.locator("#fitModelButton")).to_be_enabled(timeout=60_000)
+    page.evaluate("document.querySelector('#fitMaxEvaluationsInput').closest('details').open = true")
+    page.fill("#fitMaxEvaluationsInput", "2")
+    page.click("#fitModelButton")
+    content = page.locator("#fittingContent")
+    expect(content).to_contain_text("Evaluation budget reached", timeout=60_000)
+    expect(page.locator("#fitSeedPreviousInput")).to_be_enabled()
+    expect(content).not_to_contain_text("Model fit accepted")
+
+    page.fill("#fitMaxEvaluationsInput", "1000")
+    page.check("#fitSeedPreviousInput")
+    with page.expect_response(
+        lambda response: "/actions" in response.url and response.request.method == "POST"
+    ) as response:
+        page.click("#fitModelButton")
+    fit = response.value.json()["view"]["results"]["diagnostics"]["model_fit"]
+    assert fit["status"] == "ok"
+    assert fit["fitter"] == "flits"
+    assert fit["initial_parameter_source"] == "previous_fit"
+    assert fit["max_function_evaluations"] == 1000
+    expect(content).to_contain_text("Model fit accepted", timeout=60_000)
+    expect(content).to_contain_text("FLITS native")
+    assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
+
+
 def test_component_counts_are_compared_and_a_fit_can_be_kept(page, synthetic_waterfall) -> None:
     _load_session(page, synthetic_waterfall)
     page.click("#autoLocalizeButton")

@@ -1502,7 +1502,7 @@ class BurstSession:
         freqs_mhz: np.ndarray,
         event_window_ms: tuple[float, float],
     ) -> dict[str, list[float]] | None:
-        if previous_fit is None or getattr(previous_fit, "status", None) != "ok":
+        if previous_fit is None or getattr(previous_fit, "status", None) not in {"ok", "evaluation_limit_exceeded"}:
             return None
         previous_parameters = getattr(previous_fit, "bestfit_parameters", None) or {}
         if not previous_parameters:

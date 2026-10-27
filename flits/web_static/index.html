@@ -481,7 +481,7 @@
               <div id="fitParameterSummary" class="fit-parameter-summary"></div>
               <div id="fitModelSummary" class="fit-model-summary"></div>
               <div class="fit-advanced-options">
-                <label class="checkbox-label" data-tooltip="Seed this run from the previous successful model fit in this session when available.">
+                <label class="checkbox-label" data-tooltip="Start from the previous fit's best parameters, including a candidate that stopped at its evaluation limit. A candidate must still converge before its measurements are accepted.">
                   <input id="fitSeedPreviousInput" type="checkbox"> Seed from Previous Fit
                 </label>
                 <label class="checkbox-label" data-tooltip="Derive per-channel amplitudes from the data. Amplitude and spectral-shape terms are not optimizer parameters in this mode.">
@@ -518,7 +518,7 @@
                     <input id="fitIterationsInput" type="number" min="1" max="20" step="1" value="1">
                   </label>
                   <label class="field">
-                    <span>Max Evaluations <span class="tooltip-icon" data-tooltip="Maximum residual evaluations per optimizer pass. Auto uses SciPy's default, 100 x free parameter count.">?</span></span>
+                    <span>Max Evaluations <span class="tooltip-icon" data-tooltip="Maximum residual evaluations per optimizer pass. Auto allows at least 1,000 evaluations, or 100 x the number of fitted values for larger models. Converged fits stop early; an explicit value overrides Auto.">?</span></span>
                     <input id="fitMaxEvaluationsInput" type="number" min="1" max="50000" step="1" placeholder="auto">
                   </label>
                   <label class="field">
