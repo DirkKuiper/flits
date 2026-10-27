@@ -3602,6 +3602,7 @@ function exportModelFitSolution() {
     return
   }
   const payload = {
+    status: modelFit.status,
     model_parameters: modelFit.bestfit_parameters || {},
     fit_statistics: modelFit.fit_statistics || {},
     fit_logistics: {

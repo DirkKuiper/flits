@@ -2650,9 +2650,12 @@ class BurstSession:
         }
 
     def _model_fit_component_widths_ms(self) -> np.ndarray:
-        if self.results is None or self.results.diagnostics.model_fit is None:
+        model_fit = None if self.results is None else self.results.diagnostics.model_fit
+        # A fit that stopped at its evaluation limit keeps its candidate for
+        # continuation; only a converged fit is a model-based cross-check.
+        if model_fit is None or model_fit.status != "ok":
             return np.array([], dtype=float)
-        bestfit = self.results.diagnostics.model_fit.bestfit_parameters or {}
+        bestfit = model_fit.bestfit_parameters or {}
         widths_sec = np.asarray(bestfit.get("burst_width", []), dtype=float)
         widths_sec = widths_sec[np.isfinite(widths_sec) & (widths_sec > 0)]
         return widths_sec * 1e3
