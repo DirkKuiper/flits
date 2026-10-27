@@ -27,7 +27,7 @@ from flits.analysis.dm_optimization import (
 )
 from flits.analysis.drift import DriftAnalysisInputs, run_drift_analysis
 from flits.analysis.fitting import fit_model_selected_band
-from flits.analysis.fitting.fitburst_adapter import ModelFitRequestConfig
+from flits.analysis.fitting.model_fit import ModelFitRequestConfig
 from flits.analysis.localization import BurstLocalization, localize_burst
 from flits.analysis.morphology import compute_width_analysis
 from flits.analysis.polarization import extract_normalized_linear_spectrum, run_rm_synthesis
@@ -2488,7 +2488,7 @@ class BurstSession:
         return self.results
 
     def fit_model(self, config_data: dict[str, Any] | None = None) -> BurstMeasurements:
-        """Fit a burst model to the selected event using fitburst."""
+        """Fit the fitburst burst model to the selected event."""
         if self.results is None:
             self.compute_properties()
         assert self.results is not None

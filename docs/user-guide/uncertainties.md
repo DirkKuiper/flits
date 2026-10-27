@@ -11,7 +11,7 @@ uncertainty, the explanation says how to add it.
 | --- | --- | --- |
 | 1σ | `formal_1sigma` | A 1σ uncertainty including every term FLITS knows about, for example a fluence's radiometer noise and SEFD calibration uncertainty combined in quadrature. |
 | 1σ statistical | `statistical_only` | A 1σ statistical uncertainty: radiometer noise, or the scatter of Monte Carlo trials. A known systematic, such as the SEFD calibration uncertainty, was not supplied and is not included. |
-| 1σ fit | `model_hessian` | A 1σ uncertainty from a model fit's covariance: fitburst parameters and the PSD power law. It assumes the model describes the data. |
+| 1σ fit | `model_hessian` | A 1σ uncertainty from a model fit's covariance: burst-model parameters and the PSD power law. It assumes the model describes the data. |
 | resolution | `resolution_limit` | Half a time or frequency bin, for quantities read off the sampling grid such as the peak-bin arrival time and the ACF widths. It bounds the error; it is not a standard deviation. |
 | fit width | `heuristic_local_fit` | The width of the fitted peak of a DM sweep's score (integrated S/N or DMphase): how sharply the metric peaks. |
 | range | `conservative_bound` | The [smoothed-structure DM range](../analysis/dm-optimization.md#smoothed-structure-sutinjo-et-al-2023): the DMs the noise cannot distinguish from the best one. It is wide, several times the scatter of the best DM. |

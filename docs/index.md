@@ -66,12 +66,6 @@ flits --data-dir /path/to/filterbanks --host 127.0.0.1 --port 8123
 
 Then open `http://127.0.0.1:8123`.
 
-If you want optional selected-event model fitting as well:
-
-```bash
-pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3ec7bc21951ce1b4a26a0255096b69.tar.gz"
-```
-
 ## Start here
 
 - Use [Quickstart](getting-started.md) if you want the shortest path from

@@ -24,9 +24,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # Install dependencies first so edits to flits/ don't bust this layer.
 # BuildKit cache mount keeps pip's wheel cache across builds without bloating the image.
-COPY requirements.txt requirements-full.txt ./
+COPY requirements.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements-full.txt
+    pip install -r requirements.txt
 
 # Then install the project itself; --no-deps skips re-resolving requirements.
 COPY pyproject.toml README.md MANIFEST.in ./

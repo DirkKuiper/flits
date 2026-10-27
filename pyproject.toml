@@ -167,7 +167,6 @@ module = [
   "flits.analysis.spectral.core",
   "flits.analysis.polarization.rm_synthesis",
   "flits.analysis.dm_optimization.core",
-  "flits.analysis.fitting.fitburst_adapter",
 ]
 ignore_errors = true
 

@@ -17,16 +17,6 @@ Run it against a directory of filterbanks:
 flits --data-dir /path/to/filterbanks --host 127.0.0.1 --port 8123
 ```
 
-## Optional fitburst support
-
-`fitburst` is intentionally not included in the PyPI runtime metadata because
-public package indexes do not accept direct URL runtime dependencies. If you
-want FLITS's optional selected-event model fitting:
-
-```bash
-pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3ec7bc21951ce1b4a26a0255096b69.tar.gz"
-```
-
 ## Local checkout
 
 If you are developing locally or want to run from a source checkout:

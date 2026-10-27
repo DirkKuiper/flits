@@ -8,13 +8,6 @@ This page is the shortest path from install to a working FLITS session.
 pip install flits
 ```
 
-Optional model fitting is powered by `fitburst` and must currently be installed
-separately:
-
-```bash
-pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3ec7bc21951ce1b4a26a0255096b69.tar.gz"
-```
-
 ## 2. Try the demo
 
 To see FLITS on a real burst before using your own data:

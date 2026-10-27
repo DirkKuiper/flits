@@ -66,7 +66,7 @@ file and selections are identical. JSON or HDF5 alone cannot prevent that.
 
 Starting with session schema **1.7** and export schema **1.9**, FLITS captures
 the FLITS and Python versions, operating system and architecture, installed
-package versions (including optional `fitburst`), and available source
+package versions, and available source
 identities. Direct Git installs include their recorded commit; source/archive
 installs include available installer metadata. FLITS source is fingerprinted,
 with its commit and whether its package files are modified when Git is
@@ -112,7 +112,7 @@ For an analysis you intend to publish, preserve:
 - The original input data and the session JSON, including its source checksum.
 - The export bundle containing the values, arrays, and plots you actually use.
 - The exact FLITS release or source commit and the analysis environment:
-  Python and dependency versions, including the `fitburst` revision if used.
+  Python and dependency versions.
 
 For example, run these commands **in the environment that performed the
 analysis**, and keep their outputs beside the snapshot:

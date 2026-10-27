@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import json
-import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import numpy as np
 
-from flits.analysis.fitting import fitburst_adapter
-from flits.analysis.fitting.fitburst_adapter import ModelFitRequestConfig, ModelFitResult, SpectrumModeler
+from flits.analysis.fitting import model_fit
+from flits.analysis.fitting.burst_model import BurstModel, BurstParameters
+from flits.analysis.fitting.least_squares import fit_burst_model
+from flits.analysis.fitting.model_fit import ModelFitRequestConfig, ModelFitResult
 from flits.models import FilterbankMetadata, ModelFitDiagnostics
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
@@ -25,28 +27,19 @@ def _synthetic_scattering_session() -> tuple[BurstSession, float, float]:
     width_sec = 0.0012
     tau_sec = 0.0024
 
-    model = SpectrumModeler(
-        freqs,
-        times_sec,
-        dm_incoherent=0.0,
-        num_components=1,
-        is_dedispersed=True,
+    model = BurstModel(freqs, times_sec)
+    clean = model.evaluate(
+        BurstParameters.from_dict(
+            {
+                "amplitude": [1.05],
+                "arrival_time": [times_sec[260]],
+                "burst_width": [width_sec],
+                "ref_freq": [float(np.min(freqs))],
+                "scattering_timescale": [tau_sec],
+            }
+        )
     )
-    model.update_parameters(
-        {
-            "amplitude": [1.05],
-            "arrival_time": [times_sec[260]],
-            "burst_width": [width_sec],
-            "dm": [0.0],
-            "dm_index": [-2.0],
-            "ref_freq": [float(np.min(freqs))],
-            "scattering_timescale": [tau_sec],
-            "scattering_index": [-4.0],
-            "spectral_index": [0.0],
-            "spectral_running": [0.0],
-        }
-    )
-    data = model.compute_model() + rng.normal(0.0, 0.35, size=(freqs.size, num_time_bins))
+    data = clean + rng.normal(0.0, 0.35, size=(freqs.size, num_time_bins))
 
     metadata = FilterbankMetadata(
         source_path=Path("synthetic_scattering.fil"),
@@ -121,177 +114,56 @@ def _synthetic_scattering_dispatch_session() -> BurstSession:
     )
 
 
-class _FakeSpectrumModeler:
-    instances: list[_FakeSpectrumModeler] = []
-
-    def __init__(
-        self,
-        freqs_mhz: np.ndarray,
-        times_sec: np.ndarray,
-        *,
-        dm_incoherent: float,
-        factor_freq_upsample: int = 1,
-        factor_time_upsample: int = 1,
-        num_components: int = 1,
-        is_dedispersed: bool = False,
-        is_folded: bool = False,
-        scintillation: bool = False,
-    ) -> None:
-        self.freqs_mhz = np.asarray(freqs_mhz, dtype=float)
-        self.times_sec = np.asarray(times_sec, dtype=float)
-        self.factor_freq_upsample = int(factor_freq_upsample)
-        self.factor_time_upsample = int(factor_time_upsample)
-        self.is_folded = bool(is_folded)
-        self.scintillation = bool(scintillation)
-        self.parameters: dict[str, list[float] | None] = {}
-        self.update_history: list[dict[str, list[float] | None]] = []
-        type(self).instances.append(self)
-
-    def update_parameters(self, parameters: dict[str, list[float] | None]) -> None:
-        self.parameters = {
-            key: None if values is None else [float(value) for value in np.asarray(values, dtype=float).ravel()]
-            for key, values in parameters.items()
-        }
-        self.update_history.append(self.parameters)
-
-    def compute_model(self, data: np.ndarray | None = None) -> np.ndarray:
-        if data is not None:
-            return np.zeros_like(data, dtype=float)
-        return np.zeros((self.freqs_mhz.size, self.times_sec.size), dtype=float)
+_ADAPTER_FREQS = np.linspace(1450.0, 1250.0, 6)
+_ADAPTER_OFFPULSE = np.r_[0:12, 36:48]
 
 
-class _FakeLSFitter:
-    instances: list[_FakeLSFitter] = []
-    fit_calls = 0
-    fail_on_call: int | None = None
-
-    def __init__(
-        self,
-        data: np.ndarray,
-        model: _FakeSpectrumModeler,
-        *,
-        good_freq: np.ndarray,
-        weighted_fit: bool,
-        weight_range: list[int] | None,
-    ) -> None:
-        self.data = np.asarray(data, dtype=float)
-        self.model = model
-        self.good_freq = np.asarray(good_freq, dtype=bool)
-        self.weighted_fit = bool(weighted_fit)
-        self.weight_range = weight_range
-        self.model_parameters_at_init = {
-            key: None if values is None else list(values) for key, values in model.parameters.items()
-        }
-        self.fit_parameters: list[str] = []
-        self.fit_statistics: dict[str, object] = {}
-        self.results: SimpleNamespace | None = None
-        type(self).instances.append(self)
-
-    def fix_parameter(self, fixed_parameters: list[str]) -> None:
-        fit_parameters = [
-            "amplitude",
-            "arrival_time",
-            "burst_width",
-            "scattering_timescale",
-            "dm",
-            "dm_index",
-            "scattering_index",
-            "spectral_index",
-            "spectral_running",
-        ]
-        if self.model.scintillation:
-            fit_parameters = [
-                parameter
-                for parameter in fit_parameters
-                if parameter not in {"amplitude", "spectral_index", "spectral_running"}
-            ]
-        self.fit_parameters = [parameter for parameter in fit_parameters if parameter not in fixed_parameters]
-
-    def fit(self, *, exact_jacobian: bool = True) -> None:
-        self.exact_jacobian = bool(exact_jacobian)
-        type(self).fit_calls += 1
-        call_index = type(self).fit_calls
-        if type(self).fail_on_call == call_index:
-            print("fitburst stdout before failure " + ("x" * 5000))
-            print("fitburst stderr before failure \x00\x01" + ("y" * 5000), file=sys.stderr)
-            self.results = SimpleNamespace(
-                success=False,
-                message=f"failed iteration {call_index}",
-                status=2,
-                nfev=call_index * 10,
-            )
-            self.fit_statistics = {"chisq_initial": 10.0, "num_fit_parameters": len(self.fit_parameters)}
-            return
-        self.results = SimpleNamespace(
-            success=True,
-            message=f"ok iteration {call_index}",
-            status=1,
-            nfev=call_index * 10,
+def _adapter_band(seed: int = 7) -> np.ndarray:
+    """A bright scattered burst on a (6, 48) band with unit-variance noise, 1 ms bins."""
+    times_sec = np.arange(48, dtype=float) * 1e-3
+    clean = BurstModel(_ADAPTER_FREQS, times_sec).evaluate(
+        BurstParameters.from_dict(
+            {
+                "amplitude": [1.2],
+                "arrival_time": [0.0225],
+                "burst_width": [0.0012],
+                "ref_freq": [1250.0],
+                "scattering_timescale": [0.0015],
+            }
         )
-        self._compute_fit_statistics(self.data, self.results)
-
-    def get_fit_parameters_list(self) -> list[float]:
-        return [0.0] * len(self.fit_parameters)
-
-    def compute_residuals(self, parameter_list: list[float]) -> np.ndarray:
-        return np.zeros(self.data.size, dtype=float)
-
-    def compute_jacobian(self, parameter_list: list[float]) -> np.ndarray:
-        return np.zeros((self.data.size, len(parameter_list)), dtype=float)
-
-    def _compute_fit_statistics(self, data: np.ndarray, results: SimpleNamespace) -> None:
-        call_index = max(1, type(self).fit_calls)
-        self.fit_statistics = {
-            "chisq_initial": 10.0,
-            "chisq_final": float(10.0 / call_index),
-            "num_fit_parameters": len(self.fit_parameters),
-            "bestfit_parameters": {
-                "amplitude": [float(call_index)],
-                "arrival_time": [0.018],
-                "burst_width": [0.001 + 0.0001 * call_index],
-                "scattering_timescale": [0.002 + 0.0001 * call_index],
-            },
-            "bestfit_uncertainties": {
-                "burst_width": [0.00001],
-                "scattering_timescale": [0.00002],
-            },
-        }
+    )
+    return clean + np.random.default_rng(seed).normal(0.0, 1.0, size=clean.shape)
 
 
-def _run_fake_fitburst_fit(
-    *,
-    iterations: int,
-    fitter_class: type[_FakeLSFitter] = _FakeLSFitter,
+def _run_adapter_fit(
     config: ModelFitRequestConfig | None = None,
-) -> ModelFitResult:
-    rng = np.random.default_rng(7)
-    data = rng.normal(0.0, 1.0, size=(6, 48))
-    data[:, 20:26] += 6.0
-
-    _FakeLSFitter.instances = []
-    _FakeLSFitter.fit_calls = 0
-    _FakeSpectrumModeler.instances = []
-    fitter_class.instances = []
-    fitter_class.fit_calls = 0
+    *,
+    fit_side_effect: Any = None,
+) -> tuple[ModelFitResult, Any, Any]:
+    """Run the selected-band fit on :func:`_adapter_band`, spying on the model and the solver."""
     with (
-        patch.object(fitburst_adapter, "SpectrumModeler", _FakeSpectrumModeler),
-        patch.object(fitburst_adapter, "LSFitter", fitter_class),
+        patch.object(model_fit, "BurstModel", wraps=BurstModel) as model_spy,
+        patch.object(
+            model_fit,
+            "fit_burst_model",
+            side_effect=fit_side_effect if fit_side_effect is not None else fit_burst_model,
+        ) as fit_spy,
     ):
-        return fitburst_adapter.fit_model_selected_band(
-            selected_band=data,
-            freqs_mhz=np.linspace(1450.0, 1250.0, data.shape[0]),
-            time_axis_ms=np.arange(data.shape[1], dtype=float),
+        result = model_fit.fit_model_selected_band(
+            selected_band=_adapter_band(),
+            freqs_mhz=_ADAPTER_FREQS,
+            time_axis_ms=np.arange(48, dtype=float),
             event_rel_start=18,
             event_rel_end=30,
-            offpulse_bins=np.r_[0:12, 36:48],
+            offpulse_bins=_ADAPTER_OFFPULSE,
             tsamp_ms=1.0,
             peak_rel_bin=23,
             width_guess_ms=1.5,
-            config=config if config is not None else ModelFitRequestConfig(iterations=iterations),
+            config=config if config is not None else ModelFitRequestConfig(),
         )
+    return result, model_spy, fit_spy
 
 
-@unittest.skipUnless(SpectrumModeler is not None, "fitburst is not installed")
 class ModelFitIntegrationTest(unittest.TestCase):
     def test_fit_model_recovers_intrinsic_width_and_scattering_time(self) -> None:
         session, expected_width_ms, expected_tau_ms = _synthetic_scattering_session()
@@ -305,12 +177,27 @@ class ModelFitIntegrationTest(unittest.TestCase):
         self.assertAlmostEqual(results.tau_sc_ms or 0.0, expected_tau_ms, delta=0.35)
         self.assertIsNotNone(results.uncertainties.width_ms_model)
         self.assertIsNotNone(results.uncertainties.tau_sc_ms)
+        # The truth lies within a few reported sigma.
+        self.assertLess(
+            abs((results.width_ms_model or 0.0) - expected_width_ms), 4 * results.uncertainties.width_ms_model
+        )
+        self.assertLess(abs((results.tau_sc_ms or 0.0) - expected_tau_ms), 4 * results.uncertainties.tau_sc_ms)
         self.assertEqual(results.uncertainty_details["width_ms_model"].classification, "model_hessian")
         self.assertEqual(results.uncertainty_details["tau_sc_ms"].classification, "model_hessian")
         self.assertEqual(
             results.diagnostics.model_fit.uncertainty_details["width_ms_model"].classification, "model_hessian"
         )
-        self.assertEqual(results.diagnostics.model_fit.fitter, "fitburst")
+        self.assertEqual(results.diagnostics.model_fit.fitter, "flits")
+        self.assertEqual(results.diagnostics.model_fit.covariance_basis, "observed_hessian")
+        self.assertEqual(
+            results.diagnostics.model_fit.parameter_labels,
+            ["amplitude1", "arrival_time1", "burst_width1", "scattering_timescale"],
+        )
+        self.assertEqual(results.diagnostics.model_fit.covariance.shape, (4, 4))
+        self.assertAlmostEqual(
+            float(np.sqrt(results.diagnostics.model_fit.covariance[2, 2])) * 1e3,
+            results.uncertainties.width_ms_model or 0.0,
+        )
         self.assertGreater(len(results.diagnostics.model_fit.time_axis_ms), 0)
         self.assertGreater(len(results.diagnostics.model_fit.freq_axis_mhz), 0)
         self.assertEqual(
@@ -367,6 +254,22 @@ class ModelFitIntegrationTest(unittest.TestCase):
         self.assertIsNotNone(unweighted.width_ms_model)
         self.assertIsNotNone(weighted.width_ms_model)
         self.assertAlmostEqual(weighted.width_ms_model or 0.0, unweighted.width_ms_model or 0.0, delta=0.5)
+
+    def test_diagnostics_keep_microsecond_parameters_through_serialization(self) -> None:
+        session, _, _ = _synthetic_scattering_session()
+        diagnostics = session.fit_model().diagnostics.model_fit
+
+        payload = json.loads(json.dumps(diagnostics.to_dict()))
+        restored = ModelFitDiagnostics.from_dict(payload)
+
+        width_uncertainty = diagnostics.bestfit_uncertainties["burst_width"][0]
+        self.assertLess(width_uncertainty, 1e-4)
+        self.assertAlmostEqual(
+            restored.bestfit_uncertainties["burst_width"][0], width_uncertainty, delta=1e-9 * width_uncertainty
+        )
+        self.assertEqual(restored.parameter_labels, diagnostics.parameter_labels)
+        np.testing.assert_allclose(restored.covariance, diagnostics.covariance, rtol=1e-8)
+        self.assertEqual(restored.covariance_basis, diagnostics.covariance_basis)
 
 
 class ModelFitRequestConfigTest(unittest.TestCase):
@@ -487,10 +390,10 @@ class ModelFitRequestConfigTest(unittest.TestCase):
 
     def test_max_function_evaluations_clamps_to_interactive_cap(self) -> None:
         config = ModelFitRequestConfig.from_dict(
-            {"solver": {"max_function_evaluations": fitburst_adapter.MAX_MODEL_FIT_FUNCTION_EVALUATIONS + 1}}
+            {"solver": {"max_function_evaluations": model_fit.MAX_MODEL_FIT_FUNCTION_EVALUATIONS + 1}}
         )
 
-        self.assertEqual(config.max_function_evaluations, fitburst_adapter.MAX_MODEL_FIT_FUNCTION_EVALUATIONS)
+        self.assertEqual(config.max_function_evaluations, model_fit.MAX_MODEL_FIT_FUNCTION_EVALUATIONS)
 
     def test_non_positive_max_function_evaluations_uses_auto_default(self) -> None:
         self.assertIsNone(
@@ -575,112 +478,87 @@ class ModelFitRequestConfigTest(unittest.TestCase):
 
 
 class ModelFitIterationAdapterTest(unittest.TestCase):
-    def test_iterations_update_model_with_previous_bestfit_parameters(self) -> None:
-        result = _run_fake_fitburst_fit(iterations=2)
+    def test_iterations_restart_from_the_previous_best_fit(self) -> None:
+        result, _model_spy, fit_spy = _run_adapter_fit(ModelFitRequestConfig(iterations=2))
 
         self.assertEqual(result.status, "ok")
         self.assertEqual(result.diagnostics.fit_iterations_requested, 2)
         self.assertEqual(result.diagnostics.fit_iterations_completed, 2)
-        self.assertEqual(len(_FakeLSFitter.instances), 2)
-        self.assertEqual(_FakeLSFitter.instances[1].model_parameters_at_init["burst_width"], [0.0011])
-        self.assertAlmostEqual(result.diagnostics.bestfit_parameters["burst_width"][0], 0.0012)
-        self.assertAlmostEqual(result.width_ms_model or 0.0, 1.2)
+        self.assertEqual(fit_spy.call_count, 2)
+        first_start = fit_spy.call_args_list[0].args[2]
+        second_start = fit_spy.call_args_list[1].args[2]
+        self.assertNotEqual(float(first_start.burst_width[0]), float(second_start.burst_width[0]))
+        # The second pass starts at the first pass's optimum and stays there.
+        self.assertAlmostEqual(
+            result.diagnostics.bestfit_parameters["burst_width"][0], float(second_start.burst_width[0]), places=7
+        )
+        self.assertAlmostEqual(
+            result.width_ms_model or 0.0, result.diagnostics.bestfit_parameters["burst_width"][0] * 1e3
+        )
 
-    def test_model_controls_reach_spectrum_modeler_and_diagnostics(self) -> None:
-        result = _run_fake_fitburst_fit(
-            iterations=1,
-            config=ModelFitRequestConfig(
+    def test_model_controls_reach_the_model_and_diagnostics(self) -> None:
+        result, model_spy, fit_spy = _run_adapter_fit(
+            ModelFitRequestConfig(
                 iterations=1,
                 factor_time_upsample=4,
                 factor_freq_upsample=3,
                 ref_freq_mhz=1400.0,
                 is_folded=True,
                 exact_jacobian=False,
-            ),
+            )
         )
 
         self.assertEqual(result.status, "ok")
-        self.assertEqual(len(_FakeSpectrumModeler.instances), 1)
-        self.assertEqual(_FakeSpectrumModeler.instances[0].factor_time_upsample, 4)
-        self.assertEqual(_FakeSpectrumModeler.instances[0].factor_freq_upsample, 3)
-        self.assertTrue(_FakeSpectrumModeler.instances[0].is_folded)
-        self.assertFalse(_FakeLSFitter.instances[0].exact_jacobian)
+        self.assertEqual(model_spy.call_count, 1)
+        self.assertEqual(model_spy.call_args.kwargs["factor_time_upsample"], 4)
+        self.assertEqual(model_spy.call_args.kwargs["factor_freq_upsample"], 3)
+        self.assertTrue(model_spy.call_args.kwargs["is_folded"])
+        self.assertFalse(fit_spy.call_args.kwargs["exact_jacobian"])
         self.assertEqual(result.diagnostics.factor_time_upsample, 4)
         self.assertEqual(result.diagnostics.factor_freq_upsample, 3)
         self.assertEqual(result.diagnostics.ref_freq_mhz, 1400.0)
         self.assertTrue(result.diagnostics.is_folded)
         self.assertFalse(result.diagnostics.exact_jacobian)
         self.assertEqual(result.diagnostics.bestfit_parameters["ref_freq"], [1400.0])
-        self.assertEqual(_FakeLSFitter.fit_calls, 1)
+        # SciPy's default budget: 100 evaluations per fitted value.
         self.assertEqual(result.diagnostics.max_function_evaluations, 400)
-        self.assertEqual(result.diagnostics.function_evaluations, 10)
-        self.assertEqual(result.diagnostics.solver_status, 1)
-        self.assertEqual(result.diagnostics.solver_message, "ok iteration 1")
+        self.assertGreater(result.diagnostics.function_evaluations or 0, 1)
+        self.assertIn(result.diagnostics.solver_status, (1, 2, 3, 4))
+        self.assertIn("termination condition", result.diagnostics.solver_message or "")
 
-    def test_custom_max_function_evaluations_uses_scipy_path(self) -> None:
-        calls: list[dict[str, object]] = []
-
-        def fake_least_squares(fun: object, x0: list[float], *, jac: object, max_nfev: int) -> SimpleNamespace:
-            calls.append({"x0": list(x0), "jac": jac, "max_nfev": max_nfev})
-            return SimpleNamespace(success=True, message="custom budget converged", status=2, nfev=37)
-
-        with patch.object(fitburst_adapter, "least_squares", fake_least_squares):
-            result = _run_fake_fitburst_fit(
-                iterations=1,
-                config=ModelFitRequestConfig(max_function_evaluations=1234),
-            )
+    def test_custom_max_function_evaluations_reach_the_solver(self) -> None:
+        result, _model_spy, fit_spy = _run_adapter_fit(ModelFitRequestConfig(max_function_evaluations=1234))
 
         self.assertEqual(result.status, "ok")
-        self.assertEqual(_FakeLSFitter.fit_calls, 0)
-        self.assertEqual(calls[0]["max_nfev"], 1234)
-        self.assertEqual(len(calls[0]["x0"]), 4)
+        self.assertEqual(fit_spy.call_args.kwargs["max_function_evaluations"], 1234)
         self.assertEqual(result.diagnostics.max_function_evaluations, 1234)
-        self.assertEqual(result.diagnostics.function_evaluations, 37)
-        self.assertEqual(result.diagnostics.solver_status, 2)
-        self.assertEqual(result.diagnostics.solver_message, "custom budget converged")
         self.assertEqual(result.diagnostics.fit_statistics["max_function_evaluations"], 1234)
-        self.assertEqual(result.diagnostics.fit_statistics["function_evaluations"], 37)
+        self.assertEqual(
+            result.diagnostics.fit_statistics["function_evaluations"], result.diagnostics.function_evaluations
+        )
         round_tripped = ModelFitDiagnostics.from_dict(result.diagnostics.to_dict())
         self.assertEqual(round_tripped.max_function_evaluations, 1234)
-        self.assertEqual(round_tripped.function_evaluations, 37)
-        self.assertEqual(round_tripped.solver_status, 2)
-        self.assertEqual(round_tripped.solver_message, "custom budget converged")
+        self.assertEqual(round_tripped.function_evaluations, result.diagnostics.function_evaluations)
+        self.assertEqual(round_tripped.solver_status, result.diagnostics.solver_status)
+        self.assertEqual(round_tripped.solver_message, result.diagnostics.solver_message)
 
     def test_evaluation_limit_exceeded_gets_specific_failure_status(self) -> None:
-        def fake_least_squares(fun: object, x0: list[float], *, jac: object, max_nfev: int) -> SimpleNamespace:
-            return SimpleNamespace(
-                success=False,
-                message="The maximum number of function evaluations is exceeded.",
-                status=0,
-                nfev=max_nfev,
-            )
-
-        with patch.object(fitburst_adapter, "least_squares", fake_least_squares):
-            result = _run_fake_fitburst_fit(
-                iterations=1,
-                config=ModelFitRequestConfig(max_function_evaluations=5),
-            )
+        result, _model_spy, _fit_spy = _run_adapter_fit(ModelFitRequestConfig(max_function_evaluations=1))
 
         self.assertEqual(result.status, "evaluation_limit_exceeded")
         self.assertEqual(result.message, "The maximum number of function evaluations is exceeded.")
-        self.assertEqual(result.diagnostics.max_function_evaluations, 5)
-        self.assertEqual(result.diagnostics.function_evaluations, 5)
+        self.assertEqual(result.diagnostics.max_function_evaluations, 1)
+        self.assertEqual(result.diagnostics.function_evaluations, 1)
         self.assertEqual(result.diagnostics.solver_status, 0)
         self.assertEqual(result.diagnostics.solver_message, "The maximum number of function evaluations is exceeded.")
 
-    def test_large_fit_window_fails_before_fitburst_optimizer(self) -> None:
-        channels = fitburst_adapter.MIN_FIT_CHANNELS
-        time_bins = fitburst_adapter.MAX_MODEL_FIT_CELLS // channels + fitburst_adapter.MIN_FIT_TIME_BINS
+    def test_large_fit_window_fails_before_the_model_is_built(self) -> None:
+        channels = model_fit.MIN_FIT_CHANNELS
+        time_bins = model_fit.MAX_MODEL_FIT_CELLS // channels + model_fit.MIN_FIT_TIME_BINS
         data = np.zeros((channels, time_bins), dtype=float)
-        _FakeLSFitter.instances = []
-        _FakeLSFitter.fit_calls = 0
-        _FakeSpectrumModeler.instances = []
 
-        with (
-            patch.object(fitburst_adapter, "SpectrumModeler", _FakeSpectrumModeler),
-            patch.object(fitburst_adapter, "LSFitter", _FakeLSFitter),
-        ):
-            result = fitburst_adapter.fit_model_selected_band(
+        with patch.object(model_fit, "BurstModel", wraps=BurstModel) as model_spy:
+            result = model_fit.fit_model_selected_band(
                 selected_band=data,
                 freqs_mhz=np.linspace(1450.0, 1250.0, channels),
                 time_axis_ms=np.arange(time_bins, dtype=float),
@@ -695,16 +573,15 @@ class ModelFitIterationAdapterTest(unittest.TestCase):
 
         self.assertEqual(result.status, "fit_window_too_large")
         self.assertIn("channel-time samples", result.message or "")
-        self.assertEqual(_FakeLSFitter.instances, [])
-        self.assertEqual(_FakeSpectrumModeler.instances, [])
+        self.assertEqual(model_spy.call_count, 0)
 
     def test_successful_fit_downsamples_diagnostic_dynamic_spectra(self) -> None:
         with (
-            patch.object(fitburst_adapter, "MAX_MODEL_FIT_DIAGNOSTIC_CELLS", 60),
-            patch.object(fitburst_adapter, "MAX_MODEL_FIT_DIAGNOSTIC_FREQ_BINS", 4),
-            patch.object(fitburst_adapter, "MAX_MODEL_FIT_DIAGNOSTIC_TIME_BINS", 20),
+            patch.object(model_fit, "MAX_MODEL_FIT_DIAGNOSTIC_CELLS", 60),
+            patch.object(model_fit, "MAX_MODEL_FIT_DIAGNOSTIC_FREQ_BINS", 4),
+            patch.object(model_fit, "MAX_MODEL_FIT_DIAGNOSTIC_TIME_BINS", 20),
         ):
-            result = _run_fake_fitburst_fit(iterations=1)
+            result, _model_spy, _fit_spy = _run_adapter_fit()
 
         diagnostics = result.diagnostics
         self.assertEqual(result.status, "ok")
@@ -718,10 +595,9 @@ class ModelFitIterationAdapterTest(unittest.TestCase):
         self.assertEqual(diagnostics.fit_statistics["diagnostic_num_cells"], diagnostics.data_dynamic_spectrum_sn.size)
         json.dumps(diagnostics.to_dict())
 
-    def test_scintillation_reaches_modeler_and_excludes_inactive_parameters(self) -> None:
-        result = _run_fake_fitburst_fit(
-            iterations=1,
-            config=ModelFitRequestConfig.from_dict(
+    def test_scintillation_reaches_the_model_and_excludes_inactive_parameters(self) -> None:
+        result, model_spy, _fit_spy = _run_adapter_fit(
+            ModelFitRequestConfig.from_dict(
                 {
                     "scintillation": True,
                     "free_parameters": [
@@ -733,85 +609,110 @@ class ModelFitIterationAdapterTest(unittest.TestCase):
                         "spectral_running",
                     ],
                 }
-            ),
+            )
         )
 
         self.assertEqual(result.status, "ok")
-        self.assertTrue(_FakeSpectrumModeler.instances[0].scintillation)
+        self.assertTrue(model_spy.call_args.kwargs["scintillation"])
         self.assertTrue(result.diagnostics.scintillation)
         self.assertEqual(result.diagnostics.free_parameters, ["arrival_time", "burst_width", "scattering_timescale"])
         self.assertEqual(result.diagnostics.fixed_parameters, ["dm", "dm_index", "scattering_index"])
-        self.assertNotIn("amplitude", result.diagnostics.fit_parameters)
-        self.assertNotIn("spectral_index", result.diagnostics.fit_parameters)
-        self.assertNotIn("spectral_running", result.diagnostics.fit_parameters)
-        self.assertIn("arrival_time", result.diagnostics.fit_parameters)
+        self.assertEqual(result.diagnostics.fit_parameters, ["arrival_time", "burst_width", "scattering_timescale"])
+        # One solved amplitude per diagnostic channel and component.
+        self.assertEqual(result.diagnostics.channel_amplitudes.shape, (len(result.diagnostics.freq_axis_mhz), 1))
+        self.assertTrue(np.all(result.diagnostics.channel_amplitudes > 0))
+        self.assertEqual(result.diagnostics.fit_statistics["num_linear_parameters"], 6)
+        restored = ModelFitDiagnostics.from_dict(json.loads(json.dumps(result.diagnostics.to_dict())))
+        np.testing.assert_allclose(restored.channel_amplitudes, result.diagnostics.channel_amplitudes, rtol=1e-5)
 
-    def test_weighting_modes_reach_adapter_and_diagnostics(self) -> None:
-        auto = _run_fake_fitburst_fit(
-            iterations=1,
-            config=ModelFitRequestConfig.from_dict({"solver": {"weighting_mode": "auto"}}),
+    def test_weighting_modes_reach_the_solver_and_diagnostics(self) -> None:
+        auto, _model_spy, fit_spy = _run_adapter_fit(
+            ModelFitRequestConfig.from_dict({"solver": {"weighting_mode": "auto"}})
         )
         self.assertEqual(auto.diagnostics.weighting_mode, "auto")
         self.assertEqual(auto.diagnostics.weight_range_basis, "offpulse_bins")
-        self.assertFalse(_FakeLSFitter.instances[0].weighted_fit)
-        self.assertTrue(hasattr(_FakeLSFitter.instances[0], "weights"))
+        self.assertEqual(auto.diagnostics.weight_range, [0, 48])
+        auto_weights = fit_spy.call_args.kwargs["weights"]
+        self.assertTrue(np.all(auto_weights > 0))
 
-        fit_window = _run_fake_fitburst_fit(
-            iterations=1,
-            config=ModelFitRequestConfig.from_dict({"solver": {"weighting_mode": "fit_window"}}),
+        fit_window, _model_spy, fit_spy = _run_adapter_fit(
+            ModelFitRequestConfig.from_dict({"solver": {"weighting_mode": "fit_window"}})
         )
         self.assertEqual(fit_window.diagnostics.weighting_mode, "fit_window")
         self.assertEqual(fit_window.diagnostics.weight_range_basis, "fit_window")
-        self.assertTrue(_FakeLSFitter.instances[0].weighted_fit)
-        self.assertIsNone(_FakeLSFitter.instances[0].weight_range)
+        fit_data = np.asarray(fit_spy.call_args.args[1])
+        # fitburst's weights: inverse RMS over all but the last bin of the fitted window.
+        np.testing.assert_allclose(
+            fit_spy.call_args.kwargs["weights"], 1.0 / np.sqrt(np.mean(fit_data[:, :-1] ** 2, axis=1))
+        )
 
-        manual = _run_fake_fitburst_fit(
-            iterations=1,
-            config=ModelFitRequestConfig.from_dict(
-                {"solver": {"weighting_mode": "manual_range", "weight_range": [1, 5]}}
-            ),
+        manual, _model_spy, fit_spy = _run_adapter_fit(
+            ModelFitRequestConfig.from_dict({"solver": {"weighting_mode": "manual_range", "weight_range": [1, 5]}})
         )
         self.assertEqual(manual.diagnostics.weighting_mode, "manual_range")
         self.assertEqual(manual.diagnostics.weight_range_basis, "manual_range")
-        self.assertEqual(_FakeLSFitter.instances[0].weight_range, [1, 5])
+        self.assertEqual(manual.diagnostics.weight_range, [1, 5])
+        fit_data = np.asarray(fit_spy.call_args.args[1])
+        np.testing.assert_allclose(
+            fit_spy.call_args.kwargs["weights"], 1.0 / np.sqrt(np.mean(fit_data[:, 1:5] ** 2, axis=1))
+        )
+
+        unweighted, _model_spy, fit_spy = _run_adapter_fit()
+        self.assertEqual(unweighted.diagnostics.weighting_mode, "none")
+        np.testing.assert_array_equal(fit_spy.call_args.kwargs["weights"], np.ones(6))
 
     def test_failed_intermediate_iteration_returns_completed_bestfit_diagnostics(self) -> None:
-        class FailingSecondFit(_FakeLSFitter):
-            fail_on_call = 2
+        calls: list[Any] = []
 
-        result = _run_fake_fitburst_fit(iterations=3, fitter_class=FailingSecondFit)
+        def fail_second_pass(*args: Any, **kwargs: Any) -> Any:
+            fit = fit_burst_model(*args, **kwargs)
+            calls.append(fit)
+            if len(calls) == 2:
+                return replace(fit, success=False, status=2, message="failed iteration 2")
+            return fit
+
+        result, _model_spy, _fit_spy = _run_adapter_fit(
+            ModelFitRequestConfig(iterations=3), fit_side_effect=fail_second_pass
+        )
 
         self.assertEqual(result.status, "fit_failed")
         self.assertEqual(result.message, "failed iteration 2")
         self.assertEqual(result.diagnostics.fit_iterations_requested, 3)
         self.assertEqual(result.diagnostics.fit_iterations_completed, 1)
-        self.assertEqual(result.diagnostics.bestfit_parameters["burst_width"], [0.0011])
-        self.assertLessEqual(len(result.diagnostics.failure_stdout or ""), fitburst_adapter.MAX_FITBURST_LOG_CHARS)
-        self.assertLessEqual(len(result.diagnostics.failure_stderr or ""), fitburst_adapter.MAX_FITBURST_LOG_CHARS)
-        self.assertNotIn("\x00", result.diagnostics.failure_stderr or "")
-        self.assertIn("fitburst diagnostic output truncated", result.diagnostics.failure_stdout or "")
+        self.assertAlmostEqual(
+            result.diagnostics.bestfit_parameters["burst_width"][0], float(calls[0].parameters.burst_width[0])
+        )
         json.dumps(result.diagnostics.to_dict())
-        round_tripped = ModelFitDiagnostics.from_dict(result.diagnostics.to_dict())
-        self.assertEqual(round_tripped.failure_stdout, result.diagnostics.failure_stdout)
         self.assertIsNone(result.width_ms_model)
 
-    def test_fitburst_exception_records_sanitized_failure_diagnostics(self) -> None:
-        class RaisingFit(_FakeLSFitter):
-            def fit(self, *, exact_jacobian: bool = True) -> None:
-                print("stdout before exception " + ("a" * 5000))
-                print("stderr before exception \x00" + ("b" * 5000), file=sys.stderr)
-                raise RuntimeError("optimizer exploded")
+    def test_solver_exception_records_sanitized_failure_diagnostics(self) -> None:
+        def raise_on_second_pass(*args: Any, **kwargs: Any) -> Any:
+            if raise_on_second_pass.calls:  # type: ignore[attr-defined]
+                raise RuntimeError("optimizer exploded \x00" + ("b" * 5000))
+            raise_on_second_pass.calls += 1  # type: ignore[attr-defined]
+            return fit_burst_model(*args, **kwargs)
 
-        result = _run_fake_fitburst_fit(iterations=2, fitter_class=RaisingFit)
+        raise_on_second_pass.calls = 0  # type: ignore[attr-defined]
+        result, _model_spy, _fit_spy = _run_adapter_fit(
+            ModelFitRequestConfig(iterations=2), fit_side_effect=raise_on_second_pass
+        )
 
         self.assertEqual(result.status, "fit_failed")
-        self.assertEqual(result.message, "fitburst raised an exception during fitting.")
+        self.assertEqual(result.message, "The model fit raised an exception.")
         self.assertIn("RuntimeError: optimizer exploded", result.diagnostics.failure_exception or "")
-        self.assertLessEqual(len(result.diagnostics.failure_stdout or ""), fitburst_adapter.MAX_FITBURST_LOG_CHARS)
-        self.assertLessEqual(len(result.diagnostics.failure_stderr or ""), fitburst_adapter.MAX_FITBURST_LOG_CHARS)
-        self.assertLessEqual(len(result.diagnostics.failure_exception or ""), fitburst_adapter.MAX_FITBURST_LOG_CHARS)
-        self.assertNotIn("\x00", result.diagnostics.failure_stderr or "")
+        self.assertLessEqual(len(result.diagnostics.failure_exception or ""), model_fit.MAX_FAILURE_LOG_CHARS)
+        self.assertNotIn("\x00", result.diagnostics.failure_exception or "")
+        self.assertIn("diagnostic output truncated", result.diagnostics.failure_exception or "")
+        self.assertEqual(result.diagnostics.fit_iterations_completed, 1)
         json.dumps(result.diagnostics.to_dict())
+
+    def test_invalid_starting_width_is_reported_as_invalid_config(self) -> None:
+        result, _model_spy, _fit_spy = _run_adapter_fit(
+            ModelFitRequestConfig(initial_parameters={"burst_width": [-0.001]}, initial_parameter_source="api")
+        )
+
+        self.assertEqual(result.status, "invalid_config")
+        self.assertIn("burst_width", result.message or "")
 
 
 class ModelFitDispatchTest(unittest.TestCase):
@@ -878,7 +779,7 @@ class ModelFitDispatchTest(unittest.TestCase):
             diagnostics=ModelFitDiagnostics(
                 status="ok",
                 message=None,
-                fitter="fitburst",
+                fitter="flits",
                 component_count=1,
             ),
         )
@@ -908,7 +809,7 @@ class ModelFitDispatchTest(unittest.TestCase):
             diagnostics=ModelFitDiagnostics(
                 status="ok",
                 message=None,
-                fitter="fitburst",
+                fitter="flits",
                 component_count=2,
                 initial_parameters={},
             ),
@@ -985,7 +886,7 @@ class ModelFitDispatchTest(unittest.TestCase):
             diagnostics=ModelFitDiagnostics(
                 status="ok",
                 message=None,
-                fitter="fitburst",
+                fitter="flits",
                 component_count=1,
             ),
         )
@@ -1032,7 +933,7 @@ class ModelFitDispatchTest(unittest.TestCase):
                 diagnostics=ModelFitDiagnostics(
                     status="ok",
                     message=None,
-                    fitter="fitburst",
+                    fitter="flits",
                     component_count=2,
                     bestfit_parameters={
                         "amplitude": [0.9, 0.8],
@@ -1058,7 +959,7 @@ class ModelFitDispatchTest(unittest.TestCase):
                 diagnostics=ModelFitDiagnostics(
                     status="ok",
                     message=None,
-                    fitter="fitburst",
+                    fitter="flits",
                     component_count=1,
                 ),
             ),
@@ -1089,7 +990,7 @@ class ModelFitDispatchTest(unittest.TestCase):
                 diagnostics=ModelFitDiagnostics(
                     status="ok",
                     message=None,
-                    fitter="fitburst",
+                    fitter="flits",
                     component_count=1,
                     bestfit_parameters={
                         "amplitude": [0.9],
@@ -1115,7 +1016,7 @@ class ModelFitDispatchTest(unittest.TestCase):
                 diagnostics=ModelFitDiagnostics(
                     status="ok",
                     message=None,
-                    fitter="fitburst",
+                    fitter="flits",
                     component_count=1,
                 ),
             ),
@@ -1149,7 +1050,7 @@ class ModelFitDispatchTest(unittest.TestCase):
                 diagnostics=ModelFitDiagnostics(
                     status="ok",
                     message=None,
-                    fitter="fitburst",
+                    fitter="flits",
                     component_count=1,
                     bestfit_parameters={
                         "arrival_time": [0.001],
@@ -1167,7 +1068,7 @@ class ModelFitDispatchTest(unittest.TestCase):
                 diagnostics=ModelFitDiagnostics(
                     status="ok",
                     message=None,
-                    fitter="fitburst",
+                    fitter="flits",
                     component_count=1,
                 ),
             ),
@@ -1195,7 +1096,7 @@ class ModelFitDispatchTest(unittest.TestCase):
                 diagnostics=ModelFitDiagnostics(
                     status="ok",
                     message=None,
-                    fitter="fitburst",
+                    fitter="flits",
                     component_count=1,
                 ),
             ),
@@ -1209,7 +1110,7 @@ class ModelFitDispatchTest(unittest.TestCase):
                 diagnostics=ModelFitDiagnostics(
                     status="fit_failed",
                     message="failed iteration 2",
-                    fitter="fitburst",
+                    fitter="flits",
                     component_count=1,
                     fit_iterations_requested=3,
                     fit_iterations_completed=1,

@@ -77,15 +77,6 @@ flits --data-dir /path/to/filterbanks --host 127.0.0.1 --port 8123
 
 Then open `http://127.0.0.1:8123`.
 
-Optional model fitting uses `fitburst`, which is intentionally left out of the
-PyPI dependency metadata because package indexes reject direct URL runtime
-dependencies. To enable model fitting after installing
-FLITS:
-
-```bash
-pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3ec7bc21951ce1b4a26a0255096b69.tar.gz"
-```
-
 ## Scripting and batch measurement
 
 Measure bursts from the command line: mask interference, localize the burst,
@@ -141,7 +132,7 @@ agents can use it too. See
 - Automatic burst localization in time and frequency (matched-filter event window, spectral extent, and off-pulse placement in one click).
 - Calibrated fluence and peak-flux outputs when an SEFD is available.
 - DM optimization using integrated-event S/N and DMphase.
-- Temporal-structure, PSD, ACF, and optional selected-event model fitting.
+- Temporal-structure, PSD, ACF, and selected-event fits of the fitburst burst model.
 - Sub-burst drift rate in MHz/ms from the mask-corrected 2D autocorrelation, cross-checked against a component-centroid regression, with the drift/DM degeneracy reported as the DM offset that would account for the measured slope.
 - Weighted Q/U RM synthesis with optional RM-CLEAN, significance and quality diagnostics, and JSON/CSV products — measured in-session from a full-Stokes burst file, or from an externally prepared Q/U spectrum.
 - Export bundles and JSON session snapshots for reproducible analysis.

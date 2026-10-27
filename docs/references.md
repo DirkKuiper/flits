@@ -75,10 +75,20 @@ validates its output against RM-Tools reference products.
 
 ## Burst model fitting
 
-Optional scattering and multi-component fits are delegated to `fitburst`.
+FLITS fits the burst model of Fonseca et al. with its own implementation of
+it. `fitburst`, the CHIME/FRB implementation, is the reference its tests compare
+against. Scintillation mode solves each channel's amplitudes by variable
+projection.
 
+- Fonseca, E., Pleunis, Z., Breitman, D. et al. (2024), *Modeling the
+  Morphology of Fast Radio Bursts and Radio Pulsars with fitburst*, ApJS 271,
+  49. [doi:10.3847/1538-4365/ad27d6](https://doi.org/10.3847/1538-4365/ad27d6)
 - CHIME/FRB Collaboration, *fitburst: A Python package for modelling fast radio
   burst dynamic spectra*. <https://github.com/CHIMEFRB/fitburst>
+- Golub, G. H. & Pereyra, V. (1973), *The Differentiation of Pseudo-Inverses
+  and Nonlinear Least Squares Problems Whose Variables Separate*, SIAM J.
+  Numer. Anal. 10, 413.
+  [doi:10.1137/0710036](https://doi.org/10.1137/0710036)
 
 ## Sub-burst drift
 
