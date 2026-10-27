@@ -70,6 +70,12 @@ FWHM about 5.89 ms. The test requires each automatic event window to contain
 rounded integer samples while the HDF5 files store floating-point data; their
 measurements need not be identical.
 
+The current FLITS catalog reader normalizes `calibrated_wfall`; its subsequent
+flux and fluence use SEFD-based radiometer calibration. This example therefore
+does not demonstrate preservation of a real catalog's original Jy calibration.
+Use the original calibrated data and its documented calibration workflow when
+that scale is required; see [Supported Formats](user-guide/supported-formats.md#chimefrb-public-catalog-hdf5).
+
 The assumed SEFD of 10 Jy is a teaching input, not a calibration of CHIME or
 another telescope. No SEFD uncertainty is supplied, so flux and fluence errors
 are classified `statistical_only`. BBData's power combination and format

@@ -11,6 +11,12 @@ dedispersion, interference masking, localization and measurement routines when
 they fit the task. Preserve the user's chosen package or method. Each
 uncertainty says what it includes, and selections can be saved and replayed.
 
+For CHIME catalog `calibrated_wfall`, the current reader normalizes amplitudes
+and FLITS flux/fluence use SEFD-based radiometer calibration. They do not
+directly integrate the file's native Jy scale. If the task requires the catalog's
+original flux calibration, preserve that data and follow its calibrated-data
+workflow; do not relabel an SEFD-based estimate as native catalog fluence.
+
 ## Set up
 
 Use Python 3.11+ and FLITS 1.6+ in an environment that can access the burst files.

@@ -64,6 +64,13 @@ citing a validation result.
 
 ## What to check for a new analysis
 
+Public CHIME catalog `calibrated_wfall` inputs have an additional limit: the
+current reader normalizes their amplitudes, and FLITS subsequently derives
+flux and fluence from the configured SEFD. It does not preserve and directly
+integrate the input's absolute Jy scale. A successful reader or replay test
+does not validate agreement with the catalog's native flux calibration. See
+[Supported Formats](user-guide/supported-formats.md#chimefrb-public-catalog-hdf5).
+
 - Review the selected event, off-pulse windows, band and mask. Automatic
   localization follows the strongest usable signal and can select interference.
 - Keep `low_sn`, `no_detection`, failed fits and warning flags in batch results.
