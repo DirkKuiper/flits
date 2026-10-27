@@ -2,6 +2,7 @@ include LICENSE
 include README.md
 include requirements*.txt
 graft flits/web_static
+graft flits/schemas
 graft docs
 graft plugins/flits
 include .agents/plugins/marketplace.json

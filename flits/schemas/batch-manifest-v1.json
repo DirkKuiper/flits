@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/DirkKuiper/flits/main/flits/schemas/batch-manifest-v1.json",
+  "title": "FLITS per-burst measurement manifest v1",
+  "description": "Merge defaults with each burst's options (options replace whole values). The loader additionally requires a DM after merging, unique ids, known telescope presets, finite numbers, and increasing ranges. File paths resolve relative to the manifest.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "defaults": {
+      "$ref": "#/$defs/options"
+    },
+    "bursts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "options": {
+            "$ref": "#/$defs/options"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "bursts"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "options": {
+      "type": "object",
+      "properties": {
+        "dm": {
+          "type": "number"
+        },
+        "telescope": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sefd_jy": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "sefd_fractional_uncertainty": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "crop_ms": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event_ms": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offpulse_ms": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": 0
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "band_mhz": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "time_factor": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "freq_factor": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "mask": {
+          "enum": [
+            "fast",
+            "auto",
+            "thorough",
+            "none"
+          ]
+        },
+        "detection_snr": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "widths": {
+          "type": "boolean"
+        },
+        "include_diagnostics": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  }
+}

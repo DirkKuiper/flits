@@ -15,6 +15,9 @@ have; it does not search for bursts.
   `low_sn`, `no_detection`, `error`) and `localization.warning_flags` before
   trusting a number. Exit code 0 means every burst was measured.
 - One call per burst from Python: `flits.measure_burst(path, flits.MeasureOptions(dm=...))`.
+- Different settings per burst: `flits measure --manifest batch.json`; relative
+  paths belong to the manifest's directory. `flits schema batch-manifest` and
+  `flits schema measurement` print the input and output JSON schemas offline.
 - Full control: `flits.BurstSession.from_file(path, dm=...)`. Every action in
   the interface is a method on it.
 - Keep masking on (the default) when localizing automatically. Unmasked

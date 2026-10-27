@@ -32,6 +32,7 @@ flits measure ~/.cache/flits/demo/flits-tutorial-gbt-frb20240114a-v1.fil --dm 0
 [
   {
     "file": "/home/user/.cache/flits/demo/flits-tutorial-gbt-frb20240114a-v1.fil",
+    "schema_version": "1.0",
     "status": "ok",
     "error": null,
     "flits_version": "1.4.0",
@@ -133,14 +134,15 @@ The command exits with 0 when every burst was measured (`ok` or `low_sn`), with
 1 when at least one was `no_detection` or `error`, and with 2 for an invalid
 command line. Output is strict JSON: missing or non-finite numbers are `null`.
 
-For bursts at different DMs, run one command per DM or loop in the shell over a
-`path,dm` list without a header row:
+For bursts at different DMs or with different calibration and selection
+settings, use a JSON manifest:
 
 ```bash
-while IFS=, read -r path dm; do
-  flits measure "$path" --dm "$dm" --format jsonl
-done < bursts.csv > results.jsonl
+flits measure --manifest batch.json --format jsonl --output results.jsonl
 ```
+
+See [Batch Manifests and Output Contracts](automation-contracts.md) for the
+manifest format, relative-path rules and offline JSON schemas.
 
 ## Review and reproduce
 
