@@ -41,3 +41,5 @@ scripts/plot_fluence_timescale_relation.py
 scripts/r147_full_band_burst_rate_overlay.py
 scripts/r147_saturation_audit.py
 scripts/
+!/.github/scripts/
+!/.github/scripts/wheel_smoke.py
