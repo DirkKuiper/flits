@@ -48,6 +48,11 @@ def test_health_endpoint_serves_over_http(client: TestClient) -> None:
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+    runtime = response.json()
+    assert runtime["fitter"] == "flits"
+    assert runtime["source"]["python_source_sha256"]
+    assert "package_path" not in runtime
+    assert "python_executable" not in runtime
 
 
 def test_index_and_static_mount_serve_the_interface(client: TestClient) -> None:

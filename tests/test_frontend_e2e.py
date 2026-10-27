@@ -102,6 +102,7 @@ def _load_session(page, waterfall) -> None:
 
 def test_interface_loads_without_javascript_errors(page) -> None:
     expect(page.locator("#loadButton")).to_be_visible()
+    expect(page.locator("#runtimeIdentity")).to_contain_text("FLITS native fitter")
     assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
 
 

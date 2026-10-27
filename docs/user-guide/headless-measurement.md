@@ -17,6 +17,10 @@ piped straight into another program.
 
 ## Measure a burst
 
+Use [`flits inspect`](inspection.md) to read unfamiliar file metadata and DM
+loading guidance first. `flits info --server URL` checks whether a running
+browser server uses the same FLITS code as your command-line interpreter.
+
 Using the burst from the [Guided Workflow](../guided-workflow.md), which
 `flits demo` downloads to `~/.cache/flits/demo`:
 

@@ -49,11 +49,14 @@ __all__ = [
     "available_presets",
     "detect_preset",
     "get_preset",
+    "inspect_burst",
     "measure_burst",
     "measure_bursts",
+    "runtime_info",
 ]
 
 if TYPE_CHECKING:
+    from flits.inspection import inspect_burst
     from flits.measure import MeasureOptions, measure_burst, measure_bursts
     from flits.models import (
         BurstMeasurements,
@@ -69,11 +72,16 @@ if TYPE_CHECKING:
         MeasurementProvenance,
         MeasurementUncertainties,
     )
+    from flits.runtime import runtime_info
     from flits.session import BurstSession
     from flits.settings import ObservationConfig, TelescopePreset, available_presets, detect_preset, get_preset
 
 
 def __getattr__(name: str):
+    if name == "inspect_burst":
+        return importlib.import_module("flits.inspection").inspect_burst
+    if name == "runtime_info":
+        return importlib.import_module("flits.runtime").runtime_info
     if name in {
         "BurstMeasurements",
         "DmOptimizationResult",

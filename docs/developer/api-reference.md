@@ -54,6 +54,13 @@ The one-call form behind `flits measure`; see
 
 ## Input
 
+For JSON-compatible metadata and runtime reports, see
+[Inspection and Runtime](../user-guide/inspection.md).
+
+::: flits.inspection.inspect_burst
+
+::: flits.runtime.runtime_info
+
 ::: flits.io
     options:
       members:
