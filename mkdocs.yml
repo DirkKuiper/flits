@@ -125,6 +125,7 @@ nav:
       - References: references.md
   - Developer:
       - Testing: developer/testing.md
+      - Agent Evaluations: developer/agent-evaluations.md
       - JOSS Manuscript: developer/joss-submission.md
       - Publishing: developer/publishing.md
       - Custom Readers: developer/custom-readers.md

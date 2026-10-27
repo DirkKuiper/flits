@@ -1,0 +1,12 @@
+{
+  "name": "flits",
+  "interface": {"displayName": "FLITS radio burst analysis"},
+  "plugins": [
+    {
+      "name": "flits",
+      "source": {"source": "local", "path": "./plugins/flits"},
+      "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+      "category": "Productivity"
+    }
+  ]
+}

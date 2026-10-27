@@ -41,3 +41,10 @@ scripts/plot_fluence_timescale_relation.py
 scripts/r147_full_band_burst_rate_overlay.py
 scripts/r147_saturation_audit.py
 scripts/
+
+# Versioned agent tooling; other local research helpers remain ignored.
+!/tools/
+/tools/*
+!/tools/install_agent_skill.py
+!/tools/evaluate_agent_skill.py
+!/plugins/flits/skills/frb-analysis/scripts/

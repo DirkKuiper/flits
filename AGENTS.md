@@ -42,7 +42,8 @@ guidance ships as an Agent Skill for agents in other projects:
 | `flits/measurements.py`, `flits/models.py` | Measurement computation and the result dataclasses. |
 | `flits/web/app.py`, `flits/web_static/` | FastAPI server and the plain-JavaScript interface (no build step). |
 | `tests/` | pytest suite; `conftest.py` synthesizes every input file it needs. |
-| `.claude-plugin/`, `plugins/flits/` | Claude Code plugin marketplace and the FLITS skill for coding agents; `tests/test_agent_guidance.py` checks the skill against the code. |
+| `.agents/plugins/`, `.claude-plugin/`, `plugins/flits/` | Portable and Claude plugin marketplaces sharing one FLITS skill; guidance and installation tests check it against the code. |
+| `tools/install_agent_skill.py`, `tools/evaluate_agent_skill.py`, `evals/agent-skill/` | Cross-agent installation, synthetic evaluation workspaces, and trace-based review of routing and scientific use. |
 | `docs/`, `mkdocs.yml` | Documentation site. |
 | `paper/` | JOSS manuscript. |
 
