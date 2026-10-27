@@ -133,6 +133,7 @@ const fitWeightEndInput = document.getElementById("fitWeightEndInput")
 const fitIterationsInput = document.getElementById("fitIterationsInput")
 const fitMaxEvaluationsInput = document.getElementById("fitMaxEvaluationsInput")
 const fitTimeUpsampleInput = document.getElementById("fitTimeUpsampleInput")
+const fitPaddingInput = document.getElementById("fitPaddingInput")
 const fitFreqUpsampleInput = document.getElementById("fitFreqUpsampleInput")
 const fitRefFreqInput = document.getElementById("fitRefFreqInput")
 const fitFoldedInput = document.getElementById("fitFoldedInput")
@@ -213,6 +214,8 @@ const setDmButton = document.getElementById("setDmButton")
 const optimizeDmButton = document.getElementById("optimizeDmButton")
 const applyBestDmButton = document.getElementById("applyBestDmButton")
 const fitModelButton = document.getElementById("fitModelButton")
+const fitCompareButton = document.getElementById("fitCompareButton")
+const fitCompareMaxInput = document.getElementById("fitCompareMaxInput")
 const buildExportButton = document.getElementById("buildExportButton")
 const resetViewButton = document.getElementById("resetViewButton")
 const clearRegionsButton = document.getElementById("clearRegionsButton")
@@ -336,6 +339,7 @@ const sessionControls = [
   fitImportSolutionButton,
   fitExportSolutionButton,
   fitModelButton,
+  fitCompareButton,
   runSpectralButton,
   runDriftButton,
   buildExportButton,
@@ -415,6 +419,8 @@ const busyLockControls = [
   fitIterationsInput,
   fitMaxEvaluationsInput,
   fitTimeUpsampleInput,
+  fitPaddingInput,
+  fitCompareMaxInput,
   fitFreqUpsampleInput,
   fitRefFreqInput,
   fitFoldedInput,
@@ -631,6 +637,34 @@ function bindControls() {
       ...(seedFromPrevious ? {} : { component_guesses: componentGuesses }),
     });
   })
+  fitCompareButton.addEventListener("click", () => {
+    let solverConfig = null
+    try {
+      solverConfig = collectFitSolverConfig()
+    } catch (error) {
+      showToast(error.message || "Review the advanced fit setup.", "error")
+      return
+    }
+    postAction("compare_model_components", {
+      scintillation: Boolean(fitScintillationInput.checked),
+      free_parameters: currentFreeFitParameters(),
+      solver: solverConfig,
+      max_components: Math.max(2, Math.min(5, Math.round(Number(fitCompareMaxInput.value) || 3))),
+    })
+  })
+  fittingContent.addEventListener("click", (event) => {
+    const useButton = event.target.closest("[data-use-comparison]")
+    if (useButton) {
+      fitFromComparisonRow(Number(useButton.dataset.useComparison))
+      return
+    }
+    if (event.target.closest("[data-fit-auto-upsample]")) {
+      // Clear the requested factor so the fit chooses one, then fit as the button would.
+      fitTimeUpsampleInput.value = ""
+      updateFitParameterSummary()
+      fitModelButton.click()
+    }
+  })
   fitSeedPreviousInput.addEventListener("change", () => {
     updateFitParameterSummary()
     updateControlStates()
@@ -646,7 +680,7 @@ function bindControls() {
   })
   fitDetectComponentsButton.addEventListener("click", () => detectFitComponentsFromProfile())
   fitWeightingModeSelect.addEventListener("change", () => updateFitParameterSummary())
-  ;[fitIterationsInput, fitMaxEvaluationsInput, fitTimeUpsampleInput, fitFreqUpsampleInput, fitRefFreqInput, fitWeightStartInput, fitWeightEndInput].forEach((input) => {
+  ;[fitIterationsInput, fitMaxEvaluationsInput, fitTimeUpsampleInput, fitPaddingInput, fitFreqUpsampleInput, fitRefFreqInput, fitWeightStartInput, fitWeightEndInput].forEach((input) => {
     input.addEventListener("input", () => updateFitParameterSummary())
   })
   ;[fitFoldedInput, fitExactJacobianInput].forEach((input) => {
@@ -1667,7 +1701,7 @@ async function postAction(type, payload = {}) {
       state.activeAnalysisTab = "dm"
     } else if (type === "compute_properties" || type === "compute_widths" || type === "accept_width_result") {
       state.activeAnalysisTab = "prepare"
-    } else if (type === "fit_model") {
+    } else if (type === "fit_model" || type === "compare_model_components") {
       state.activeAnalysisTab = "fitting"
     } else if (type === "run_temporal_structure_analysis" || type === "run_spectral_analysis") {
       state.activeAnalysisTab = "temporal"
@@ -2691,61 +2725,331 @@ function renderFitting(view) {
 
   const fitTone = modelFitStatusTone(modelFit.status)
   const fitStatistics = modelFit.fit_statistics || {}
-  const initialParameters = modelFit.initial_parameters || {}
-  const bestfit = modelFit.bestfit_parameters || {}
-  const bestfitUncertainties = modelFit.bestfit_uncertainties || {}
-  const widthDetail = resultUncertaintyDetail(results, "width_ms_model", "ms")
-  const tauDetail = resultUncertaintyDetail(results, "tau_sc_ms", "ms")
   const fitStatusCopyText = modelFit.status === "ok" || modelFit.status === "evaluation_limit_exceeded"
     ? modelFitStatusCopy(modelFit.status)
     : (modelFit.message || modelFitStatusCopy(modelFit.status))
-  const fitSummaryTiles = [
-    resultTile("Model Width", results.width_ms_model === null ? "n/a" : formatValueWithDetail(results.width_ms_model, widthDetail, { valueDigits: 3, uncertaintyDigits: 3, units: "ms" }), "primary", {
-      detail: widthDetail,
-    }),
-    resultTile("Scattering Tau", results.tau_sc_ms === null ? "n/a" : formatValueWithDetail(results.tau_sc_ms, tauDetail, { valueDigits: 3, uncertaintyDigits: 3, units: "ms" }), "primary", {
-      detail: tauDetail,
-    }),
-    resultTile("Reduced Chi^2", fitStatistics.chisq_final_reduced === null || fitStatistics.chisq_final_reduced === undefined ? "n/a" : fmt(fitStatistics.chisq_final_reduced, 3), "primary"),
-  ]
-  const fitMetaTiles = [
-    resultTile("Fitter", modelFit.fitter || "n/a", "secondary"),
-    resultTile("Initialization", fitInitialSourceLabel(modelFit.initial_parameter_source), "secondary"),
-    resultTile("Optimizer Passes", modelFit.fit_iterations_completed === null || modelFit.fit_iterations_completed === undefined ? "n/a" : `${modelFit.fit_iterations_completed}/${modelFit.fit_iterations_requested || modelFit.fit_iterations_completed}`, "secondary"),
-    resultTile("Function Evaluations", modelFit.function_evaluations === null || modelFit.function_evaluations === undefined ? "n/a" : String(modelFit.function_evaluations), "secondary"),
-    resultTile("Max Evaluations", modelFit.max_function_evaluations === null || modelFit.max_function_evaluations === undefined ? "auto" : String(modelFit.max_function_evaluations), "secondary"),
-    resultTile("Weighting", weightingLabel(modelFit.weighting_mode), "secondary"),
-    resultTile("Scintillation", modelFit.scintillation ? "enabled" : "disabled", "secondary"),
-    resultTile("Folded", modelFit.is_folded ? "enabled" : "disabled", "secondary"),
-    resultTile("Jacobian", modelFit.exact_jacobian ? "exact" : "numeric", "secondary"),
-    resultTile("Fit S/N", fitStatistics.snr === null || fitStatistics.snr === undefined ? "n/a" : fmt(fitStatistics.snr, 3), "secondary"),
-    resultTile("Good Channels", fitStatistics.num_freq_good === null || fitStatistics.num_freq_good === undefined ? "n/a" : String(fitStatistics.num_freq_good), "secondary"),
-    resultTile("Observations", fitStatistics.num_observations === null || fitStatistics.num_observations === undefined ? "n/a" : String(fitStatistics.num_observations), "secondary"),
-    resultTile("Parameters Fit", fitParameterListLabel(modelFit.free_parameters || modelFit.fit_parameters), "secondary"),
-    resultTile("Fixed Parameters", fitParameterListLabel(modelFit.fixed_parameters), "secondary"),
-  ]
-
-  fittingContent.innerHTML = `
-    <div class="results-primary">
-      ${fitSummaryTiles.join("")}
-    </div>
-    <div class="results-secondary">
-      ${fitMetaTiles.join("")}
-    </div>
+  const statusNote = `
     <div class="dm-fit-note" data-tone="${escapeHtml(fitTone)}">
       <strong>${escapeHtml(modelFitStatusLabel(modelFit.status))}</strong>
       <span>${escapeHtml(fitStatusCopyText)}</span>
     </div>
-    ${renderScatteringParameterTable(initialParameters, bestfit, bestfitUncertainties)}
-    ${results?.provenance ? `
-      <details class="details-card results-details">
-        <summary>Fit Selection Context</summary>
-        <div class="kv-list">
-          ${renderProvenanceItems(results.provenance)}
-        </div>
-      </details>
-    ` : ""}
   `
+  const comparisonMarkup = renderModelComparison(diagnostics.model_comparison)
+  const contextMarkup = results?.provenance ? `
+    <details class="details-card results-details">
+      <summary>Fit Selection Context</summary>
+      <div class="kv-list">
+        ${renderProvenanceItems(results.provenance)}
+      </div>
+    </details>
+  ` : ""
+
+  if (modelFit.status !== "ok") {
+    fittingContent.innerHTML = `${statusNote}${comparisonMarkup}${renderModelFitDetails(modelFit)}${contextMarkup}`
+    return
+  }
+
+  const bestfit = modelFit.bestfit_parameters || {}
+  const bestfitUncertainties = modelFit.bestfit_uncertainties || {}
+  const atBounds = new Set(modelFit.parameters_at_bounds || [])
+  const componentCount = Math.max(1, Number(modelFit.component_count) || 1)
+  const widthDetail = resultUncertaintyDetail(results, "width_ms_model", "ms")
+  const tauDetail = resultUncertaintyDetail(results, "tau_sc_ms", "ms")
+  const refFreq = Number(modelFit.ref_freq_mhz)
+  const tauLabel = Number.isFinite(refFreq) ? `Scattering Timescale at ${fmt(refFreq, 1)} MHz` : "Scattering Timescale"
+  const fitSummaryTiles = [
+    resultTile(
+      componentCount > 1 ? "Intrinsic Width (component 1)" : "Intrinsic Width",
+      fitValueOrLimit(results.width_ms_model, widthDetail, atBounds.has("burst_width1")),
+      "primary",
+      { detail: widthDetail },
+    ),
+    resultTile(tauLabel, fitValueOrLimit(results.tau_sc_ms, tauDetail, atBounds.has("scattering_timescale")), "primary", {
+      detail: tauDetail,
+    }),
+    resultTile("Reduced χ²", fitStatistics.chisq_final_reduced === null || fitStatistics.chisq_final_reduced === undefined ? "n/a" : fmt(fitStatistics.chisq_final_reduced, 3), "primary", {
+      tooltip: "Chi-squared per degree of freedom over the fit window. Near 1 when the model describes the data to the noise; larger when it misses structure, or when the noise scale is off, as with unweighted data.",
+    }),
+  ]
+
+  fittingContent.innerHTML = `
+    ${statusNote}
+    <div class="results-primary">
+      ${fitSummaryTiles.join("")}
+    </div>
+    ${renderModelFitNotes(modelFit, results)}
+    ${renderScatteringParameterTable(modelFit.initial_parameters || {}, bestfit, bestfitUncertainties, {
+      fitted: new Set(modelFit.fit_parameters || modelFit.free_parameters || []),
+      atBounds,
+      scintillation: Boolean(modelFit.scintillation),
+    })}
+    ${comparisonMarkup}
+    ${renderModelFitDetails(modelFit)}
+    ${contextMarkup}
+  `
+}
+
+// A fitted value with its 1σ uncertainty, or the upper limit value + 1σ when
+// the fit ended at the lower bound of zero.
+function fitValueOrLimit(value, detail, atLowerBound) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return "n/a"
+  }
+  const sigma = Number(detail?.value)
+  if (atLowerBound && Number.isFinite(sigma)) {
+    return `< ${fmt(Number(value) + sigma, 3)} ms`
+  }
+  return formatValueWithDetail(value, detail, { valueDigits: 3, uncertaintyDigits: 3, units: "ms" })
+}
+
+function fitParameterLabelText(label) {
+  const match = /^([a-z_]+?)(\d+)?$/.exec(String(label || ""))
+  if (!match) {
+    return String(label || "")
+  }
+  const base = fitParameterLabel(match[1])
+  return match[2] ? `${base} (component ${match[2]})` : base
+}
+
+function modelFitCorrelations(modelFit) {
+  const labels = Array.isArray(modelFit?.parameter_labels) ? modelFit.parameter_labels : []
+  const covariance = Array.isArray(modelFit?.covariance) ? modelFit.covariance : []
+  if (!labels.length || covariance.length !== labels.length) {
+    return null
+  }
+  const sigma = labels.map((_, index) => Math.sqrt(Number(covariance[index]?.[index])))
+  const matrix = labels.map((_, row) => labels.map((__, column) => {
+    const value = Number(covariance[row]?.[column]) / (sigma[row] * sigma[column])
+    return Number.isFinite(value) ? value : null
+  }))
+  return { labels, matrix }
+}
+
+function renderModelFitNotes(modelFit, results) {
+  const notes = []
+  const resolutionMs = Number(modelFit.time_resolution_ms)
+  const factor = Number(modelFit.factor_time_upsample) || 1
+  const flags = new Set(modelFit.resolution_flags || [])
+  const atBounds = new Set(modelFit.parameters_at_bounds || [])
+  const resolutionText = Number.isFinite(resolutionMs) ? `${fmt(resolutionMs, 4)} ms` : "one time bin"
+
+  for (const [key, label, name] of [
+    ["burst_width1", "Intrinsic width", "width_ms_model"],
+    ["scattering_timescale", "Scattering timescale", "tau_sc_ms"],
+  ]) {
+    if (!atBounds.has(key)) {
+      continue
+    }
+    const detail = resultUncertaintyDetail(results, name, "ms")
+    const value = Number(results?.[name])
+    const sigma = Number(detail?.value)
+    const limit = Number.isFinite(value) && Number.isFinite(sigma) ? ` Quote it as < ${fmt(value + sigma, 3)} ms (value + 1σ).` : ""
+    notes.push({
+      title: `${label} is consistent with zero`,
+      text: `The fit ended at the lower bound, so only an upper limit is constrained.${limit}`,
+    })
+  }
+
+  if (flags.has("width_below_time_resolution") || flags.has("scattering_below_time_resolution")) {
+    const what = flags.has("width_below_time_resolution") && flags.has("scattering_below_time_resolution")
+      ? "The intrinsic width and the scattering timescale are"
+      : flags.has("width_below_time_resolution") ? "The intrinsic width is" : "The scattering timescale is"
+    if (factor > 1) {
+      const basis = modelFit.time_upsample_basis === "auto" ? "chosen automatically" : "as requested"
+      notes.push({
+        title: "Shorter than one time bin",
+        text: `${what} below the ${resolutionText} time resolution. The model was averaged over ${factor} sub-samples per bin (${basis}), as the data integrate over each bin, so the fit is constrained by how the burst's flux spreads into neighbouring bins.`,
+      })
+    } else {
+      notes.push({
+        title: "Shorter than one time bin, without upsampling",
+        text: `${what} below the ${resolutionText} time resolution, and the model was evaluated only at bin centres. That overestimates a width this narrow; averaging the model over each bin removes the bias.`,
+        action: '<button class="secondary-button" type="button" data-fit-auto-upsample>Fit Again with Auto Upsampling</button>',
+      })
+    }
+  }
+
+  const correlations = modelFitCorrelations(modelFit)
+  if (correlations) {
+    const strong = []
+    // In fitburst's convention the amplitude scales with the scattering
+    // timescale, so it correlates strongly with it in every fit; the matrix
+    // under Fit Details still shows it.
+    const noted = (label) => !String(label).startsWith("amplitude")
+    correlations.labels.forEach((rowLabel, row) => {
+      for (let column = row + 1; column < correlations.labels.length; column += 1) {
+        const value = correlations.matrix[row][column]
+        if (value !== null && Math.abs(value) >= 0.8 && noted(rowLabel) && noted(correlations.labels[column])) {
+          strong.push({ pair: `${fitParameterLabelText(rowLabel)} and ${fitParameterLabelText(correlations.labels[column])}`, value })
+        }
+      }
+    })
+    strong.sort((left, right) => Math.abs(right.value) - Math.abs(left.value))
+    if (strong.length) {
+      const listed = strong.slice(0, 3).map((item) => `${item.pair} (ρ = ${fmt(item.value, 2)})`).join("; ")
+      notes.push({
+        title: strong.length === 1 ? "Strongly correlated parameters" : `${strong.length} strongly correlated parameter pairs`,
+        text: `${listed}. These trade off against each other. Each 1σ uncertainty already allows for the other parameter adjusting, but a quantity that combines them needs the covariance, not the separate uncertainties. The full matrix is under Fit Details.`,
+      })
+    }
+  }
+
+  if (!notes.length) {
+    return ""
+  }
+  return `
+    <div class="fit-notes">
+      ${notes.map((note) => `
+        <div class="dm-fit-note" data-tone="warning">
+          <strong>${escapeHtml(note.title)}</strong>
+          <span>${escapeHtml(note.text)}</span>
+          ${note.action || ""}
+        </div>
+      `).join("")}
+    </div>
+  `
+}
+
+function renderModelComparison(comparison) {
+  if (!comparison) {
+    return ""
+  }
+  const rows = Array.isArray(comparison.rows) ? comparison.rows : []
+  const preferred = Number(comparison.preferred_components)
+  const optionalNumber = (value, digits) => (value === null || value === undefined || !Number.isFinite(Number(value)) ? "–" : fmt(value, digits))
+  const pValue = (value) => {
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+      return "–"
+    }
+    return Number(value) < 1e-4 ? "< 0.0001" : fmt(value, 4)
+  }
+  const body = rows.map((row) => {
+    const count = Number(row.num_components)
+    const ok = row.status === "ok"
+    const isPreferred = ok && count === preferred
+    return (
+      `<tr${isPreferred ? ' class="is-preferred"' : ""}>` +
+      `<td>${escapeHtml(String(count))}${isPreferred ? ' <span class="fit-preferred-badge">lowest BIC</span>' : ""}</td>` +
+      `<td>${escapeHtml(ok ? optionalNumber(row.chisq_reduced, 3) : modelFitStatusLabel(row.status))}</td>` +
+      `<td>${escapeHtml(ok ? optionalNumber(row.delta_bic, 1) : "–")}</td>` +
+      `<td>${escapeHtml(ok ? optionalNumber(row.delta_aic, 1) : "–")}</td>` +
+      `<td>${escapeHtml(ok ? pValue(row.f_test_p_value) : "–")}</td>` +
+      `<td>${ok ? `<button class="secondary-button compact-button" type="button" data-use-comparison="${escapeHtml(String(count))}">Use This Fit</button>` : ""}</td>` +
+      `</tr>`
+    )
+  }).join("")
+  const message = comparison.message ? `<p class="fit-comparison-message">${escapeHtml(comparison.message)}</p>` : ""
+  const upsampling = Number(comparison.factor_time_upsample) > 1 ? ` All fits use ${Number(comparison.factor_time_upsample)} sub-samples per time bin.` : ""
+  return `
+    <details class="details-card results-details" open>
+      <summary>Component Count Comparison</summary>
+      <p class="fit-comparison-intro">Each fit starts from the one above it with a component added at the largest residual, over the same samples and weights.${escapeHtml(upsampling)} Lower BIC and AIC are better. The F-test p-value is the probability of an improvement this large over one component fewer if the extra component were not needed.</p>
+      <div class="residual-table-wrap">
+        <table class="residual-table">
+          <thead>
+            <tr>
+              <th>Components</th>
+              <th>Reduced χ²</th>
+              <th>ΔBIC</th>
+              <th>ΔAIC</th>
+              <th>F-test p</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+      ${message}
+      <p class="fit-comparison-intro">Treat these as guidance. At high S/N, components are rarely exactly Gaussian, so extra components keep lowering χ² even when they do not describe separate emission; check the residuals before adopting one.</p>
+    </details>
+  `
+}
+
+function renderModelFitDetails(modelFit) {
+  const statistics = modelFit.fit_statistics || {}
+  const valueOr = (value, formatter = (item) => String(item)) => (value === null || value === undefined || value === "" ? "n/a" : formatter(value))
+  const window = Array.isArray(modelFit.fit_window_ms) ? modelFit.fit_window_ms : null
+  const factor = Number(modelFit.factor_time_upsample)
+  const upsampleText = Number.isFinite(factor)
+    ? `×${factor}${modelFit.time_upsample_basis === "auto" ? " (auto)" : ""}`
+    : "n/a"
+  const covarianceBasis = {
+    observed_hessian: "Inverse observed Hessian",
+    gauss_newton: "Inverse Gauss–Newton matrix (the observed Hessian was not positive definite)",
+  }[modelFit.covariance_basis] || "n/a"
+  const items = [
+    ["Fit window", window ? `${fmt(window[0], 3)} to ${fmt(window[1], 3)} ms` : "n/a"],
+    ["Time resolution", valueOr(modelFit.time_resolution_ms, (value) => `${fmt(value, 4)} ms`)],
+    ["Time upsampling", upsampleText],
+    ["Frequency upsampling", valueOr(modelFit.factor_freq_upsample, (value) => `×${value}`)],
+    ["Reference frequency", valueOr(modelFit.ref_freq_mhz, (value) => `${fmt(value, 3)} MHz`)],
+    ["Weighting", weightingLabel(modelFit.weighting_mode)],
+    ["Initialization", fitInitialSourceLabel(modelFit.initial_parameter_source)],
+    ["Optimizer passes", modelFit.fit_iterations_completed === null || modelFit.fit_iterations_completed === undefined ? "n/a" : `${modelFit.fit_iterations_completed}/${modelFit.fit_iterations_requested || modelFit.fit_iterations_completed}`],
+    ["Function evaluations", `${valueOr(modelFit.function_evaluations)} of ${valueOr(modelFit.max_function_evaluations)}`],
+    ["Jacobian", modelFit.exact_jacobian === false ? "finite differences" : "analytic"],
+    ["Scintillation", modelFit.scintillation ? "per-channel amplitudes" : "off"],
+    ["Folded profile", modelFit.is_folded ? "on" : "off"],
+    ["Good channels", valueOr(statistics.num_freq_good)],
+    ["Degrees of freedom", valueOr(statistics.num_observations)],
+    ["Fit S/N", valueOr(statistics.snr, (value) => fmt(value, 2))],
+    ["AIC / BIC", statistics.aic === null || statistics.aic === undefined ? "n/a" : `${fmt(statistics.aic, 1)} / ${fmt(statistics.bic, 1)}`],
+    ["Covariance", covarianceBasis],
+    ["Parameters fitted", fitParameterListLabel(modelFit.free_parameters || modelFit.fit_parameters)],
+    ["Parameters fixed", fitParameterListLabel(modelFit.fixed_parameters)],
+  ]
+  const correlations = modelFitCorrelations(modelFit)
+  const matrixMarkup = correlations && correlations.labels.length <= 12 ? `
+    <h5>Correlation matrix</h5>
+    <div class="residual-table-wrap">
+      <table class="residual-table fit-correlation-table">
+        <thead><tr><th></th>${correlations.labels.map((label) => `<th>${escapeHtml(fitParameterLabelText(label))}</th>`).join("")}</tr></thead>
+        <tbody>
+          ${correlations.matrix.map((row, rowIndex) => `<tr><th>${escapeHtml(fitParameterLabelText(correlations.labels[rowIndex]))}</th>${row.map((value, columnIndex) => {
+            const strong = columnIndex !== rowIndex && value !== null && Math.abs(value) >= 0.8
+            return `<td${strong ? ' class="is-strong"' : ""}>${value === null ? "–" : fmt(value, 2)}</td>`
+          }).join("")}</tr>`).join("")}
+        </tbody>
+      </table>
+    </div>
+  ` : ""
+  return `
+    <details class="details-card results-details">
+      <summary>Fit Details</summary>
+      <div class="kv-list">
+        ${items.map(([label, value]) => `<div class="kv-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}
+      </div>
+      ${matrixMarkup}
+    </details>
+  `
+}
+
+function fitFromComparisonRow(count) {
+  const comparison = state.view?.results?.diagnostics?.model_comparison
+  const row = (comparison?.rows || []).find((item) => Number(item.num_components) === count && item.status === "ok")
+  if (!row) {
+    showToast("That fit is no longer available.", "error")
+    return
+  }
+  let solverConfig = null
+  try {
+    solverConfig = collectFitSolverConfig()
+  } catch (error) {
+    showToast(error.message || "Review the advanced fit setup.", "error")
+    return
+  }
+  // Refit on the comparison's grid, so the result matches its row.
+  if (Number(comparison.factor_time_upsample) >= 1) {
+    solverConfig.factor_time_upsample = Number(comparison.factor_time_upsample)
+  }
+  postAction("fit_model", {
+    num_components: count,
+    initial_parameters: row.bestfit_parameters,
+    initial_parameter_source: "component_comparison",
+    free_parameters: comparison.free_parameters?.length ? comparison.free_parameters : currentFreeFitParameters(),
+    scintillation: Boolean(comparison.scintillation),
+    solver: solverConfig,
+  })
 }
 
 function renderFitGuessBuilder(view) {
@@ -2924,6 +3228,7 @@ function fitInitialSourceLabel(source) {
     current_selection: "Current selection",
     previous_fit: "Previous fit",
     imported_solution: "Imported solution",
+    component_comparison: "Component comparison",
     api: "API request",
   }
   return labels[source] || "Current selection"
@@ -2982,7 +3287,11 @@ function updateFitParameterSummary() {
   const maxEvaluationsLabel = maxEvaluations !== null && maxEvaluations > 0
     ? `${Math.round(maxEvaluations)} max evaluations`
     : "auto evaluation budget"
-  fitModelSummary.textContent = `Solver: ${weightingLabel(weighting)} weighting; ${iterations} optimizer pass${iterations === 1 ? "" : "es"}; ${maxEvaluationsLabel}${previousFitLabel}${scintillationLabel}`
+  const timeUpsample = parseOptionalNumber(fitTimeUpsampleInput.value)
+  const timeUpsampleLabel = timeUpsample !== null && timeUpsample >= 1 ? `time upsampling ×${Math.round(timeUpsample)}` : "auto time upsampling"
+  const padding = parseOptionalNumber(fitPaddingInput.value)
+  const paddingLabel = padding !== null && padding >= 0 ? `event window ±${Math.round(padding)} bins` : "padded event window"
+  fitModelSummary.textContent = `Solver: ${weightingLabel(weighting)} weighting; ${iterations} optimizer pass${iterations === 1 ? "" : "es"}; ${maxEvaluationsLabel}; ${timeUpsampleLabel}; ${paddingLabel}${previousFitLabel}${scintillationLabel}`
   fitParameterSummary.innerHTML = `
     <span><strong>Fit</strong> ${escapeHtml(fittedLabels.join(", ") || "none")}</span>
     <span><strong>Fixed</strong> ${escapeHtml(fixedLabels.join(", ") || "none")}</span>
@@ -3089,10 +3398,18 @@ function collectFitSolverConfig() {
   const solver = {
     weighting_mode: weightingMode,
     iterations: Math.max(1, Math.round(Number(fitIterationsInput.value) || 1)),
-    factor_time_upsample: Math.max(1, Math.round(Number(fitTimeUpsampleInput.value) || 1)),
     factor_freq_upsample: Math.max(1, Math.round(Number(fitFreqUpsampleInput.value) || 1)),
     is_folded: Boolean(fitFoldedInput.checked),
     exact_jacobian: Boolean(fitExactJacobianInput.checked),
+  }
+  // Blank leaves the time upsampling and the fit-window padding to the fit.
+  const timeUpsample = parseOptionalNumber(fitTimeUpsampleInput.value)
+  if (timeUpsample !== null && timeUpsample >= 1) {
+    solver.factor_time_upsample = Math.round(timeUpsample)
+  }
+  const padding = parseOptionalNumber(fitPaddingInput.value)
+  if (padding !== null && padding >= 0) {
+    solver.fit_window_padding_bins = Math.round(padding)
   }
   const refFreq = parseOptionalNumber(fitRefFreqInput.value)
   if (refFreq !== null && refFreq > 0) {
@@ -5454,7 +5771,20 @@ function renderResidualTable(optimization) {
   `
 }
 
-function renderScatteringParameterTable(initialParameters, bestfitParameters, uncertainties) {
+function renderScatteringParameterTable(initialParameters, bestfitParameters, uncertainties, options = {}) {
+  const fitted = options.fitted instanceof Set ? options.fitted : null
+  const atBounds = options.atBounds instanceof Set ? options.atBounds : new Set()
+  const solvedPerChannel = new Set(options.scintillation ? ["amplitude", "spectral_index", "spectral_running"] : [])
+  const uncertaintyNote = (key, componentIndex) => {
+    if (solvedPerChannel.has(key)) {
+      return "per channel"
+    }
+    if (fitted && !fitted.has(key)) {
+      return "fixed"
+    }
+    const boundLabel = componentIndex === null ? key : `${key}${componentIndex + 1}`
+    return atBounds.has(boundLabel) ? "upper limit" : null
+  }
   const definitions = [
     ["Arrival Time", "arrival_time", 1e3, "ms", "component"],
     ["Intrinsic Width", "burst_width", 1e3, "ms", "component"],
@@ -5486,6 +5816,7 @@ function renderScatteringParameterTable(initialParameters, bestfitParameters, un
       uncertainties?.[key]?.[0],
       scale,
       unit,
+      uncertaintyNote(key, null),
     )
     if (row) {
       rows.push(row)
@@ -5504,6 +5835,7 @@ function renderScatteringParameterTable(initialParameters, bestfitParameters, un
         uncertainties?.[key]?.[componentIndex],
         scale,
         unit,
+        uncertaintyNote(key, componentIndex),
       )
       if (row) {
         rows.push(row)
@@ -5517,16 +5849,16 @@ function renderScatteringParameterTable(initialParameters, bestfitParameters, un
 
   return `
     <details class="details-card results-details" open>
-      <summary>Initial vs Best-Fit Parameters</summary>
+      <summary>Best-Fit Parameters</summary>
       <div class="residual-table-wrap">
         <table class="residual-table">
           <thead>
             <tr>
               <th>Component</th>
               <th>Parameter</th>
-              <th>Initial</th>
               <th>Best Fit</th>
               <th>Uncertainty</th>
+              <th>Initial</th>
             </tr>
           </thead>
           <tbody>
@@ -5538,7 +5870,7 @@ function renderScatteringParameterTable(initialParameters, bestfitParameters, un
   `
 }
 
-function parameterComparisonRow(scopeLabel, label, initial, bestfit, uncertainty, scale, unit) {
+function parameterComparisonRow(scopeLabel, label, initial, bestfit, uncertainty, scale, unit, note = null) {
   const hasInitial = initial !== null && initial !== undefined && !Number.isNaN(Number(initial))
   const hasBestfit = bestfit !== null && bestfit !== undefined && !Number.isNaN(Number(bestfit))
   if (!hasInitial && !hasBestfit) {
@@ -5546,16 +5878,20 @@ function parameterComparisonRow(scopeLabel, label, initial, bestfit, uncertainty
   }
   const scaledInitial = hasInitial ? `${fmt(Number(initial) * scale, 3)}${unit ? ` ${unit}` : ""}` : "n/a"
   const scaledBestfit = hasBestfit ? `${fmt(Number(bestfit) * scale, 3)}${unit ? ` ${unit}` : ""}` : "n/a"
-  const scaledUncertainty = uncertainty === null || uncertainty === undefined || Number.isNaN(Number(uncertainty))
-    ? "n/a"
-    : `±${fmt(Number(uncertainty) * scale, 3)}${unit ? ` ${unit}` : ""}`
+  const hasUncertainty = uncertainty !== null && uncertainty !== undefined && !Number.isNaN(Number(uncertainty))
+  let scaledUncertainty = hasUncertainty ? `±${fmt(Number(uncertainty) * scale, 3)}${unit ? ` ${unit}` : ""}` : "n/a"
+  if (note === "upper limit" && hasUncertainty && hasBestfit) {
+    scaledUncertainty = `upper limit < ${fmt((Number(bestfit) + Number(uncertainty)) * scale, 3)}${unit ? ` ${unit}` : ""}`
+  } else if (note && note !== "upper limit") {
+    scaledUncertainty = note
+  }
   return (
     `<tr>` +
     `<td>${escapeHtml(scopeLabel)}</td>` +
     `<td>${escapeHtml(label)}</td>` +
-    `<td>${escapeHtml(scaledInitial)}</td>` +
     `<td>${escapeHtml(scaledBestfit)}</td>` +
     `<td>${escapeHtml(scaledUncertainty)}</td>` +
+    `<td>${escapeHtml(scaledInitial)}</td>` +
     `</tr>`
   )
 }
@@ -6610,6 +6946,7 @@ function updateControlStates() {
   setDmButton.disabled = !hasSession || isBusy || !hasRequiredDm
   optimizeDmButton.disabled = !hasSession || isBusy || !hasRequiredDm
   fitModelButton.disabled = !hasSession || isBusy || !hasFitParameters
+  fitCompareButton.disabled = !hasSession || isBusy || !hasFitParameters
   applyBestDmButton.disabled = !hasSession || isBusy || !hasBestDm
   snapshotDirectorySelect.disabled = isBusy || state.snapshotLibrary.length === 0
   snapshotFileSelect.disabled = isBusy || snapshotsForDirectory(state.selectedSnapshotDirectory).length === 0
@@ -6668,6 +7005,7 @@ function busyButtonForAction(action) {
   if (action === "optimize_dm") return optimizeDmButton
   if (action === "apply_best_dm") return applyBestDmButton
   if (action === "fit_model") return fitModelButton
+  if (action === "compare_model_components") return fitCompareButton
   if (action === "run_temporal_structure_analysis") return runSpectralButton
   if (action === "run_spectral_analysis") return runSpectralButton
   if (action === "run_drift_analysis") return runDriftButton
@@ -6692,6 +7030,7 @@ function busyButtonText(action) {
   if (action === "auto_localize") return "Localizing..."
   if (action === "optimize_dm") return "Sweeping DM..."
   if (action === "fit_model") return "Fitting..."
+  if (action === "compare_model_components") return "Comparing..."
   if (action === "run_temporal_structure_analysis") return "Running..."
   if (action === "run_spectral_analysis") return "Running..."
   if (action === "run_drift_analysis") return "Measuring..."
@@ -6727,6 +7066,7 @@ function actionBusyText(action) {
     compute_widths: "Computing width comparison",
     accept_width_result: "Accepting width result",
     fit_model: "Running model fit",
+    compare_model_components: "Comparing component counts",
     run_temporal_structure_analysis: "Running temporal structure",
     run_spectral_analysis: "Running power spectrum",
     run_drift_analysis: "Measuring drift rate",
@@ -6754,6 +7094,7 @@ function actionSuccessText(action) {
     compute_widths: "Width comparison updated",
     accept_width_result: "Accepted width updated",
     fit_model: "Model fit completed",
+    compare_model_components: "Component counts compared",
     run_temporal_structure_analysis: "Temporal structure updated",
     run_spectral_analysis: "Power spectrum updated",
     run_drift_analysis: "Drift rate measured",

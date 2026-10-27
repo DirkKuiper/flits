@@ -506,7 +506,7 @@
                     </select>
                   </label>
                   <label class="field">
-                    <span>Weight Start Bin</span>
+                    <span>Weight Start Bin <span class="tooltip-icon" data-tooltip="Manual weighting range, in time bins from the start of the event window.">?</span></span>
                     <input id="fitWeightStartInput" type="number" min="0" step="1">
                   </label>
                   <label class="field">
@@ -522,16 +522,20 @@
                     <input id="fitMaxEvaluationsInput" type="number" min="1" max="50000" step="1" placeholder="auto">
                   </label>
                   <label class="field">
-                    <span>Time Upsampling</span>
-                    <input id="fitTimeUpsampleInput" type="number" min="1" max="32" step="1" value="1">
+                    <span>Time Upsampling <span class="tooltip-icon" data-tooltip="Sub-samples per time bin that the model is averaged over, as the data integrate over each bin. Blank (auto) refits with enough sub-samples to resolve the narrowest fitted width.">?</span></span>
+                    <input id="fitTimeUpsampleInput" type="number" min="1" max="32" step="1" placeholder="auto">
+                  </label>
+                  <label class="field">
+                    <span>Fit Window Padding <span class="tooltip-icon" data-tooltip="Time bins fitted on each side of the event window. Blank (auto) adds the event window's own length, at least 8 bins, so the baseline and any scattering tail are in the fit.">?</span></span>
+                    <input id="fitPaddingInput" type="number" min="0" step="1" placeholder="auto">
                   </label>
                   <label class="field">
                     <span>Frequency Upsampling</span>
                     <input id="fitFreqUpsampleInput" type="number" min="1" max="32" step="1" value="1">
                   </label>
                   <label class="field">
-                    <span>Reference Frequency (MHz)</span>
-                    <input id="fitRefFreqInput" type="number" min="0" step="0.001">
+                    <span>Reference Frequency (MHz) <span class="tooltip-icon" data-tooltip="Frequency at which the scattering timescale and the spectrum are quoted. Blank uses the lowest frequency of the selected band.">?</span></span>
+                    <input id="fitRefFreqInput" type="number" min="0" step="0.001" placeholder="lowest frequency">
                   </label>
                 </div>
                 <div class="fit-advanced-options">
@@ -546,8 +550,19 @@
                   <input id="fitSolutionInput" type="file" accept=".json,application/json" hidden>
                 </div>
               </details>
-              <div class="export-actions">
+              <div class="export-actions fit-run-actions">
                 <button class="primary-button" id="fitModelButton">Run Model Fit</button>
+                <span class="fit-compare-controls">
+                  <button class="secondary-button" id="fitCompareButton" type="button" data-tooltip="Fit one, two, ... components, each starting from the previous fit with a component added at the largest residual, and compare them by BIC, AIC and an F-test.">Compare Component Counts</button>
+                  <label class="fit-compare-max">up to
+                    <select id="fitCompareMaxInput" aria-label="Largest component count to compare">
+                      <option value="2">2</option>
+                      <option value="3" selected>3</option>
+                      <option value="4">4</option>
+                      <option value="5">5</option>
+                    </select>
+                  </label>
+                </span>
               </div>
               <div id="fittingContent" class="results-content">
                 <div class="empty-state">No 2D model fit yet. Run the fit on the current selection to inspect model width, scattering time, and residuals.</div>
