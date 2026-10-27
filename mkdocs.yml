@@ -52,9 +52,13 @@ plugins:
         Getting started:
           - getting-started.md: Install FLITS, try the demo, and load a burst
           - guided-workflow.md: A complete worked example on a public GBT burst, with reference values
+          - format-workflows.md: Generate synthetic PSRFITS and CHIME inputs, measure and replay them
+          - validation.md: Independent comparisons, injected signals, numerical tolerances and tested limits
           - installation.md: Python, Docker, Apptainer, and remote or HPC deployment
         Scripting:
+          - user-guide/inspection.md: Inspect file metadata and verify local and server runtime identities
           - user-guide/headless-measurement.md: Measure bursts from the command line or Python, in batches
+          - user-guide/automation-contracts.md: Per-burst JSON manifests and versioned offline output schemas
           - user-guide/headless-replay.md: Recompute and check a saved session without a browser
           - user-guide/coding-agents.md: Have coding agents use FLITS, with the FLITS skill
           - developer/api-reference.md: The Python API, BurstSession first
@@ -102,12 +106,15 @@ nav:
   - Getting Started:
       - Quickstart: getting-started.md
       - Guided Workflow: guided-workflow.md
+      - PSRFITS and CHIME Examples: format-workflows.md
       - Installation and Deployment: installation.md
   - User Guide:
       - Session Workflow: user-guide/session-workflow.md
       - Exports and Snapshots: user-guide/exports-and-snapshots.md
       - Uncertainties: user-guide/uncertainties.md
       - Headless Measurement: user-guide/headless-measurement.md
+      - Inspection and Runtime: user-guide/inspection.md
+      - Batch Manifests and Schemas: user-guide/automation-contracts.md
       - Headless Replay: user-guide/headless-replay.md
       - Coding Agents: user-guide/coding-agents.md
       - Supported Formats: user-guide/supported-formats.md
@@ -121,10 +128,12 @@ nav:
       - Rotation-Measure Synthesis: analysis/rm-synthesis.md
       - Model Fitting: analysis/model-fitting.md
   - Reference:
+      - Scientific Validation: validation.md
       - Python API: developer/api-reference.md
       - References: references.md
   - Developer:
       - Testing: developer/testing.md
+      - Agent Evaluations: developer/agent-evaluations.md
       - JOSS Manuscript: developer/joss-submission.md
       - Publishing: developer/publishing.md
       - Custom Readers: developer/custom-readers.md

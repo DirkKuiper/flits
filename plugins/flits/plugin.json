@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "flits",
+  "version": "1.0.0",
+  "description": "Measure detected fast radio bursts with FLITS: fluence, widths, DM, drift and polarization from filterbank, PSRFITS and CHIME data",
+  "author": {
+    "name": "Dirk Kuiper",
+    "url": "https://github.com/DirkKuiper"
+  },
+  "homepage": "https://dirkkuiper.github.io/flits/",
+  "repository": "https://github.com/DirkKuiper/flits",
+  "license": "GPL-3.0-only",
+  "keywords": ["fast radio bursts", "FRB", "radio astronomy", "fluence", "dispersion measure", "filterbank", "PSRFITS", "CHIME"]
+}

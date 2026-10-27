@@ -612,10 +612,15 @@ def fit_model_selected_band(
                     **context,
                 )
             if not fit.success:
+                best_parameters = {}
+                if fit.status == 0:
+                    best_parameters = fit.parameters.to_dict()
+                elif completed_iterations:
+                    best_parameters = current.to_dict()
                 return _failed_result(
                     status="evaluation_limit_exceeded" if fit.status == 0 else "fit_failed",
                     message=fit.message or "The model fit could not converge for the current selection.",
-                    bestfit_parameters=current.to_dict() if completed_iterations else {},
+                    bestfit_parameters=best_parameters,
                     fit_statistics=fit.fit_statistics,
                     fit_parameters=list(fit.layout.fit_parameters),
                     fit_iterations_completed=completed_iterations,

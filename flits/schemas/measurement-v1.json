@@ -1,0 +1,836 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/DirkKuiper/flits/main/flits/schemas/measurement-v1.json",
+  "title": "FLITS measurement record v1",
+  "description": "One JSON/JSONL record. flits measure --format json wraps records in an array. Nullable values mean unavailable; inspect status, flags and uncertainty classifications before using quantities.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "file": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "low_sn",
+        "no_detection",
+        "error"
+      ]
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "flits_version": {
+      "type": "string"
+    },
+    "dm": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "telescope": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "selection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/selection"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "localization": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/localization"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "measurements": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/measurements"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "snapshot": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provenance_warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "file",
+    "status",
+    "error",
+    "flits_version",
+    "dm",
+    "telescope",
+    "selection",
+    "localization",
+    "measurements",
+    "snapshot",
+    "provenance_warnings"
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "selection": {
+      "type": "object",
+      "properties": {
+        "event_source": {
+          "enum": [
+            "auto_localized",
+            "manual"
+          ]
+        },
+        "crop_ms": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "event_ms": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "offpulse_ms": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "band_mhz": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "time_factor": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "freq_factor": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mask_profile": {
+          "enum": [
+            "fast",
+            "auto",
+            "thorough",
+            null
+          ]
+        },
+        "masked_channels": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "event_source",
+        "crop_ms",
+        "event_ms",
+        "offpulse_ms",
+        "band_mhz",
+        "time_factor",
+        "freq_factor",
+        "mask_profile",
+        "masked_channels"
+      ],
+      "additionalProperties": true
+    },
+    "localization": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "ok",
+            "low_sn",
+            "no_detection"
+          ]
+        },
+        "peak_bin": {
+          "type": "integer"
+        },
+        "event_start_bin": {
+          "type": "integer"
+        },
+        "event_end_bin": {
+          "type": "integer"
+        },
+        "spec_lo": {
+          "type": "integer"
+        },
+        "spec_hi": {
+          "type": "integer"
+        },
+        "band_limited": {
+          "type": "boolean"
+        },
+        "best_width_bins": {
+          "type": "integer"
+        },
+        "detection_snr": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "integrated_snr": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "search_window_bins": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offpulse_regions": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "iterations": {
+          "type": "integer"
+        },
+        "warning_flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "status",
+        "peak_bin",
+        "event_start_bin",
+        "event_end_bin",
+        "spec_lo",
+        "spec_hi",
+        "band_limited",
+        "best_width_bins",
+        "detection_snr",
+        "integrated_snr",
+        "search_window_bins",
+        "offpulse_regions",
+        "iterations",
+        "warning_flags"
+      ],
+      "additionalProperties": true
+    },
+    "measurements": {
+      "type": "object",
+      "properties": {
+        "dm": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "toa_peak_topo_mjd": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "toa_topo_mjd": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "mjd_at_peak": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "toa_inf_topo_mjd": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "toa_inf_bary_mjd_tdb": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "dispersion_to_infinite_frequency_ms": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "barycentric_correction_ms": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "toa_reference_frequency_mhz": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "snr_peak": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "snr_integrated": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "width_ms_acf": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "width_ms_model": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "spectral_width_mhz_acf": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "tau_sc_ms": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "peak_flux_jy": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "fluence_jyms": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "iso_e": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "event_duration_ms": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "spectral_extent_mhz": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "burst_name": {
+          "type": "string"
+        },
+        "toa_status": {
+          "type": "string"
+        },
+        "toa_status_reason": {
+          "type": "string"
+        },
+        "peak_positions_ms": {
+          "type": "array",
+          "items": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "measurement_flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "uncertainties": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "uncertainty_details": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/uncertainty"
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "calibration_method": {
+              "type": "string"
+            },
+            "noise_basis": {
+              "type": "string"
+            },
+            "tsamp_ms": {
+              "type": "number"
+            },
+            "npol": {
+              "type": "integer"
+            },
+            "effective_bandwidth_mhz": {
+              "type": "number"
+            },
+            "warning_flags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "calibration_method",
+            "noise_basis",
+            "tsamp_ms",
+            "npol",
+            "effective_bandwidth_mhz",
+            "warning_flags"
+          ],
+          "additionalProperties": true
+        },
+        "mask_count": {
+          "type": "integer"
+        },
+        "masked_channels": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "width_results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/width"
+          }
+        },
+        "accepted_width": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/acceptedWidth"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "diagnostics": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "dm",
+        "toa_peak_topo_mjd",
+        "toa_topo_mjd",
+        "mjd_at_peak",
+        "toa_inf_topo_mjd",
+        "toa_inf_bary_mjd_tdb",
+        "dispersion_to_infinite_frequency_ms",
+        "barycentric_correction_ms",
+        "toa_reference_frequency_mhz",
+        "snr_peak",
+        "snr_integrated",
+        "width_ms_acf",
+        "width_ms_model",
+        "spectral_width_mhz_acf",
+        "tau_sc_ms",
+        "peak_flux_jy",
+        "fluence_jyms",
+        "iso_e",
+        "event_duration_ms",
+        "spectral_extent_mhz",
+        "burst_name",
+        "toa_status",
+        "toa_status_reason",
+        "peak_positions_ms",
+        "measurement_flags",
+        "uncertainties",
+        "uncertainty_details",
+        "provenance",
+        "mask_count",
+        "masked_channels",
+        "width_results",
+        "accepted_width"
+      ],
+      "additionalProperties": true
+    },
+    "uncertainty": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "units": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "classification": {
+          "enum": [
+            "formal_1sigma",
+            "statistical_only",
+            "model_hessian",
+            "resolution_limit",
+            "heuristic_local_fit",
+            "conservative_bound",
+            "diagnostic_only"
+          ]
+        },
+        "is_formal_1sigma": {
+          "type": "boolean",
+          "deprecated": true
+        },
+        "publishable": {
+          "type": "boolean",
+          "deprecated": true
+        },
+        "basis": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tooltip": {
+          "type": "string",
+          "minLength": 1
+        },
+        "warning_flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "value",
+        "units",
+        "classification",
+        "is_formal_1sigma",
+        "publishable",
+        "basis",
+        "tooltip",
+        "warning_flags"
+      ],
+      "additionalProperties": true
+    },
+    "width": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "uncertainty": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "units": {
+          "type": "string"
+        },
+        "event_window_ms": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "spectral_extent_mhz": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "offpulse_windows_ms": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "masked_channels": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "effective_bandwidth_mhz": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "algorithm_name": {
+          "type": "string"
+        },
+        "uncertainty_details": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/uncertainty"
+          }
+        },
+        "quality_flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "method",
+        "label",
+        "value",
+        "uncertainty",
+        "units",
+        "event_window_ms",
+        "spectral_extent_mhz",
+        "offpulse_windows_ms",
+        "masked_channels",
+        "effective_bandwidth_mhz",
+        "algorithm_name",
+        "uncertainty_details",
+        "quality_flags"
+      ],
+      "additionalProperties": true
+    },
+    "acceptedWidth": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "type": "string"
+        },
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "uncertainty": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "units": {
+          "type": "string"
+        },
+        "uncertainty_detail": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uncertainty"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "method",
+        "value",
+        "uncertainty",
+        "units",
+        "uncertainty_detail"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "ok",
+              "low_sn"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "error": {
+            "type": "null"
+          },
+          "selection": {
+            "$ref": "#/$defs/selection"
+          },
+          "measurements": {
+            "$ref": "#/$defs/measurements"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "no_detection"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "error": {
+            "type": "null"
+          },
+          "selection": {
+            "$ref": "#/$defs/selection"
+          },
+          "localization": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/localization"
+              },
+              {
+                "properties": {
+                  "status": {
+                    "const": "no_detection"
+                  }
+                }
+              }
+            ]
+          },
+          "measurements": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "error"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "dm": {
+            "type": "null"
+          },
+          "telescope": {
+            "type": "null"
+          },
+          "selection": {
+            "type": "null"
+          },
+          "localization": {
+            "type": "null"
+          },
+          "measurements": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
+}

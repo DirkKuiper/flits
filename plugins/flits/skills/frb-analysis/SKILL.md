@@ -1,22 +1,59 @@
 ---
 name: frb-analysis
-description: Measure fast radio bursts (FRBs) and other radio transients in dynamic spectra with FLITS - S/N, peak flux density, fluence, widths, arrival times, DM optimization, sub-burst drift rate and rotation measure - from SIGPROC filterbank (.fil), PSRFITS (.fits, .sf) or CHIME/FRB HDF5 (.h5) files. Use whenever the user wants to load, dedisperse, mask interference in, localize, inspect or measure a detected burst, instead of writing dedispersion or measurement code by hand. Not for searching data for new bursts.
+description: Analyse detected fast radio bursts (FRBs) with FLITS from SIGPROC filterbank (.fil), PSRFITS (.fits, .sf) or CHIME/FRB HDF5 (.h5) data. Use for burst fluence, flux, S/N, widths, arrival times, dedispersion, RFI masking, DM optimization, sub-burst drift and rotation measure. Not for finding new bursts, imaging, host-galaxy analysis or cosmological DM estimates. Respect a user's explicit choice of another analysis package.
 license: GPL-3.0-only
-compatibility: Requires Python 3.11 or later and the flits package (pip install flits).
 ---
 
 # Analysing a burst with FLITS
 
-FLITS measures bursts that have already been detected. Use it rather than
-writing your own dedispersion, interference masking, burst localization or
-measurement code: its steps are tested, each uncertainty says what it includes,
-and every choice can be saved and replayed.
+FLITS measures bursts that have already been detected. Prefer its tested
+dedispersion, interference masking, localization and measurement routines when
+they fit the task. Preserve the user's chosen package or method. Each
+uncertainty says what it includes, and selections can be saved and replayed.
+
+For CHIME catalog `calibrated_wfall`, the current reader normalizes amplitudes
+and FLITS flux/fluence use SEFD-based radiometer calibration. They do not
+directly integrate the file's native Jy scale. If the task requires the catalog's
+original flux calibration, preserve that data and follow its calibrated-data
+workflow; do not relabel an SEFD-based estimate as native catalog fluence.
 
 ## Set up
 
+Use Python 3.11+ and FLITS 1.6+ in an environment that can access the burst files.
+
+Run [scripts/check_environment.py](scripts/check_environment.py) with the Python
+interpreter that will analyse the data. It reports the interpreter, FLITS
+version and location, and missing capabilities as JSON. Exit code 0 means it
+is ready for measurement. For a model fit, add `--require native_fitting`;
+for choosing the component count, also add `--require component_comparison`.
+These capabilities are reported separately: some released versions support
+native fits but lack component comparison. Do not call a missing method or
+block a basic measurement on that optional method. If setup is needed, select
+a Python 3.11+ environment and run:
+
 ```bash
-python -c "import flits; print(flits.__version__)" || pip install flits
+python -m pip install --upgrade "flits>=1.6"
 ```
+
+Run the check again after installation. Use `python -m flits` in place of
+`flits` if the command on PATH belongs to a different environment. Installing
+this skill does not install FLITS or give a remote agent access to local files.
+
+If an old version is still imported after upgrading, check the reported module
+path. A local source checkout can shadow the installed package; `pip` does not
+update that checkout. Use an appropriate current checkout or run the installed
+package from outside it. Do not switch or reset a research branch just to
+upgrade an analysis environment.
+
+Before reusing a browser server, verify its runtime as well: a process already
+running can still use older code after a package upgrade. A saved fit records
+its own fitter and software provenance, which may differ from the current
+server. Check the provenance of a newly computed fit when validating an upgrade.
+If the installed package provides `flits.runtime_info`, use
+`python -m flits info --server URL` to compare it with the intended server.
+A legacy health response cannot prove a match. If its runtime cannot be verified,
+preserve the existing session and start the intended environment on a free
+port. Do not assume upgrading a package updates an existing process.
 
 ## Pick the entry point
 
@@ -27,8 +64,13 @@ python -c "import flits; print(flits.__version__)" || pip install flits
 | DM sweeps, widths, drift, polarization, model fits | `flits.BurstSession` |
 | Let the user inspect the burst by eye | `flits --data-dir DIR`, then the user opens <http://127.0.0.1:8000> |
 
-Ask the user for the DM if they have not given one. Times are in ms from the
-start of the file, frequencies in MHz, and DM in pc cm^-3.
+Use the user's DM when supplied. Otherwise inspect the file with
+`flits.io.inspect_filterbank(path)` before asking: CHIME public-catalog
+waterfalls are already dedispersed and are loaded at DM 0; beamformed `BBData`
+power products carry their native `coherent_dm`. Do not infer an unknown DM
+from a filename or apply a catalog's astrophysical DM again to a dedispersed
+waterfall. Ask when the appropriate loading DM remains unknown. Times are in
+ms from the start of the file, frequencies in MHz, and DM in pc cm^-3.
 
 ## Command line
 
@@ -43,6 +85,12 @@ choices with `--event`, `--offpulse`, `--band` or `--crop`. `--snapshot-dir DIR`
 saves each burst's session, which the user can reopen in the interface and
 which `flits replay SNAPSHOT --check` recomputes. `flits measure --help` lists
 every option.
+
+Start with the documented entry point. Avoid reading package internals or
+writing a replacement analysis when the command already supplies the requested
+measurement. Save JSON and a session, inspect their status/flags/uncertainty
+details, and add further diagnostics only where the task or a warning calls
+for them. Do not claim an artifact was checked visually unless it was opened.
 
 ## Python
 
@@ -88,7 +136,7 @@ with open("burst_flits_session.json", "w") as f:
 | Sub-burst drift rate | `run_drift_analysis` |
 | Rotation measure | `polarization_capability`, then `run_polarization_analysis` |
 | Spectral and temporal structure | `run_spectral_analysis`, `run_temporal_structure_analysis` |
-| Burst model fit (the fitburst model) | `fit_model`; `compare_model_components` to choose the number of components |
+| Burst model fit (FLITS's native implementation of the fitburst model) | `fit_model`; `compare_model_components` to choose the number of components when available |
 | Reopen a saved session | `BurstSession.from_snapshot` |
 
 ## Before reporting a number
@@ -111,8 +159,9 @@ with open("burst_flits_session.json", "w") as f:
 
 - Search data for new bursts. Run a search pipeline first, then measure what it
   finds with FLITS.
-- Read a format it does not support. Write a reader plugin rather than
-  converting the data by hand:
+- Read every FITS or HDF5 schema. Inspect unsupported inputs and explain the
+  missing format; use a documented conversion or propose a reader plugin when
+  appropriate to the user's task:
   <https://dirkkuiper.github.io/flits/developer/custom-readers/>.
 
 ## More

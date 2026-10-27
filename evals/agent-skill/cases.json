@@ -1,0 +1,186 @@
+[
+  {
+    "id": "fluence",
+    "prompt": "Measure the fluence and peak flux of the detected burst in burst.fil at DM 527.7. SEFD is 10 Jy with 10% uncertainty.",
+    "should_select": true,
+    "checks": [
+      "uses_flits",
+      "checks_status_and_flags",
+      "reports_uncertainty_classification"
+    ]
+  },
+  {
+    "id": "width",
+    "prompt": "How long is the detected radio pulse in burst.sf? The loading DM is 0. Save enough information for me to review the selection.",
+    "should_select": true,
+    "checks": [
+      "uses_flits",
+      "saves_session",
+      "reports_width_definition"
+    ]
+  },
+  {
+    "id": "batch",
+    "prompt": "Measure S/N, widths and fluences for the already detected bursts in data/*.fil at DM 349. Keep failures in the output table.",
+    "should_select": true,
+    "checks": [
+      "uses_flits",
+      "retains_failed_records",
+      "checks_status_and_flags"
+    ]
+  },
+  {
+    "id": "catalog-dm",
+    "prompt": "This CHIME public-catalog waterfall is already dedispersed. Its astrophysical DM is 500. Measure its fluence from catalog.h5.",
+    "should_select": true,
+    "checks": [
+      "uses_flits",
+      "loads_at_dm_zero",
+      "does_not_double_dedisperse"
+    ]
+  },
+  {
+    "id": "bbdata-dm",
+    "prompt": "Inspect the detected burst in beamformed BBData power.h5 and measure it at the native coherent-dedispersion DM recorded in the file.",
+    "should_select": true,
+    "checks": [
+      "inspects_metadata",
+      "uses_recorded_coherent_dm",
+      "uses_flits"
+    ]
+  },
+  {
+    "id": "unknown-dm",
+    "prompt": "Measure the detected burst in burst.fil. I have not supplied the dispersion measure.",
+    "should_select": true,
+    "checks": [
+      "inspects_metadata",
+      "asks_if_loading_dm_unknown",
+      "does_not_invent_dm"
+    ]
+  },
+  {
+    "id": "calibration",
+    "prompt": "Measure fluence for burst.fil at DM 300 using SEFD 12 Jy. The SEFD uncertainty is unknown.",
+    "should_select": true,
+    "checks": [
+      "uses_flits",
+      "does_not_invent_calibration_uncertainty",
+      "identifies_statistical_only_uncertainty"
+    ]
+  },
+  {
+    "id": "weak-burst",
+    "prompt": "Measure this detected low-S/N burst in burst.fil at DM 0 and explain whether its automatic selection needs review.",
+    "should_select": true,
+    "checks": [
+      "uses_flits",
+      "checks_status_and_flags",
+      "retains_weak_result"
+    ]
+  },
+  {
+    "id": "rfi",
+    "prompt": "The known FRB in burst.fil at DM 400 is fainter than some interference. Estimate its width and fluence.",
+    "should_select": true,
+    "checks": [
+      "uses_flits",
+      "keeps_masking_enabled",
+      "reviews_localization"
+    ]
+  },
+  {
+    "id": "rotation-measure",
+    "prompt": "Estimate rotation measure for the detected burst in stokes.fits at DM 0. Check whether the file establishes a polarization basis.",
+    "should_select": true,
+    "checks": [
+      "checks_stokes_capability",
+      "does_not_guess_polarization_basis",
+      "uses_flits"
+    ]
+  },
+  {
+    "id": "drift",
+    "prompt": "Measure the downward frequency drift of the detected sub-bursts in burst.fil at DM 0.",
+    "should_select": true,
+    "checks": [
+      "uses_session_drift_analysis",
+      "reports_mhz_per_ms",
+      "addresses_dm_drift_degeneracy"
+    ]
+  },
+  {
+    "id": "replay",
+    "prompt": "Check whether the measurements in burst_flits_session.json reproduce from the original burst file.",
+    "should_select": true,
+    "checks": [
+      "uses_replay_check",
+      "reports_differences_or_failure",
+      "does_not_claim_all_analyses_are_replayed"
+    ]
+  },
+  {
+    "id": "new-burst-search",
+    "prompt": "Search this hour-long radio observation for previously undetected fast radio bursts.",
+    "should_select": false,
+    "checks": [
+      "does_not_use_flits_as_search_pipeline"
+    ]
+  },
+  {
+    "id": "cosmological-dm",
+    "prompt": "Estimate the redshift of an FRB from its dispersion measure and a cosmological electron-density model.",
+    "should_select": false,
+    "checks": [
+      "does_not_use_flits_for_cosmological_dm"
+    ]
+  },
+  {
+    "id": "host-galaxy",
+    "prompt": "Rank likely host galaxies for this localized FRB from a galaxy catalog.",
+    "should_select": false,
+    "checks": [
+      "does_not_use_flits_for_host_association"
+    ]
+  },
+  {
+    "id": "optical-fits",
+    "prompt": "Measure aperture photometry of stars in this optical image stars.fits.",
+    "should_select": false,
+    "checks": [
+      "does_not_route_on_fits_extension_alone"
+    ]
+  },
+  {
+    "id": "generic-hdf5",
+    "prompt": "Plot temperature versus time from this laboratory sensor file temperatures.h5.",
+    "should_select": false,
+    "checks": [
+      "does_not_route_on_hdf5_extension_alone"
+    ]
+  },
+  {
+    "id": "explicit-alternative",
+    "prompt": "Use fitburst directly to fit the detected radio burst in burst.npz. I specifically want the upstream fitburst package.",
+    "should_select": false,
+    "checks": [
+      "respects_explicit_package_choice"
+    ]
+  },
+  {
+    "id": "radio-imaging",
+    "prompt": "Make a radio continuum image from these interferometric visibilities.",
+    "should_select": false,
+    "checks": [
+      "does_not_use_flits_for_imaging"
+    ]
+  },
+  {
+    "id": "repo-maintenance",
+    "prompt": "Fix a typo in the FLITS README and run the documentation build.",
+    "should_select": false,
+    "checks": [
+      "does_not_invoke_scientific_analysis_for_repository_maintenance"
+    ]
+  }
+]

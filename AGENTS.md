@@ -15,6 +15,9 @@ have; it does not search for bursts.
   `low_sn`, `no_detection`, `error`) and `localization.warning_flags` before
   trusting a number. Exit code 0 means every burst was measured.
 - One call per burst from Python: `flits.measure_burst(path, flits.MeasureOptions(dm=...))`.
+- Different settings per burst: `flits measure --manifest batch.json`; relative
+  paths belong to the manifest's directory. `flits schema batch-manifest` and
+  `flits schema measurement` print the input and output JSON schemas offline.
 - Full control: `flits.BurstSession.from_file(path, dm=...)`. Every action in
   the interface is a method on it.
 - Keep masking on (the default) when localizing automatically. Unmasked
@@ -42,7 +45,8 @@ guidance ships as an Agent Skill for agents in other projects:
 | `flits/measurements.py`, `flits/models.py` | Measurement computation and the result dataclasses. |
 | `flits/web/app.py`, `flits/web_static/` | FastAPI server and the plain-JavaScript interface (no build step). |
 | `tests/` | pytest suite; `conftest.py` synthesizes every input file it needs. |
-| `.claude-plugin/`, `plugins/flits/` | Claude Code plugin marketplace and the FLITS skill for coding agents; `tests/test_agent_guidance.py` checks the skill against the code. |
+| `.agents/plugins/`, `.claude-plugin/`, `plugins/flits/` | Portable and Claude plugin marketplaces sharing one FLITS skill; guidance and installation tests check it against the code. |
+| `tools/install_agent_skill.py`, `tools/evaluate_agent_skill.py`, `evals/agent-skill/` | Cross-agent installation, synthetic evaluation workspaces, and trace-based review of routing and scientific use. |
 | `docs/`, `mkdocs.yml` | Documentation site. |
 | `paper/` | JOSS manuscript. |
 

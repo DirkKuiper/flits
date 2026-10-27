@@ -17,6 +17,22 @@ Run it against a directory of filterbanks:
 flits --data-dir /path/to/filterbanks --host 127.0.0.1 --port 8123
 ```
 
+### Windows virtual environment
+
+For an isolated install on Windows, call the virtual environment's Python
+directly from PowerShell; activation is optional:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install flits
+.\.venv\Scripts\python.exe -m flits --data-dir "C:\data\bursts"
+```
+
+On Linux or macOS, the equivalent interpreter is `.venv/bin/python`.
+Using the environment's Python with `-m flits` also ensures that the command
+uses the same installation as your scripts.
+
 ## Local checkout
 
 If you are developing locally or want to run from a source checkout:
@@ -34,7 +50,43 @@ You can also install directly from GitHub:
 pip install "git+https://github.com/DirkKuiper/flits.git"
 ```
 
+## Installation checks
+
+The `wheel-platforms` CI job builds and installs a wheel with the package's
+runtime dependency ranges, then runs outside the source checkout. It uses
+Python 3.11 and 3.14 on these hosted runners:
+
+| Platform | Runner |
+| --- | --- |
+| Linux x86-64 | `ubuntu-latest` |
+| Linux ARM64 | `ubuntu-24.04-arm` |
+| macOS ARM64 | `macos-latest` |
+| macOS Intel | `macos-15-intel` |
+| Windows x86-64 | `windows-latest` |
+
+Each job records the actual OS, CPU architecture, Python version and imported
+package path. It reads synthetic SIGPROC, folded PSRFITS and CHIME HDF5 files,
+checks measurements and Gaussian-width recovery with the native fitter, writes
+PNG export artifacts, replays a saved session, and starts the server over real
+HTTP to check the interface assets. Results and server logs are retained as CI
+artifacts. The script reuses `tests/conftest.py`; no observatory data is needed.
+
+The full numerical unit suite separately runs on Linux with Python 3.11–3.14,
+and browser tests run in Chromium on Linux. The wheel checks exercise specific
+synthetic formats and workflows; they do not establish compatibility with every
+instrument's file dialect or every optional reader dependency. Windows ARM64
+is outside this matrix.
+
+Runner labels follow [GitHub's hosted-runner documentation](https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job).
+
 ## Docker
+
+Image builds target `linux/amd64` and `linux/arm64`. CI builds each architecture
+on a native runner and exercises the installed image with the same analysis,
+export, replay and HTTP checks as the wheel. The image's runtime dependencies
+use `requirements.txt`; wheel checks use the compatible package ranges.
+The CI-only `pytest` installation supports fixture generation in a disposable
+test container and is not added to the published image.
 
 The published image is available at `ghcr.io/dirkkuiper/flits`.
 

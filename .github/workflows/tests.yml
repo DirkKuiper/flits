@@ -51,6 +51,57 @@ jobs:
       - name: Run test suite
         run: python -m pytest -q
 
+  wheel-platforms:
+    name: wheel (${{ matrix.os }}, ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
+        python-version: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Build and install the wheel
+        shell: python {0}
+        run: |
+          import os, subprocess, sys
+          from pathlib import Path
+          destination = Path(os.environ["RUNNER_TEMP"]) / "wheel-dist"
+          subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "build"])
+          subprocess.check_call([sys.executable, "-m", "build", "--wheel", "--outdir", str(destination)])
+          wheels = list(destination.glob("*.whl"))
+          assert len(wheels) == 1, wheels
+          subprocess.check_call([sys.executable, "-m", "pip", "install", str(wheels[0]), "pytest"])
+
+      - name: Exercise the installed package outside the checkout
+        working-directory: ${{ runner.temp }}
+        shell: python {0}
+        run: |
+          import os, subprocess, sys
+          from pathlib import Path
+          source = Path(os.environ["GITHUB_WORKSPACE"])
+          subprocess.check_call([
+            sys.executable, str(source / ".github" / "scripts" / "wheel_smoke.py"),
+            "--source-root", str(source), "--output", "wheel-smoke.json",
+          ])
+
+      - name: Retain platform evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: |
+            ${{ runner.temp }}/wheel-smoke.json
+            ${{ runner.temp }}/wheel-smoke-server.log
+          if-no-files-found: warn
+
   browser:
     # The interface is how FLITS is used, and it is the largest surface the unit
     # tests cannot reach. These drive a real browser against a real server.
@@ -108,7 +159,9 @@ jobs:
         run: python -m ruff format --check .
 
       - name: Type check
-        run: python -m mypy
+        run: |
+          python -m mypy
+          python -m mypy .github/scripts/wheel_smoke.py
 
   minimum-versions:
     # Prove that the lower bounds declared in pyproject.toml are real: install
@@ -142,6 +195,7 @@ jobs:
             "matplotlib==3.8.0" \
             "h5py==3.10.0" \
             "pytest>=8.3" \
+            "jsonschema>=4.18,<5" \
             "httpx>=0.27"
           python -m pip install --no-deps -e .
 
@@ -175,10 +229,23 @@ jobs:
 
   container:
     runs-on: ubuntu-latest
+    if: always()
     needs:
       - test
+      - wheel-platforms
+      - container-arm64
 
     steps:
+      - name: Require unit and platform checks to pass
+        env:
+          UNIT_RESULT: ${{ needs.test.result }}
+          WHEEL_RESULT: ${{ needs.wheel-platforms.result }}
+          ARM_RESULT: ${{ needs.container-arm64.result }}
+        run: |
+          test "$UNIT_RESULT" = success
+          test "$WHEEL_RESULT" = success
+          test "$ARM_RESULT" = success
+
       - name: Check out repository
         uses: actions/checkout@v7
 
@@ -186,4 +253,39 @@ jobs:
         run: docker build -t flits-ci .
 
       - name: Smoke test container image
-        run: docker run --rm flits-ci flits --help
+        run: |
+          mkdir -p "$RUNNER_TEMP/container-evidence"
+          docker run --rm --workdir /tmp \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/smoke-source,readonly" \
+            --mount "type=bind,source=$RUNNER_TEMP/container-evidence,target=/evidence" \
+            flits-ci sh -c 'python -m pip install pytest && python /smoke-source/.github/scripts/wheel_smoke.py --source-root /smoke-source --output /evidence/wheel-smoke.json'
+
+      - name: Retain container evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: container-amd64
+          path: ${{ runner.temp }}/container-evidence
+          if-no-files-found: warn
+
+  container-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build container natively on ARM64
+        run: docker build -t flits-ci .
+      - name: Exercise the installed container package
+        run: |
+          mkdir -p "$RUNNER_TEMP/container-evidence"
+          docker run --rm --workdir /tmp \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/smoke-source,readonly" \
+            --mount "type=bind,source=$RUNNER_TEMP/container-evidence,target=/evidence" \
+            flits-ci sh -c 'python -m pip install pytest && python /smoke-source/.github/scripts/wheel_smoke.py --source-root /smoke-source --output /evidence/wheel-smoke.json'
+      - name: Retain ARM64 container evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: container-arm64
+          path: ${{ runner.temp }}/container-evidence
+          if-no-files-found: warn

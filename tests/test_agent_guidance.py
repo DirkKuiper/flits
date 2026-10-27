@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import shutil
 from pathlib import Path
 
@@ -108,11 +109,12 @@ def test_skill_names_only_existing_command_line_options() -> None:
         for action in parser._actions
         for option in action.option_strings
     }
-    named = set(re.findall(r"(?<![\w-])--[a-z][a-z-]*", body))
-    assert named and named <= known, sorted(named - known)
+    named = set()
     for line in "\n".join(_code_blocks(body, "bash")).splitlines():
         if line.startswith("flits "):
             assert line.split()[1] in {"measure", "replay", "demo"} or line.split()[1].startswith("--")
+            named.update(word for word in shlex.split(line) if word.startswith("--"))
+    assert named and named <= known, sorted(named - known)
 
 
 def test_skill_names_only_existing_session_methods_and_dm_metrics() -> None:

@@ -442,6 +442,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setAnalysisTab(initialAnalysisTab())
   setStatus("Idle", "neutral")
   updateControlStates()
+  void loadRuntimeIdentity()
   await loadPresets()
   await loadAutoMaskProfiles()
   await loadFiles()
@@ -455,6 +456,24 @@ document.addEventListener("DOMContentLoaded", async () => {
     void loadSnapshotLibrary()
   }
 })
+
+async function loadRuntimeIdentity() {
+  const label = document.getElementById("runtimeIdentity")
+  try {
+    const runtime = await api("/api/health")
+    if (!runtime.flits_version || !runtime.fitter) {
+      label.textContent = "Server version unavailable"
+      label.title = "This server does not report its version. Restart FLITS from the intended Python environment."
+      return
+    }
+    const fitter = runtime.fitter === "flits" ? "FLITS native fitter" : runtime.fitter
+    label.textContent = `v${runtime.flits_version} · ${fitter}`
+    label.title = `Running server: ${runtime.instance_id || "unknown instance"}. Saved fits retain their own provenance.`
+  } catch (error) {
+    label.textContent = "Server version unavailable"
+    label.title = error.message
+  }
+}
 
 // `?open-snapshot=` takes a saved session's id or its path relative to the data
 // directory. The parameter is consumed so that a reload starts clean.
@@ -613,7 +632,7 @@ function bindControls() {
   })
   fitModelButton.addEventListener("click", () => {
     const freeParameters = currentFreeFitParameters()
-    const seedFromPrevious = Boolean(fitSeedPreviousInput.checked && hasPreviousSuccessfulFit())
+    const seedFromPrevious = Boolean(fitSeedPreviousInput.checked && hasPreviousFitCandidate())
     let componentGuesses = null
     if (!seedFromPrevious) {
       componentGuesses = collectFitComponentGuesses()
@@ -2980,6 +2999,7 @@ function renderModelFitDetails(modelFit) {
     gauss_newton: "Inverse Gauss–Newton matrix (the observed Hessian was not positive definite)",
   }[modelFit.covariance_basis] || "n/a"
   const items = [
+    ["Fitter", modelFit.fitter === "flits" ? "FLITS native" : valueOr(modelFit.fitter)],
     ["Fit window", window ? `${fmt(window[0], 3)} to ${fmt(window[1], 3)} ms` : "n/a"],
     ["Time resolution", valueOr(modelFit.time_resolution_ms, (value) => `${fmt(value, 4)} ms`)],
     ["Time upsampling", upsampleText],
@@ -3279,7 +3299,7 @@ function updateFitParameterSummary() {
   const fitted = activeParameters.filter((parameter) => free.has(parameter))
   const fixedLabels = activeParameters.filter((parameter) => !free.has(parameter)).map((parameter) => fitParameterLabel(parameter))
   const fittedLabels = fitted.map((parameter) => fitParameterLabel(parameter))
-  const previousFitLabel = fitSeedPreviousInput.checked && hasPreviousSuccessfulFit() ? ", previous-fit seed" : ""
+  const previousFitLabel = fitSeedPreviousInput.checked && hasPreviousFitCandidate() ? ", previous-fit seed" : ""
   const scintillationLabel = fitScintillationInput.checked
     ? ", scintillation: per-channel amplitude/spectral shape"
     : ""
@@ -3288,7 +3308,7 @@ function updateFitParameterSummary() {
   const maxEvaluations = parseOptionalNumber(fitMaxEvaluationsInput.value)
   const maxEvaluationsLabel = maxEvaluations !== null && maxEvaluations > 0
     ? `${Math.round(maxEvaluations)} max evaluations`
-    : "auto evaluation budget"
+    : "auto (at least 1,000 evaluations)"
   const timeUpsample = parseOptionalNumber(fitTimeUpsampleInput.value)
   const timeUpsampleLabel = timeUpsample !== null && timeUpsample >= 1 ? `time upsampling ×${Math.round(timeUpsample)}` : "auto time upsampling"
   const padding = parseOptionalNumber(fitPaddingInput.value)
@@ -3323,8 +3343,11 @@ function syncScintillationParameterControls(baseDisabled = false) {
   })
 }
 
-function hasPreviousSuccessfulFit() {
-  return state.view?.results?.diagnostics?.model_fit?.status === "ok"
+function hasPreviousFitCandidate() {
+  const fit = state.view?.results?.diagnostics?.model_fit
+  return (fit?.status === "ok" || fit?.status === "evaluation_limit_exceeded")
+    && Array.isArray(fit.bestfit_parameters?.arrival_time)
+    && fit.bestfit_parameters.arrival_time.length > 0
 }
 
 function previousFitComponentCount() {
@@ -6913,7 +6936,7 @@ function updateControlStates() {
   const hasBestDm = Number.isFinite(Number(state.view?.dm_optimization?.best_dm))
   const hasRequiredDm = hasRequiredDmValue()
   const hasFitParameters = hasFreeFitParameters()
-  const hasPreviousFit = hasPreviousSuccessfulFit()
+  const hasPreviousFit = hasPreviousFitCandidate()
 
   for (const control of sessionControls) {
     control.disabled = !hasSession || isBusy
@@ -7528,7 +7551,7 @@ function modelFitStatusCopy(status) {
     insufficient_channels: "Keep at least four unmasked channels inside the selected spectral window for a stable fit.",
     insufficient_offpulse: "The fitter needs a contiguous off-pulse block to estimate per-channel weights from the current crop.",
     insufficient_signal: "The selected event window does not support a stable model fit. Recenter or widen the event window before retrying.",
-    evaluation_limit_exceeded: "The optimizer used its evaluation budget before converging. Try fewer fit parameters, better initial guesses, a narrower event window, or a larger Max Evaluations budget.",
+    evaluation_limit_exceeded: "The optimizer reached its evaluation limit before converging. Increase Max Evaluations and, when available, enable Seed from Previous Fit to continue from the saved candidate. Review the selection and initial guesses if the fit keeps stopping.",
     fit_failed: "The current selection or initial guesses did not converge to a stable fit. Check masking and event placement before retrying.",
   }
   return labels[status] || "Review the current selection before trusting the model fit."

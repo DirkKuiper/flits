@@ -25,10 +25,14 @@ offers. The selected analysis state is recorded in a JSON session snapshot.
 Given the snapshot and original data, `flits replay` restores the selections
 and recomputes supported measurements.
 
-![FLITS aligned viewer showing a GBT burst with its time profile, dynamic spectrum, frequency profile, and selected event, off-pulse, and spectral windows.](docs/assets/guided-workflow/prepared-viewer.png)
+![FLITS aligned viewer showing a GBT burst with its time profile, dynamic spectrum, frequency profile, and selected event, off-pulse, and spectral windows.](https://raw.githubusercontent.com/DirkKuiper/flits/main/docs/assets/guided-workflow/prepared-viewer.png)
 
 The [guided GBT workflow](https://dirkkuiper.github.io/flits/guided-workflow/)
 walks through the selections and results shown in the interface.
+The [synthetic PSRFITS and CHIME walkthrough](https://dirkkuiper.github.io/flits/format-workflows/)
+demonstrates their loading-DM conventions, measurements and replay.
+The [validation summary](https://dirkkuiper.github.io/flits/validation/) describes
+the numerical comparisons, acceptance tolerances and tested limits.
 
 ## Why FLITS exists
 
@@ -111,17 +115,25 @@ print(measurements.snr_integrated, measurements.fluence_jyms)
 
 ### With a coding agent
 
-Coding agents tend to write their own dedispersion and measurement code. The
-FLITS skill tells them to use FLITS instead, and how. In Claude Code:
+The FLITS skill helps Codex, Claude Code, Cursor and Copilot select the existing
+analysis routines and check their results. In Codex:
+
+```text
+Use $skill-installer to install frb-analysis from
+https://github.com/DirkKuiper/flits/tree/main/plugins/flits/skills/frb-analysis
+```
+
+In Claude Code:
 
 ```text
 /plugin marketplace add DirkKuiper/flits
 /plugin install flits@flits
 ```
 
-The skill follows the [Agent Skills](https://agentskills.io) standard, so other
-agents can use it too. See
-[Coding Agents](https://dirkkuiper.github.io/flits/user-guide/coding-agents/).
+The skill follows the [Agent Skills](https://agentskills.io) standard. See
+[Coding Agents](https://dirkkuiper.github.io/flits/user-guide/coding-agents/)
+for Cursor and Copilot installation, project-local skills, and verifying that
+the agent can find FLITS and access your data.
 
 ## Highlights
 
@@ -169,10 +181,15 @@ Author and citation metadata are in
 [CITATION.cff](https://github.com/DirkKuiper/flits/blob/main/CITATION.cff),
 which GitHub's "Cite this repository" button turns into APA or BibTeX.
 
+The [ASCL entry](https://ascl.net/code/v/4896) is currently marked submitted;
+an assigned ASCL identifier and ADS indexing are not yet confirmed.
+The canonical project is [DirkKuiper/flits](https://github.com/DirkKuiper/flits),
+the Fast-Look Interactive Transient Suite for analyzing detected FRBs.
+
 ## License
 
-FLITS is released under the GNU GPLv3. See [LICENSE](./LICENSE).
+FLITS is released under the GNU GPLv3. See [LICENSE](https://github.com/DirkKuiper/flits/blob/main/LICENSE).
 
 The interface bundles [plotly.js](https://github.com/plotly/plotly.js) (MIT) so
 it works without fetching anything from a CDN; its licence travels with the copy
-in [`flits/web_static/vendor/`](./flits/web_static/vendor/).
+in [`flits/web_static/vendor/`](https://github.com/DirkKuiper/flits/tree/main/flits/web_static/vendor/).

@@ -521,8 +521,10 @@ class ModelFitIterationAdapterTest(unittest.TestCase):
         self.assertTrue(result.diagnostics.is_folded)
         self.assertFalse(result.diagnostics.exact_jacobian)
         self.assertEqual(result.diagnostics.bestfit_parameters["ref_freq"], [1400.0])
-        # SciPy's default budget: 100 evaluations per fitted value.
-        self.assertEqual(result.diagnostics.max_function_evaluations, 400)
+        # Small models get headroom for correlated parameters; easy fits still
+        # terminate as soon as they converge.
+        self.assertEqual(result.diagnostics.max_function_evaluations, 1000)
+        self.assertLess(result.diagnostics.function_evaluations, 1000)
         self.assertGreater(result.diagnostics.function_evaluations or 0, 1)
         self.assertIn(result.diagnostics.solver_status, (1, 2, 3, 4))
         self.assertIn("termination condition", result.diagnostics.solver_message or "")
@@ -552,6 +554,34 @@ class ModelFitIterationAdapterTest(unittest.TestCase):
         self.assertEqual(result.diagnostics.function_evaluations, 1)
         self.assertEqual(result.diagnostics.solver_status, 0)
         self.assertEqual(result.diagnostics.solver_message, "The maximum number of function evaluations is exceeded.")
+
+    def test_capped_fit_keeps_the_best_candidate_without_accepting_measurements(self) -> None:
+        result, _model_spy, _fit_spy = _run_adapter_fit(ModelFitRequestConfig(max_function_evaluations=2))
+        self.assertEqual(result.status, "evaluation_limit_exceeded")
+        self.assertEqual(result.diagnostics.function_evaluations, 2)
+        self.assertTrue(result.diagnostics.bestfit_parameters)
+        self.assertNotEqual(result.diagnostics.bestfit_parameters, result.diagnostics.initial_parameters)
+        self.assertIsNone(result.width_ms_model)
+        self.assertIsNone(result.tau_sc_ms)
+        self.assertEqual(result.diagnostics.bestfit_uncertainties, {})
+        restored = ModelFitDiagnostics.from_dict(result.diagnostics.to_dict())
+        self.assertEqual(restored.bestfit_parameters.keys(), result.diagnostics.bestfit_parameters.keys())
+        for name, values in result.diagnostics.bestfit_parameters.items():
+            np.testing.assert_allclose(restored.bestfit_parameters[name], values, rtol=1e-8, atol=1e-12)
+
+    def test_a_capped_session_fit_can_continue_from_its_saved_candidate(self) -> None:
+        session, expected_width_ms, expected_tau_ms = _synthetic_scattering_session()
+        first = session.fit_model({"solver": {"max_function_evaluations": 2}}).diagnostics.model_fit
+        self.assertEqual(first.status, "evaluation_limit_exceeded")
+        candidate = dict(first.bestfit_parameters)
+        with patch.object(model_fit, "fit_burst_model", wraps=fit_burst_model) as fit_spy:
+            resumed = session.fit_model({"seed_from_previous_fit": True}).diagnostics.model_fit
+        self.assertEqual(resumed.status, "ok")
+        self.assertEqual(resumed.initial_parameter_source, "previous_fit")
+        self.assertEqual(resumed.initial_parameters["burst_width"], candidate["burst_width"])
+        self.assertEqual(fit_spy.call_args.args[2].burst_width.tolist(), candidate["burst_width"])
+        self.assertAlmostEqual(session.results.width_ms_model, expected_width_ms, delta=0.25)
+        self.assertAlmostEqual(session.results.tau_sc_ms, expected_tau_ms, delta=0.25)
 
     def test_large_fit_window_fails_before_the_model_is_built(self) -> None:
         channels = model_fit.MIN_FIT_CHANNELS

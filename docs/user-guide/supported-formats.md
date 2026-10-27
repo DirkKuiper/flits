@@ -118,6 +118,15 @@ register a custom reader via an entry point (see
   future metadata field says otherwise, so FLITS does not silently invent an
   infinite-frequency TOA for public catalog files.
 
+!!! warning "Catalog flux calibration"
+    The reader currently normalizes the waterfall, including `calibrated_wfall`.
+    FLITS flux and fluence then use its SEFD-based radiometer calibration; they
+    are not a direct integration of the catalog's stored Jy scale. CHIME's
+    [calibrated-waterfall tutorial](https://chime-frb-open-data.github.io/waterfall/#plotting-calibrated-data)
+    describes that original scale. Preserve the original data and its calibration
+    metadata when that calibration is required. Do not label a FLITS SEFD-based
+    estimate as a reproduction of the catalog-calibrated fluence.
+
 ## CHIME beamformed `BBData`
 
 FLITS also supports CHIME beamformed `BBData` containers with:
