@@ -583,6 +583,17 @@ class ModelFitIterationAdapterTest(unittest.TestCase):
         self.assertAlmostEqual(session.results.width_ms_model, expected_width_ms, delta=0.25)
         self.assertAlmostEqual(session.results.tau_sc_ms, expected_tau_ms, delta=0.25)
 
+    def test_temporal_cross_check_ignores_a_capped_fit_candidate(self) -> None:
+        session, expected_width_ms, _expected_tau_ms = _synthetic_scattering_session()
+        session.fit_model({"solver": {"max_function_evaluations": 2}})
+        self.assertTrue(session.results.diagnostics.model_fit.bestfit_parameters)
+        self.assertIsNone(session.run_temporal_structure_analysis(8.0).model_fit_min_component_ms)
+
+        session.fit_model({"seed_from_previous_fit": True})
+        self.assertEqual(session.results.diagnostics.model_fit.status, "ok")
+        converged = session.run_temporal_structure_analysis(8.0).model_fit_min_component_ms
+        self.assertAlmostEqual(converged, expected_width_ms, delta=0.25)
+
     def test_large_fit_window_fails_before_the_model_is_built(self) -> None:
         channels = model_fit.MIN_FIT_CHANNELS
         time_bins = model_fit.MAX_MODEL_FIT_CELLS // channels + model_fit.MIN_FIT_TIME_BINS
