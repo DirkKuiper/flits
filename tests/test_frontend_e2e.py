@@ -152,6 +152,24 @@ def test_auto_localize_then_measure_reports_results(page, synthetic_waterfall) -
     assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
 
 
+def test_a_model_fit_runs_from_the_fitting_tab(page, synthetic_waterfall) -> None:
+    """Localize, then fit: the button must be live again once localization ends."""
+    _load_session(page, synthetic_waterfall)
+
+    page.click("#autoLocalizeButton")
+    page.click("#analysisFittingTab")
+    expect(page.locator("#analysisFittingPanel")).to_be_visible()
+    # Every action disables the controls while it runs; the fit button has to
+    # come back without the user touching a checkbox.
+    expect(page.locator("#fitModelButton")).to_be_enabled(timeout=60_000)
+
+    page.click("#fitModelButton")
+    content = page.locator("#fittingContent")
+    expect(content).to_contain_text("Model fit accepted", timeout=60_000)
+    expect(content).to_contain_text("Intrinsic Width")
+    assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
+
+
 def test_export_panel_can_build_a_bundle(page, synthetic_waterfall) -> None:
     _load_session(page, synthetic_waterfall)
 

@@ -2941,10 +2941,12 @@ function fitParameterListLabel(parameters) {
 }
 
 function currentFreeFitParameterSet() {
+  // Count checked boxes even while they are disabled: every action disables
+  // them while it runs, and updateControlStates reads this before it enables
+  // them again. Scintillation mode unchecks the parameters it solves per
+  // channel, and activeFitParameterOrder leaves them out.
   return new Set(
-    Array.from(fitFreeParamsContainer.querySelectorAll("input[type='checkbox']:checked"))
-      .filter((input) => !input.disabled)
-      .map((input) => input.value),
+    Array.from(fitFreeParamsContainer.querySelectorAll("input[type='checkbox']:checked")).map((input) => input.value),
   )
 }
 
