@@ -51,8 +51,8 @@ def _all_details(session: BurstSession) -> list[tuple[str, UncertaintyDetail]]:
 
 
 def _fit_details() -> list[tuple[str, UncertaintyDetail]]:
-    """Texts from the PSD and fitburst fits, which a short synthetic burst may not reach."""
-    from flits.analysis.fitting.fitburst_adapter import _fitburst_uncertainty_detail
+    """Texts from the PSD and burst-model fits, which a short synthetic burst may not reach."""
+    from flits.analysis.fitting.model_fit import _model_fit_uncertainty_detail
     from flits.analysis.temporal.core import _psd_uncertainty_details
 
     psd = _psd_uncertainty_details(
@@ -64,15 +64,27 @@ def _fit_details() -> list[tuple[str, UncertaintyDetail]]:
             "crossover_frequency_hz_3sigma_high": 130.0,
         },
     )
-    fitburst = _fitburst_uncertainty_detail(value=0.1, units="ms", parameter_label="Width")
-    return [*((f"psd.{key}", d) for key, d in psd.items()), ("fitburst.width", fitburst)]
+    model_fit = [
+        ("model_fit.width", _model_fit_uncertainty_detail(value=0.1, units="ms", parameter_label="Width")),
+        (
+            "model_fit.tau_gauss_newton_at_bound",
+            _model_fit_uncertainty_detail(
+                value=0.1,
+                units="ms",
+                parameter_label="Scattering timescale",
+                covariance_basis="gauss_newton",
+                at_lower_bound=True,
+            ),
+        ),
+    ]
+    return [*((f"psd.{key}", d) for key, d in psd.items()), *model_fit]
 
 
 def test_no_uncertainty_passes_judgement(measured_session: BurstSession) -> None:
     details = _all_details(measured_session) + _fit_details()
     sources = {name.split(".")[0] for name, _ in details}
 
-    assert {"results", "width", "dm", "drift", "psd", "fitburst"} <= sources
+    assert {"results", "width", "dm", "drift", "psd", "model_fit"} <= sources
     assert any(name == "results.iso_e" for name, _ in details)
     for name, detail in details:
         for text in (detail.basis, detail.tooltip):

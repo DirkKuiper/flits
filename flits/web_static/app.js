@@ -2941,10 +2941,12 @@ function fitParameterListLabel(parameters) {
 }
 
 function currentFreeFitParameterSet() {
+  // Count checked boxes even while they are disabled: every action disables
+  // them while it runs, and updateControlStates reads this before it enables
+  // them again. Scintillation mode unchecks the parameters it solves per
+  // channel, and activeFitParameterOrder leaves them out.
   return new Set(
-    Array.from(fitFreeParamsContainer.querySelectorAll("input[type='checkbox']:checked"))
-      .filter((input) => !input.disabled)
-      .map((input) => input.value),
+    Array.from(fitFreeParamsContainer.querySelectorAll("input[type='checkbox']:checked")).map((input) => input.value),
   )
 }
 
@@ -7086,7 +7088,6 @@ function fitStatusTone(status) {
 
 function modelFitStatusTone(status) {
   if (status === "ok") return "success"
-  if (status === "fitburst_unavailable") return "error"
   return "warning"
 }
 
@@ -7160,7 +7161,8 @@ function fitStatusCopy(status) {
 function modelFitStatusLabel(status) {
   const labels = {
     ok: "Model fit accepted",
-    fitburst_unavailable: "fitburst is unavailable",
+    // Stored by FLITS versions that fitted through the optional fitburst package.
+    fitburst_unavailable: "Saved without a model fit",
     insufficient_data: "Selected-band data are unavailable",
     insufficient_time_bins: "Selection is too short for fitting",
     fit_window_too_large: "Fit window is too large",
@@ -7176,7 +7178,7 @@ function modelFitStatusLabel(status) {
 function modelFitStatusCopy(status) {
   const labels = {
     ok: "The model fit used the current selected band and reports intrinsic width and scattering time as secondary, model-based diagnostics.",
-    fitburst_unavailable: "Install the optional fitburst dependency to enable model-based burst fitting in FLITS.",
+    fitburst_unavailable: "This session was saved by a FLITS version that needed the optional fitburst package for model fits. FLITS now fits the model itself: run the fit again.",
     insufficient_data: "Widen the selected spectral window or reset the current crop before running a model fit.",
     insufficient_time_bins: "Use a wider crop or event window so the burst and off-pulse baseline are both represented in the fit.",
     fit_window_too_large: "Narrow the event window or increase time/frequency downsampling before running the model fit.",

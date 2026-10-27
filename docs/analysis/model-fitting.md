@@ -1,24 +1,70 @@
 # Model Fitting
 
-FLITS exposes an optional selected-event 2D model-fitting workflow in the
+FLITS exposes a selected-event 2D model-fitting workflow in the
 Fitting tab. It uses the live session state: crop, event window, frequency
 window, off-pulse regions, masks, display downsampling, and component
 annotations. FLITS does not mirror command-line preprocessing flags from the
 underlying solver because those choices are already represented by the
 interactive session.
 
-## Dependency model
+## The model
 
-The Fitting tab can display initial guesses and previous results without the
-optional solver backend. Running the model fit requires `fitburst` in the
-environment used to launch FLITS:
+FLITS fits the dynamic-spectrum model of Fonseca et al. (2024), the model the
+`fitburst` package implements. Each component is a Gaussian, convolved with a
+one-sided exponential when the scattering timescale is positive, with a running
+power-law spectrum. DM, DM index, scattering timescale, and scattering index are
+shared by all components.
 
-```bash
-pip install "fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3ec7bc21951ce1b4a26a0255096b69.tar.gz"
-```
+FLITS evaluates the model itself, so fitting needs no extra package. The
+implementation is written from the paper's equations, evaluates every channel
+and component at once, and has analytic derivatives. Parameter names, units,
+and solution JSON follow `fitburst`, so a solution moves between the two
+programs unchanged.
 
-When the dependency is unavailable or a fit cannot be constrained, FLITS stores
-a structured failure diagnostic instead of failing at import time.
+The test suite compares FLITS with `fitburst` in every model mode: time and
+frequency upsampling, folded profiles, scintillation, an incoherent DM, and data
+that are not dedispersed. On synthetic bursts fitted from the same starting
+point, FLITS reaches `fitburst`'s minimum to within 0.001σ, its uncertainties
+agree to within 0.02%, and the fit runs five to eight times faster. A
+scintillation-mode fit runs about 50 times faster.
+
+Where FLITS differs from `fitburst`:
+
+- **Bounds.** Widths and the scattering timescale cannot go negative. When the
+  scattering timescale ends at zero, the fit lists it in
+  `parameters_at_bounds` and its uncertainty is one-sided: quote the value plus
+  the uncertainty as an upper limit.
+- **Unresolved scattering.** In `fitburst`'s profile normalization the
+  amplitude grows without bound as the scattering timescale shrinks. The solver
+  steps the amplitude of the Gaussian that the profile tends to instead, so a
+  fit of an unscattered burst converges to the Gaussian fit. Results are
+  reported in `fitburst`'s convention.
+- **Covariance.** Like `fitburst`, FLITS inverts the observed Hessian of
+  chi-squared. If that matrix is not positive definite, it inverts the
+  Gauss-Newton matrix instead, and `covariance_basis` records which one it
+  used. The full covariance matrix and its parameter labels are stored with the
+  fit.
+- **Scintillation mode.** Each channel's amplitudes are solved by linear least
+  squares at every step, and the derivatives include how those amplitudes move
+  with the other parameters (variable projection; Golub & Pereyra 1973). In 40
+  simulated scintillating bursts, the scatter of FLITS's best fits matches its
+  reported uncertainties to within 7%. In the same test, the scatter is 1.5 to
+  4 times larger than the uncertainties `fitburst` reports.
+- **Fit statistics** add AIC and BIC, and in scintillation mode the number of
+  per-channel amplitudes, to `fitburst`'s chi-squared, reduced chi-squared, and
+  S/N.
+- **Before each scattered component**, `fitburst` holds the profile at a floor
+  of about 10⁻⁵ of its peak. FLITS evaluates the profile as written.
+
+Before fitting, FLITS puts the selected band in off-pulse S/N units: it
+subtracts each channel's off-pulse mean and divides the whole band by the
+median off-pulse noise of its channels. This assumes a bandpass-flattened
+spectrum, which is what FLITS's readers produce. Per-channel noise enters
+through the weights, not through the scaling.
+
+The Fitting tab can display initial guesses and previous results before a fit
+has run. When a fit cannot be constrained, FLITS stores a structured failure
+diagnostic instead of raising an error.
 
 ## Fit parameters
 
@@ -57,9 +103,9 @@ reference frequency, folded profile mode, exact-Jacobian mode, and
 scintillation mode.
 
 **Optimizer Passes** restarts the solver from the previous best fit for each
-pass. **Max Evaluations** controls the residual-evaluation budget per pass; if
-left blank, SciPy uses its default budget of 100 times the number of scalar fit
-parameters.
+pass. **Max Evaluations** controls the model-evaluation budget per pass; if
+left blank, FLITS uses 100 times the number of fitted values, SciPy's default
+for least squares.
 
 Weighting modes are:
 

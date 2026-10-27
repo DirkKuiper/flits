@@ -118,17 +118,6 @@ def _process_environment() -> dict[str, Any]:
         if source is not None:
             package["source"] = source
         packages[name] = package
-    # Explicit absence is useful for the optional fitter.
-    packages.setdefault("fitburst", {"version": None, "status": "not_installed"})
-    # A checkout on sys.path can shadow an installed distribution. Identify
-    # the modules actually imported for the specialist wrappers as well.
-    for name in ("fitburst",):
-        module = sys.modules.get(name)
-        package = packages.setdefault(name, {"version": None, "status": "metadata_unavailable"})
-        package["loaded"] = module is not None
-        location = getattr(module, "__file__", None)
-        if location:
-            package["loaded_source"] = source_identity(Path(location).resolve().parent)
     return {
         "flits_version": __version__,
         "flits_source": source_identity(Path(__file__).resolve().parent),

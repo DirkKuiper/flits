@@ -1,4 +1,7 @@
--r requirements-full.txt
+-r requirements.txt
+# fitburst is the reference implementation of the burst model; the parity
+# tests in tests/test_fitburst_parity.py compare FLITS with it.
+fitburst @ https://github.com/CHIMEFRB/fitburst/archive/3c76da8f9e3ec7bc21951ce1b4a26a0255096b69.tar.gz
 build>=1.2.2
 httpx>=0.27
 mypy>=1.11

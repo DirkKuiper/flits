@@ -40,7 +40,6 @@ jobs:
           cache-dependency-path: |
             pyproject.toml
             requirements.txt
-            requirements-full.txt
             requirements-dev.txt
 
       - name: Install dependencies
@@ -114,8 +113,8 @@ jobs:
   minimum-versions:
     # Prove that the lower bounds declared in pyproject.toml are real: install
     # the oldest permitted release of every direct runtime dependency and run
-    # the suite against it. fitburst-dependent tests are excluded because the
-    # optional model-fitting extra is not installed here.
+    # the suite against it. The fitburst parity tests skip because fitburst,
+    # a test-only dependency, is not installed here.
     runs-on: ubuntu-latest
 
     steps:
@@ -147,7 +146,7 @@ jobs:
           python -m pip install --no-deps -e .
 
       - name: Run test suite
-        run: python -m pytest -q --ignore=tests/test_model_fitting.py
+        run: python -m pytest -q
 
   package:
     runs-on: ubuntu-latest

@@ -27,8 +27,9 @@ python -m pip install -r requirements-dev.txt
 python -m pip install -e .
 ```
 
-`requirements-dev.txt` includes the optional `fitburst` dependency so the
-scattering-fit tests exercise the full feature set.
+`requirements-dev.txt` includes `fitburst`, the reference implementation of the
+burst model. `tests/test_fitburst_parity.py` compares FLITS's model and fits
+with it, and skips when it is not installed.
 
 ## Dependency declarations
 

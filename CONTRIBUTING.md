@@ -39,8 +39,8 @@ python -m pip install -r requirements-dev.txt
 python -m pip install -e .
 ```
 
-`requirements-dev.txt` pulls in the optional `fitburst` dependency so the
-model-fitting tests run, plus `pytest`, `httpx`, `ruff` and `mypy`.
+`requirements-dev.txt` adds `pytest`, `httpx`, `ruff` and `mypy`, and
+`fitburst`, which the parity tests compare FLITS's burst model against.
 
 ## Before you open a pull request
 

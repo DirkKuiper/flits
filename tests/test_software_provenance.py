@@ -17,7 +17,7 @@ import pytest
 from PIL import Image
 
 import flits.provenance as provenance
-from flits.analysis.fitting.fitburst_adapter import ModelFitResult
+from flits.analysis.fitting.model_fit import ModelFitResult
 from flits.cli import replay
 from flits.exports import create_export_snapshot
 from flits.models import ModelFitDiagnostics
@@ -274,7 +274,7 @@ def test_real_environment_records_python_flits_and_installed_dependencies():
     result = provenance.capture_environment()
     assert result["python_version"]
     assert result["flits_version"]
-    for name in ("numpy", "scipy", "fitburst"):
+    for name in ("numpy", "scipy"):
         assert "version" in result["packages"][name]
     assert result["flits_source"]["python_source_sha256"]
     json.dumps(result, allow_nan=False)

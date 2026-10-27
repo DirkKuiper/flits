@@ -223,6 +223,6 @@ lower bound.
   from, and why the structure-maximising metric partly addresses the degeneracy.
 - [Measurements](measurements.md) — how FLITS classifies uncertainties in
   general.
-- [Model Fitting](model-fitting.md) — `fitburst` fits the scattering timescale,
+- [Model Fitting](model-fitting.md) — the burst-model fit measures the scattering timescale,
   which is a different asymmetry from drift and is easy to confuse with it in a
   single component.

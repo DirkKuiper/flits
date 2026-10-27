@@ -32,16 +32,34 @@ def _jsonable(values: np.ndarray, digits: int = 4) -> list[Any]:
     return [[float(value) if np.isfinite(value) else None for value in row] for row in rounded]
 
 
+def _round_significant(values: Any, significant: int) -> np.ndarray:
+    """Round to a number of significant digits, so small values keep their precision."""
+    array = np.asarray(values, dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        magnitude = np.where(np.isfinite(array) & (array != 0), np.floor(np.log10(np.abs(array))), 0.0)
+        factor = 10.0 ** (significant - 1 - magnitude)
+        return np.where(np.isfinite(array), np.round(array * factor) / factor, array)
+
+
+def _jsonable_significant(values: np.ndarray, significant: int = 10) -> list[Any]:
+    rounded = _round_significant(values, significant)
+    if rounded.ndim == 1:
+        return [float(value) if np.isfinite(value) else None for value in rounded]
+    return [[float(value) if np.isfinite(value) else None for value in row] for row in rounded]
+
+
 def _jsonable_parameter_dict(
     values: dict[str, list[float] | None],
-    digits: int = 6,
+    significant: int = 10,
 ) -> dict[str, list[float | None] | None]:
+    # Model parameters are in seconds, so rounding to decimal places would
+    # erase microsecond widths and their uncertainties.
     payload: dict[str, list[float | None] | None] = {}
     for key, current in values.items():
         if current is None:
             payload[key] = None
             continue
-        rounded = np.round(np.asarray(current, dtype=float), digits)
+        rounded = _round_significant(current, significant).ravel()
         payload[key] = [float(value) if np.isfinite(value) else None for value in rounded]
     return payload
 
@@ -1720,6 +1738,12 @@ class ModelFitDiagnostics:
     bestfit_parameters: dict[str, list[float] | None] = field(default_factory=dict)
     bestfit_uncertainties: dict[str, list[float] | None] = field(default_factory=dict)
     fit_statistics: dict[str, float | int | None] = field(default_factory=dict)
+    # Labels, covariance and bound flags of the fitted values, in solver order
+    # (fitburst's labels: ``burst_width2`` for component 2, ``dm`` when shared).
+    parameter_labels: list[str] = field(default_factory=list)
+    covariance: np.ndarray = field(default_factory=lambda: np.empty((0, 0), dtype=float))
+    covariance_basis: str | None = None
+    parameters_at_bounds: list[str] = field(default_factory=list)
     freq_axis_mhz: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     time_axis_ms: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     data_dynamic_spectrum_sn: np.ndarray = field(default_factory=lambda: np.empty((0, 0), dtype=float))
@@ -1731,6 +1755,8 @@ class ModelFitDiagnostics:
     data_freq_profile_sn: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     model_freq_profile_sn: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     residual_freq_profile_sn: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    # Scintillation mode: each diagnostic channel's solved component amplitudes.
+    channel_amplitudes: np.ndarray = field(default_factory=lambda: np.empty((0, 0), dtype=float))
     uncertainty_details: dict[str, UncertaintyDetail] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -1777,6 +1803,10 @@ class ModelFitDiagnostics:
             "bestfit_parameters": _jsonable_parameter_dict(self.bestfit_parameters),
             "bestfit_uncertainties": _jsonable_parameter_dict(self.bestfit_uncertainties),
             "fit_statistics": fit_statistics,
+            "parameter_labels": list(self.parameter_labels),
+            "covariance": _jsonable_significant(self.covariance) if self.covariance.size else [],
+            "covariance_basis": self.covariance_basis,
+            "parameters_at_bounds": list(self.parameters_at_bounds),
             "freq_axis_mhz": _jsonable_1d(self.freq_axis_mhz, digits=6),
             "time_axis_ms": _jsonable_1d(self.time_axis_ms, digits=6),
             "data_dynamic_spectrum_sn": _jsonable(self.data_dynamic_spectrum_sn, digits=6),
@@ -1788,6 +1818,7 @@ class ModelFitDiagnostics:
             "data_freq_profile_sn": _jsonable_1d(self.data_freq_profile_sn, digits=6),
             "model_freq_profile_sn": _jsonable_1d(self.model_freq_profile_sn, digits=6),
             "residual_freq_profile_sn": _jsonable_1d(self.residual_freq_profile_sn, digits=6),
+            "channel_amplitudes": _jsonable(self.channel_amplitudes, digits=6) if self.channel_amplitudes.size else [],
             "uncertainty_details": _uncertainty_detail_map_to_dict(self.uncertainty_details),
         }
 
@@ -1828,6 +1859,10 @@ class ModelFitDiagnostics:
             bestfit_parameters={str(key): value for key, value in payload.get("bestfit_parameters", {}).items()},
             bestfit_uncertainties={str(key): value for key, value in payload.get("bestfit_uncertainties", {}).items()},
             fit_statistics={str(key): value for key, value in payload.get("fit_statistics", {}).items()},
+            parameter_labels=[str(value) for value in payload.get("parameter_labels", [])],
+            covariance=_array_2d(payload.get("covariance") or None, dtype=float),
+            covariance_basis=payload.get("covariance_basis"),
+            parameters_at_bounds=[str(value) for value in payload.get("parameters_at_bounds", [])],
             freq_axis_mhz=_array_1d(payload.get("freq_axis_mhz"), dtype=float),
             time_axis_ms=_array_1d(payload.get("time_axis_ms"), dtype=float),
             data_dynamic_spectrum_sn=_array_2d(payload.get("data_dynamic_spectrum_sn"), dtype=float),
@@ -1839,6 +1874,7 @@ class ModelFitDiagnostics:
             data_freq_profile_sn=_array_1d(payload.get("data_freq_profile_sn"), dtype=float),
             model_freq_profile_sn=_array_1d(payload.get("model_freq_profile_sn"), dtype=float),
             residual_freq_profile_sn=_array_1d(payload.get("residual_freq_profile_sn"), dtype=float),
+            channel_amplitudes=_array_2d(payload.get("channel_amplitudes") or None, dtype=float),
             uncertainty_details=_uncertainty_detail_map_from_dict(payload.get("uncertainty_details")),
         )
 

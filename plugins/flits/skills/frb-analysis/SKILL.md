@@ -88,7 +88,7 @@ with open("burst_flits_session.json", "w") as f:
 | Sub-burst drift rate | `run_drift_analysis` |
 | Rotation measure | `polarization_capability`, then `run_polarization_analysis` |
 | Spectral and temporal structure | `run_spectral_analysis`, `run_temporal_structure_analysis` |
-| Burst model fit | `fit_model`, which needs the optional `fitburst` package |
+| Burst model fit (the fitburst model) | `fit_model` |
 | Reopen a saved session | `BurstSession.from_snapshot` |
 
 ## Before reporting a number

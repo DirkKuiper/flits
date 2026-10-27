@@ -58,6 +58,12 @@ def test_index_and_static_mount_serve_the_interface(client: TestClient) -> None:
     app_js = client.get("/static/app.js")
     assert app_js.status_code == 200
 
+    # Browsers must revalidate the interface, so an upgrade takes effect on reload.
+    assert index.headers["cache-control"] == "no-cache"
+    assert app_js.headers["cache-control"] == "no-cache"
+    unchanged = client.get("/static/app.js", headers={"If-None-Match": app_js.headers["etag"]})
+    assert unchanged.status_code == 304
+
 
 def test_file_listing_reports_the_synthetic_burst(client: TestClient, synthetic_waterfall) -> None:
     response = client.get("/api/files")
