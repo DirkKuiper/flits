@@ -52,6 +52,8 @@ plugins:
         Getting started:
           - getting-started.md: Install FLITS, try the demo, and load a burst
           - guided-workflow.md: A complete worked example on a public GBT burst, with reference values
+          - format-workflows.md: Generate synthetic PSRFITS and CHIME inputs, measure and replay them
+          - validation.md: Independent comparisons, injected signals, numerical tolerances and tested limits
           - installation.md: Python, Docker, Apptainer, and remote or HPC deployment
         Scripting:
           - user-guide/headless-measurement.md: Measure bursts from the command line or Python, in batches
@@ -102,6 +104,7 @@ nav:
   - Getting Started:
       - Quickstart: getting-started.md
       - Guided Workflow: guided-workflow.md
+      - PSRFITS and CHIME Examples: format-workflows.md
       - Installation and Deployment: installation.md
   - User Guide:
       - Session Workflow: user-guide/session-workflow.md
@@ -121,6 +124,7 @@ nav:
       - Rotation-Measure Synthesis: analysis/rm-synthesis.md
       - Model Fitting: analysis/model-fitting.md
   - Reference:
+      - Scientific Validation: validation.md
       - Python API: developer/api-reference.md
       - References: references.md
   - Developer:
