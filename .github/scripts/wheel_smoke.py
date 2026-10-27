@@ -56,6 +56,9 @@ def _server(data_dir: Path, log_path: Path) -> dict[str, Any]:
                         raise TimeoutError(f"Server startup exceeded 60 s; see {log_path}") from None
                     time.sleep(0.1)
             assert health["status"] == "ok", health
+            if "instance_id" in health:
+                identity = _cli("info", "--server", base)
+                assert identity["same_flits_code"] is True, identity
             for endpoint, marker in (("/", b"FLITS"), ("/static/app.js", b"DOMContentLoaded")):
                 with urlopen(base + endpoint, timeout=5) as response:
                     assert response.status == 200
