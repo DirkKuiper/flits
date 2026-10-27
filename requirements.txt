@@ -8,7 +8,7 @@
 #     pip install -c requirements.txt .
 #
 # Dependabot keeps these pins current.
-fastapi==0.143.2
+fastapi==0.161.1
 uvicorn==0.54.0
 numpy==2.4.6
 scipy==1.17.1
