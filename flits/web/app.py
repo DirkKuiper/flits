@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.types import Scope
 
 from flits.analysis.polarization import run_rm_synthesis
 from flits.io import inspect_filterbank, list_readers
@@ -153,7 +154,20 @@ if _CORS_ORIGINS:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# The interface is served with ``no-cache``: browsers revalidate it on every
+# load (an unchanged file costs a 304), so after an upgrade they never run an
+# old interface against the new API.
+INTERFACE_CACHE_CONTROL = "no-cache"
+
+
+class _InterfaceFiles(StaticFiles):
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = INTERFACE_CACHE_CONTROL
+        return response
+
+
+app.mount("/static", _InterfaceFiles(directory=STATIC_DIR), name="static")
 
 
 def data_dir() -> Path:
@@ -578,7 +592,7 @@ def _write_snapshot_file(path: Path, content: bytes) -> None:
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": INTERFACE_CACHE_CONTROL})
 
 
 @app.get("/api/health")
