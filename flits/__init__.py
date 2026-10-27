@@ -26,7 +26,7 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 __all__ = [
     "BurstMeasurements",

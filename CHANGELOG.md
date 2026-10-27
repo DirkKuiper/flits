@@ -4,6 +4,46 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.6.0](https://github.com/DirkKuiper/flits/compare/flits-v1.5.0...flits-v1.6.0) (2026-10-27)
+
+
+### Features
+
+* **fitting:** fit the fitburst burst model natively ([0183a58](https://github.com/DirkKuiper/flits/commit/0183a586fc984c618d97380671b2762f643976cb))
+* **fitting:** fit the fitburst burst model natively ([4575fb0](https://github.com/DirkKuiper/flits/commit/4575fb01f5df0be1f53ffd99883f6866557f50e8))
+* guide coding agents to FLITS with a skill and clearer help ([dd62d8c](https://github.com/DirkKuiper/flits/commit/dd62d8c4a4496b578c3ce2ee385e77290ca1c4c5))
+* guide coding agents to FLITS with a skill and clearer help ([6b7f4be](https://github.com/DirkKuiper/flits/commit/6b7f4be1bebdefcb7be041224fa2fc24eac64b63))
+* **io:** read SIGPROC and PSRFITS search data without your ([9389ada](https://github.com/DirkKuiper/flits/commit/9389ada0eb2cad4adfecde82c4eac8a811405e6d))
+* **io:** read SIGPROC and PSRFITS search data without your ([d0616a4](https://github.com/DirkKuiper/flits/commit/d0616a4053e6d2d451e3649f116ba72fa0857990))
+* mask interference without jess ([a00a098](https://github.com/DirkKuiper/flits/commit/a00a0988cd2fdb93628c689db1656537fe795b6b))
+* mask interference without jess ([79ac3df](https://github.com/DirkKuiper/flits/commit/79ac3dfaa5c2c956e73352dd9c07c12b7e1530b4))
+
+
+### Bug Fixes
+
+* **io:** sum two polarizations without wrapping 8-bit samples ([0bad0de](https://github.com/DirkKuiper/flits/commit/0bad0de735e913c9cce38c06296f72de468bea52))
+* **web:** keep Run Model Fit enabled after every action ([f2bf858](https://github.com/DirkKuiper/flits/commit/f2bf8586aef4eb0e6d597f65010578ee80885cf5))
+* **web:** make browsers revalidate the interface after an upgrade ([5ac8052](https://github.com/DirkKuiper/flits/commit/5ac8052b3f4f837a741f9ec2dc12a510b7e5656b))
+
+
+### Performance Improvements
+
+* **localization:** localize bursts two to five times faster ([770764f](https://github.com/DirkKuiper/flits/commit/770764f5eb7180001f0502d52670a2f6c486c158))
+* **localization:** localize bursts two to five times faster ([b280222](https://github.com/DirkKuiper/flits/commit/b28022221a918f6951e794465286c623a513f7f7))
+
+
+### Documentation
+
+* cite FLITS by its Zenodo DOI ([c6511b7](https://github.com/DirkKuiper/flits/commit/c6511b75c14c64ea6be8b27e55249dc46686c4da))
+* cite FLITS by its Zenodo DOI ([576e423](https://github.com/DirkKuiper/flits/commit/576e423706d8c3fd3540a8dfb951606814adc458))
+* **paper:** add C. Makarytchev's fitburst modelling with FLITS ([118827c](https://github.com/DirkKuiper/flits/commit/118827ce4613a20db4532eaef0a192b7f969fcc8))
+* **paper:** describe A. Moroianu's use of FLITS accurately ([53a595a](https://github.com/DirkKuiper/flits/commit/53a595a2d551fe117248d76c2be979c60cee9441))
+* **paper:** describe FLITS's own burst-model fits ([fe68097](https://github.com/DirkKuiper/flits/commit/fe6809746545d231257c442982d98c999bc39c33))
+* **paper:** describe FLITS's own readers and interference masking ([dd0f0a5](https://github.com/DirkKuiper/flits/commit/dd0f0a566995eee33c473461cf384815a0029344))
+* **paper:** list Jeff Huang's FRB 20240114A study as a separate paper ([fd150d4](https://github.com/DirkKuiper/flits/commit/fd150d4538838d3b4ffec04a2d26e34eef2a6af9))
+* **paper:** name research uses and describe batch measurement for arXiv ([3cb2baa](https://github.com/DirkKuiper/flits/commit/3cb2baa6cbb4bc5248ccf6e0fb9dc593c7c227e5))
+* **paper:** name research uses and describe batch measurement for arXiv ([255e248](https://github.com/DirkKuiper/flits/commit/255e248bf1790a96796902521c70900c21ab5438))
+
 ## [1.5.0](https://github.com/DirkKuiper/flits/compare/flits-v1.4.0...flits-v1.5.0) (2026-10-23)
 
 
