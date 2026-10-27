@@ -48,3 +48,5 @@ scripts/
 !/tools/install_agent_skill.py
 !/tools/evaluate_agent_skill.py
 !/plugins/flits/skills/frb-analysis/scripts/
+!/.github/scripts/
+!/.github/scripts/wheel_smoke.py
