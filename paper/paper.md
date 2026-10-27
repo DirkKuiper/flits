@@ -197,11 +197,11 @@ User documentation and reproducible examples are available at
 FLITS made the burst measurements for a study of the brightest bursts of the
 repeating FRB 20240114A observed with several telescopes
 (Kuiper et al., in prep.), and J. Huang uses it in a separate study of the
-same source (Huang et al., in prep.). It is also used in a pulsar study
-(Kuiper et al., in prep.) and by A. Moroianu to analyse how the DM and burst
-morphology of precisely localized repeating FRBs evolve over time
-(Moroianu et al., in prep.). C. Makarytchev, an undergraduate at McGill
-University, used it to model bursts with `fitburst` in a summer project.
+same source (Huang et al., in prep.). It is also used in a pulsar study of
+subpulse morphology and DM optimization (Kuiper et al., in prep.) and by
+A. Moroianu to analyse how the DM and burst morphology of precisely localized
+repeating FRBs evolve over time (Moroianu et al., in prep.). C. Makarytchev
+and V. Shah use it to determine accurate DMs for bursts from FRB 20240209A.
 
 Researchers outside the development team have contributed code. M. A. Fine
 added support for folded PSRFITS pulsar data, treating pulse phase as the time
