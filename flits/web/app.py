@@ -887,7 +887,7 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
         elif action == "set_spectral_extent":
             session.set_spectral_extent_freq(float(payload["start_freq_mhz"]), float(payload["end_freq_mhz"]))
         elif action == "auto_mask_jess":
-            session.auto_mask_jess(payload.get("profile"))
+            session.auto_mask(payload.get("profile"))
         elif action == "auto_localize":
             localization = session.auto_localize(
                 detection_snr_threshold=float(payload.get("detection_snr_threshold", 6.0)),

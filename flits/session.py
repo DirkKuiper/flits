@@ -13,7 +13,6 @@ import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -29,6 +28,7 @@ from flits.analysis.drift import DriftAnalysisInputs, run_drift_analysis
 from flits.analysis.fitting import fit_model_selected_band
 from flits.analysis.fitting.model_fit import ModelFitRequestConfig
 from flits.analysis.localization import BurstLocalization, localize_burst
+from flits.analysis.masking import CHANNEL_TESTS, flag_outlying_channels
 from flits.analysis.morphology import compute_width_analysis
 from flits.analysis.polarization import extract_normalized_linear_spectrum, run_rm_synthesis
 from flits.analysis.temporal.core import run_temporal_structure_analysis, temporal_to_spectral_result
@@ -78,22 +78,12 @@ from flits.signal import (
 from flits.stokes import normalize_polarization_basis
 from flits.timing import ObservatoryLocation, TimingContext
 
-try:
-    import jess.channel_masks as _jess_channel_masks
-
-    jess = SimpleNamespace(channel_masks=_jess_channel_masks)
-    _jess_import_error: Exception | None = None
-except Exception as exc:  # pragma: no cover - optional dependency
-    _jess_import_error = exc
-    jess = SimpleNamespace(channel_masks=SimpleNamespace(channel_masker=None))
-
-
 SESSION_SNAPSHOT_SCHEMA_VERSION = SESSION_SCHEMA_VERSION
 SOURCE_HASH_ALGORITHM = "sha256"
 SOURCE_HASH_CHUNK_BYTES = 1024 * 1024
-JESS_MASK_DTYPE = np.float32
-JESS_WORKING_COPY_FACTOR = 6
-JESS_TEST_SEQUENCE = ("skew", "stand-dev")
+AUTO_MASK_DTYPE = np.float32
+AUTO_MASK_WORKING_COPY_FACTOR = 6
+AUTO_MASK_TESTS = CHANNEL_TESTS
 
 
 def _jsonable_array(values: np.ndarray, digits: int = 4) -> list[Any]:
@@ -131,12 +121,12 @@ def robust_color_limits(values: np.ndarray) -> tuple[float, float]:
     return vmin, vmax
 
 
-def _adaptive_jess_time_bin_limit(
+def _adaptive_mask_time_bin_limit(
     eligible_channels: int,
     memory_budget_mb: int,
     *,
-    dtype: np.dtype[Any] = np.dtype(JESS_MASK_DTYPE),
-    working_copy_factor: int = JESS_WORKING_COPY_FACTOR,
+    dtype: np.dtype[Any] = np.dtype(AUTO_MASK_DTYPE),
+    working_copy_factor: int = AUTO_MASK_WORKING_COPY_FACTOR,
 ) -> int:
     eligible_channels = max(0, int(eligible_channels))
     if eligible_channels == 0:
@@ -1993,21 +1983,18 @@ class BurstSession:
             self.invalidate_analysis_state()
         return result
 
-    def auto_mask_jess(self, profile: str | None = None) -> None:
-        """Mask interference automatically using the jess statistical tests."""
-        if jess.channel_masks.channel_masker is None:
-            if _jess_import_error is not None:
-                message = f"{type(_jess_import_error).__name__}: {_jess_import_error}"
-                raise RuntimeError(
-                    f"Jess is not available in the active environment: {message}"
-                ) from _jess_import_error
-            raise RuntimeError("Jess is not installed in the active environment.")
+    def auto_mask(self, profile: str | None = None) -> None:
+        """Mask interference automatically from statistics of the off-burst samples.
 
+        Channels whose skewness, or failing that whose standard deviation,
+        stands out from the bandpass are masked; see `flits.analysis.masking`.
+        """
         mask_profile = get_auto_mask_profile(self.config.auto_mask_profile if profile is None else profile)
         if mask_profile.key != self.config.auto_mask_profile:
             self.config = replace(self.config, auto_mask_profile=mask_profile.key)
-        masked = self.get_masked_crop()
-        if masked.size == 0:
+        # A view of the crop: only the sampled off-burst values are copied below.
+        crop = self.data[:, self.crop_start : self.crop_end]
+        if crop.size == 0:
             self.last_auto_mask = AutoMaskRunSummary(
                 profile=mask_profile.key,
                 profile_label=mask_profile.label,
@@ -2030,22 +2017,20 @@ class BurstSession:
                 [np.arange(start, end, dtype=int) for start, end in explicit_offpulse if end > start]
             )
         else:
-            rel_start, rel_end = self._event_bounds_in_crop(masked.shape[1])
+            rel_start, rel_end = self._event_bounds_in_crop(crop.shape[1])
             candidate_bins = np.concatenate(
                 [
                     np.arange(0, rel_start, dtype=int),
-                    np.arange(rel_end, masked.shape[1], dtype=int),
+                    np.arange(rel_end, crop.shape[1], dtype=int),
                 ]
             )
         if candidate_bins.size == 0:
-            candidate_bins = np.arange(masked.shape[1], dtype=int)
+            candidate_bins = np.arange(crop.shape[1], dtype=int)
 
         eligible_channels = (
-            np.flatnonzero(~self.channel_mask)
-            if self.channel_mask is not None
-            else np.arange(masked.shape[0], dtype=int)
+            np.flatnonzero(~self.channel_mask) if self.channel_mask is not None else np.arange(crop.shape[0], dtype=int)
         )
-        max_samples = _adaptive_jess_time_bin_limit(eligible_channels.size, mask_profile.memory_budget_mb)
+        max_samples = _adaptive_mask_time_bin_limit(eligible_channels.size, mask_profile.memory_budget_mb)
         sampled_bins = _sample_time_bins_evenly(candidate_bins, max_samples)
         if eligible_channels.size == 0 or sampled_bins.size == 0:
             self.last_auto_mask = AutoMaskRunSummary(
@@ -2064,9 +2049,13 @@ class BurstSession:
             self.provenance.record("auto_mask", inputs=("data_load",))
             return
 
-        offburst = masked[eligible_channels][:, sampled_bins]
+        # Eligible channels are the unmasked ones, so the masked copy of the crop
+        # would hold the same values for them.
+        offburst = crop[np.ix_(eligible_channels, sampled_bins)]
+        if not np.issubdtype(offburst.dtype, np.floating):
+            offburst = offburst.astype(np.float32)
         fill_value = float(np.nanmedian(offburst)) if np.isfinite(offburst).any() else 0.0
-        filled = np.nan_to_num(offburst.astype(JESS_MASK_DTYPE, copy=False), nan=fill_value)
+        filled = np.nan_to_num(offburst.astype(AUTO_MASK_DTYPE, copy=False), nan=fill_value)
 
         channel_sigma = np.nanstd(filled, axis=1)
         variable_local = np.isfinite(channel_sigma) & (channel_sigma > 0)
@@ -2078,21 +2067,9 @@ class BurstSession:
         test_used: str | None = "constant" if constant_channels.size else None
         if active_channels.size:
             active_spectra = filled[variable_local, :].T
-            for test_name in JESS_TEST_SEQUENCE:
+            for test_name in AUTO_MASK_TESTS:
                 tests_tried.append(test_name)
-                bool_mask = np.atleast_1d(
-                    np.asarray(
-                        jess.channel_masks.channel_masker(
-                            dynamic_spectra=active_spectra,
-                            test=test_name,
-                            sigma=3,
-                            show_plots=False,
-                        ),
-                        dtype=bool,
-                    )
-                )
-                if bool_mask.shape != (active_channels.size,):
-                    raise RuntimeError("Jess returned an unexpected mask shape.")
+                bool_mask = flag_outlying_channels(active_spectra, test_name)
                 detected_channels.extend(active_channels[bool_mask].astype(int).tolist())
                 test_used = test_name
                 if bool_mask.any():
@@ -2120,6 +2097,10 @@ class BurstSession:
             tests_tried=tuple(tests_tried),
         )
         self.provenance.record("auto_mask", inputs=("data_load",))
+
+    def auto_mask_jess(self, profile: str | None = None) -> None:
+        """Former name of `auto_mask`, from when it called the jess package."""
+        self.auto_mask(profile)
 
     def set_dm(self, new_dm: float) -> None:
         """Retune the dispersion measure of the loaded data.

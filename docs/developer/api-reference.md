@@ -25,7 +25,7 @@ session = BurstSession.from_file(
 session.set_crop_ms(80.0, 200.0)
 session.set_event_ms(120.0, 128.0)
 session.add_offpulse_ms(0.0, 80.0)
-session.auto_mask_jess("auto")
+session.auto_mask("auto")
 
 measurements = session.compute_properties()
 print(measurements.fluence_jyms, measurements.snr)

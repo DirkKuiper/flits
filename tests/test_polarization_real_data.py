@@ -148,8 +148,9 @@ def test_a_real_polarization_analysis_survives_an_export_bundle(nrt_session: Bur
     assert science["polarization"]["rm_synthesis"]["peak_rm_rad_m2"] == pytest.approx(EXPECTED_RM_RAD_M2, abs=3.0)
 
     csv_text = next(value for name, value in contents.items() if name.endswith("catalog.csv")).decode("utf-8")
-    header, row = (line.split(",") for line in csv_text.splitlines()[:2])
-    assert float(dict(zip(header, row, strict=True))["rm_rad_m2"]) == pytest.approx(EXPECTED_RM_RAD_M2, abs=3.0)
+    # Parse as CSV: the provenance column holds quoted JSON with commas in it.
+    row = next(csv.DictReader(io.StringIO(csv_text)))
+    assert float(row["rm_rad_m2"]) == pytest.approx(EXPECTED_RM_RAD_M2, abs=3.0)
 
     with np.load(io.BytesIO(next(v for n, v in contents.items() if n.endswith("diagnostics.npz")))) as arrays:
         assert arrays["rm_phi_rad_m2"].size > 0
