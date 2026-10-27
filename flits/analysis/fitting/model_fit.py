@@ -14,14 +14,19 @@ failure instead of raising.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
 
 from flits.analysis.fitting.burst_model import BurstModel, BurstParameters
-from flits.analysis.fitting.least_squares import BurstFitResult, channel_weights, fit_burst_model
-from flits.models import ModelFitDiagnostics, UncertaintyDetail
+from flits.analysis.fitting.least_squares import (
+    BurstFitResult,
+    channel_weights,
+    compare_fit_statistics,
+    fit_burst_model,
+)
+from flits.models import ModelComparisonDiagnostics, ModelComparisonRow, ModelFitDiagnostics, UncertaintyDetail
 
 __all__ = [
     "DEFAULT_FIXED_PARAMETERS",
@@ -37,6 +42,7 @@ __all__ = [
     "WEIGHTING_MODES",
     "ModelFitRequestConfig",
     "ModelFitResult",
+    "compare_component_counts",
     "fit_model_selected_band",
 ]
 
@@ -59,6 +65,18 @@ GLOBAL_PARAMETERS = ("dm", "dm_index", "scattering_timescale", "scattering_index
 NON_FITTABLE_PARAMETERS = ("ref_freq",)
 SCINTILLATION_INACTIVE_PARAMETERS = ("amplitude", "spectral_index", "spectral_running")
 WEIGHTING_MODES = ("none", "auto", "fit_window", "manual_range")
+# Automatic time upsampling: a component narrower than this many time bins is
+# refitted with sub-samples no wider than 1/AUTO_SUBSAMPLES_PER_WIDTH of its
+# width, so the model is averaged over each bin as the data are.
+AUTO_SUBSAMPLES_PER_WIDTH = 3
+MAX_AUTO_TIME_UPSAMPLE = 16
+MAX_AUTO_UPSAMPLE_ROUNDS = 3
+# Upsampled samples per evaluation stay below this, which keeps a fit to seconds.
+MAX_UPSAMPLED_FIT_SAMPLES = 16_000_000
+# The fit window extends the event window by its own length on each side, and
+# by at least this many bins, so the baseline and any scattering tail are fitted.
+MIN_FIT_PADDING_BINS = 8
+MAX_COMPARISON_COMPONENTS = 5
 
 
 def _model_fit_uncertainty_detail(
@@ -68,6 +86,7 @@ def _model_fit_uncertainty_detail(
     parameter_label: str,
     covariance_basis: str | None = "observed_hessian",
     at_lower_bound: bool = False,
+    below_time_resolution: bool = False,
 ) -> UncertaintyDetail:
     if covariance_basis == "gauss_newton":
         source = (
@@ -87,6 +106,12 @@ def _model_fit_uncertainty_detail(
             "uncertainty as an upper limit."
         )
         warning_flags.append("at_lower_bound")
+    elif below_time_resolution:
+        tooltip += (
+            " It is shorter than one time bin: the model is averaged over each bin, so the data constrain it only "
+            "through how the burst's flux spreads into neighbouring bins."
+        )
+        warning_flags.append("below_time_resolution")
     if value is None:
         warning_flags.append("uncertainty_unavailable")
     return UncertaintyDetail(
@@ -112,13 +137,16 @@ class ModelFitRequestConfig:
     weighting_mode: str = "none"
     weight_range: list[int] | None = None
     iterations: int = 1
-    factor_time_upsample: int = 1
+    # None chooses the factor from the fitted width (see AUTO_SUBSAMPLES_PER_WIDTH).
+    factor_time_upsample: int | None = None
     factor_freq_upsample: int = 1
     ref_freq_mhz: float | None = None
     is_folded: bool = False
     exact_jacobian: bool = True
     max_function_evaluations: int | None = None
     scintillation: bool = False
+    # Bins added to each side of the event window; None pads by the event length.
+    fit_window_padding_bins: int | None = None
     fixed_parameters: list[str] = field(init=False)
 
     def __post_init__(self) -> None:
@@ -138,7 +166,7 @@ class ModelFitRequestConfig:
         if self.weighting_mode == "manual_range" and self.weight_range is None:
             raise ValueError("manual_range weighting requires a two-bin weight_range.")
         object.__setattr__(self, "iterations", _coerce_iterations(self.iterations))
-        object.__setattr__(self, "factor_time_upsample", _coerce_positive_int(self.factor_time_upsample))
+        object.__setattr__(self, "factor_time_upsample", _coerce_optional_positive_int(self.factor_time_upsample))
         object.__setattr__(self, "factor_freq_upsample", _coerce_positive_int(self.factor_freq_upsample))
         object.__setattr__(self, "ref_freq_mhz", _coerce_ref_freq_mhz(self.ref_freq_mhz))
         object.__setattr__(self, "is_folded", _coerce_bool(self.is_folded, default=False))
@@ -146,6 +174,7 @@ class ModelFitRequestConfig:
         object.__setattr__(
             self, "max_function_evaluations", _coerce_max_function_evaluations(self.max_function_evaluations)
         )
+        object.__setattr__(self, "fit_window_padding_bins", _coerce_padding_bins(self.fit_window_padding_bins))
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible request payload."""
@@ -160,12 +189,13 @@ class ModelFitRequestConfig:
                 "weighting_mode": _coerce_weighting_mode(self.weighting_mode),
                 "weight_range": None if self.weight_range is None else [int(value) for value in self.weight_range],
                 "iterations": _coerce_iterations(self.iterations),
-                "factor_time_upsample": _coerce_positive_int(self.factor_time_upsample),
+                "factor_time_upsample": _coerce_optional_positive_int(self.factor_time_upsample),
                 "factor_freq_upsample": _coerce_positive_int(self.factor_freq_upsample),
                 "ref_freq_mhz": _coerce_ref_freq_mhz(self.ref_freq_mhz),
                 "is_folded": bool(self.is_folded),
                 "exact_jacobian": bool(self.exact_jacobian),
                 "max_function_evaluations": _coerce_max_function_evaluations(self.max_function_evaluations),
+                "fit_window_padding_bins": _coerce_padding_bins(self.fit_window_padding_bins),
             },
             "scintillation": bool(self.scintillation),
         }
@@ -198,7 +228,7 @@ class ModelFitRequestConfig:
             weighting_mode=solver.get("weighting_mode", payload.get("weighting_mode", "none")),
             weight_range=_coerce_weight_range(solver.get("weight_range", payload.get("weight_range"))),
             iterations=_coerce_iterations(solver.get("iterations", payload.get("iterations", 1))),
-            factor_time_upsample=_coerce_positive_int(
+            factor_time_upsample=_coerce_optional_positive_int(
                 solver.get("factor_time_upsample", payload.get("factor_time_upsample"))
             ),
             factor_freq_upsample=_coerce_positive_int(
@@ -211,6 +241,9 @@ class ModelFitRequestConfig:
                 solver.get("max_function_evaluations", payload.get("max_function_evaluations"))
             ),
             scintillation=_coerce_bool(payload.get("scintillation"), default=False),
+            fit_window_padding_bins=_coerce_padding_bins(
+                solver.get("fit_window_padding_bins", payload.get("fit_window_padding_bins"))
+            ),
         )
 
 
@@ -352,8 +385,14 @@ def fit_model_selected_band(
             exact_jacobian=config.exact_jacobian,
             max_function_evaluations=config.max_function_evaluations,
         )
-    fit_time_bins = max(0, int(event_rel_end) - int(event_rel_start))
-    fit_cells = int(data.shape[0]) * fit_time_bins
+    fit_start, fit_end = _fit_window(
+        event_rel_start=int(event_rel_start),
+        event_rel_end=int(event_rel_end),
+        num_time=int(data.shape[1]),
+        num_channels=int(data.shape[0]),
+        padding_bins=config.fit_window_padding_bins,
+    )
+    fit_cells = int(data.shape[0]) * (fit_end - fit_start)
     if fit_cells > MAX_MODEL_FIT_CELLS:
         return _failed_result(
             status="fit_window_too_large",
@@ -447,14 +486,18 @@ def fit_model_selected_band(
         effective_ref_freq_mhz = float(finite_refs[0] if finite_refs.size else np.min(freqs))
         if finite_refs.size == 0:
             initial_parameters["ref_freq"] = [effective_ref_freq_mhz] * config.num_components
-    factor_time_upsample = _coerce_positive_int(config.factor_time_upsample)
     factor_freq_upsample = _coerce_positive_int(config.factor_freq_upsample)
+    time_upsample_basis = "auto" if config.factor_time_upsample is None else "requested"
+    factor_time_upsample = 1 if config.factor_time_upsample is None else int(config.factor_time_upsample)
 
-    fit_data = np.array(normalized_data[:, event_rel_start:event_rel_end], dtype=float, copy=True)
-    fit_time_axis_ms = time_axis_ms[event_rel_start:event_rel_end]
+    fit_data = np.array(normalized_data[:, fit_start:fit_end], dtype=float, copy=True)
+    fit_time_axis_ms = time_axis_ms[fit_start:fit_end]
     times_sec = (fit_time_axis_ms - float(time_axis_ms[0])) / 1e3
+    fit_window_ms = [float(time_axis_ms[fit_start]), float(time_axis_ms[fit_end - 1] + float(tsamp_ms))]
     weighting_mode = _coerce_weighting_mode(config.weighting_mode)
-    weight_range = _coerce_weight_range(config.weight_range, fit_data.shape[1])
+    # A manual weight range is given in event-window bins.
+    weight_range = _coerce_weight_range(config.weight_range, int(event_rel_end) - int(event_rel_start))
+    event_offset = int(event_rel_start) - fit_start
     weight_range_basis: str | None = "none"
     context: dict[str, Any] = {
         "initial_parameters": initial_parameters,
@@ -466,10 +509,13 @@ def fit_model_selected_band(
         "weighting_mode": weighting_mode,
         "fit_iterations_requested": fit_iterations,
         "factor_time_upsample": factor_time_upsample,
+        "time_upsample_basis": time_upsample_basis,
         "factor_freq_upsample": factor_freq_upsample,
         "ref_freq_mhz": effective_ref_freq_mhz,
         "is_folded": config.is_folded,
         "exact_jacobian": config.exact_jacobian,
+        "fit_window_ms": fit_window_ms,
+        "time_resolution_ms": float(tsamp_ms),
     }
     if weighting_mode == "auto":
         offpulse_weights, offpulse_range = _offpulse_channel_weights(
@@ -491,29 +537,37 @@ def fit_model_selected_band(
         if weight_range is None:
             return _failed_result(
                 status="invalid_config",
-                message="manual_range weighting requires a valid two-bin weight_range within the fitted event window.",
+                message="manual_range weighting requires a valid two-bin weight_range within the event window.",
                 weight_range=None,
                 weight_range_basis="invalid",
                 fit_iterations_completed=0,
                 max_function_evaluations=config.max_function_evaluations,
                 **context,
             )
-        weights = channel_weights(fit_data, good_freq, weighted=True, weight_range=weight_range)
+        weights = channel_weights(
+            fit_data,
+            good_freq,
+            weighted=True,
+            weight_range=[weight_range[0] + event_offset, weight_range[1] + event_offset],
+        )
         weight_range_basis = "manual_range"
     else:
         weights = channel_weights(fit_data, good_freq, weighted=False)
     context.update({"weight_range": weight_range, "weight_range_basis": weight_range_basis})
 
-    try:
-        model = BurstModel(
+    def burst_model(factor: int) -> BurstModel:
+        return BurstModel(
             freqs,
             times_sec,
             factor_freq_upsample=factor_freq_upsample,
-            factor_time_upsample=factor_time_upsample,
+            factor_time_upsample=factor,
             is_folded=config.is_folded,
             scintillation=config.scintillation,
         )
-        current = BurstParameters.from_dict(initial_parameters, config.num_components)
+
+    try:
+        model = burst_model(factor_time_upsample)
+        start = BurstParameters.from_dict(initial_parameters, config.num_components)
     except ValueError as exc:
         return _failed_result(
             status="invalid_config",
@@ -523,55 +577,79 @@ def fit_model_selected_band(
             **context,
         )
 
-    completed_iterations = 0
-    fit: BurstFitResult | None = None
-    for _iteration_index in range(fit_iterations):
-        try:
-            fit = fit_burst_model(
-                model,
-                fit_data,
-                current,
-                config.free_parameters,
-                weights=weights,
-                exact_jacobian=config.exact_jacobian,
-                max_function_evaluations=config.max_function_evaluations,
+    def run_passes(model: BurstModel, current: BurstParameters) -> tuple[BurstFitResult, int] | ModelFitResult:
+        """Run the requested optimizer passes, each from the previous best fit."""
+        completed_iterations = 0
+        fit: BurstFitResult | None = None
+        for _iteration_index in range(fit_iterations):
+            try:
+                fit = fit_burst_model(
+                    model,
+                    fit_data,
+                    current,
+                    config.free_parameters,
+                    weights=weights,
+                    exact_jacobian=config.exact_jacobian,
+                    max_function_evaluations=config.max_function_evaluations,
+                )
+            except ValueError as exc:
+                return _failed_result(
+                    status="invalid_config",
+                    message=str(exc),
+                    bestfit_parameters=current.to_dict() if completed_iterations else {},
+                    fit_iterations_completed=completed_iterations,
+                    max_function_evaluations=config.max_function_evaluations,
+                    **context,
+                )
+            except Exception as exc:
+                return _failed_result(
+                    status="fit_failed",
+                    message="The model fit raised an exception.",
+                    bestfit_parameters=current.to_dict() if completed_iterations else {},
+                    fit_iterations_completed=completed_iterations,
+                    max_function_evaluations=config.max_function_evaluations,
+                    failure_exception=_sanitize_log(f"{type(exc).__name__}: {exc}"),
+                    **context,
+                )
+            if not fit.success:
+                return _failed_result(
+                    status="evaluation_limit_exceeded" if fit.status == 0 else "fit_failed",
+                    message=fit.message or "The model fit could not converge for the current selection.",
+                    bestfit_parameters=current.to_dict() if completed_iterations else {},
+                    fit_statistics=fit.fit_statistics,
+                    fit_parameters=list(fit.layout.fit_parameters),
+                    fit_iterations_completed=completed_iterations,
+                    max_function_evaluations=fit.max_function_evaluations,
+                    function_evaluations=fit.function_evaluations,
+                    solver_status=fit.status,
+                    solver_message=fit.message,
+                    **context,
+                )
+            current = fit.parameters
+            completed_iterations += 1
+        assert fit is not None
+        return fit, completed_iterations
+
+    outcome = run_passes(model, start)
+    if isinstance(outcome, ModelFitResult):
+        return outcome
+    fit, completed_iterations = outcome
+    if time_upsample_basis == "auto":
+        # A model narrower than a time bin must be averaged over the bin, as the
+        # data are; refit from the solution on a fine enough grid.
+        for _round in range(MAX_AUTO_UPSAMPLE_ROUNDS):
+            needed = _auto_time_upsample(
+                fit.parameters, time_resolution_s=float(tsamp_ms) / 1e3, current=factor_time_upsample, cells=fit_cells
             )
-        except ValueError as exc:
-            return _failed_result(
-                status="invalid_config",
-                message=str(exc),
-                bestfit_parameters=current.to_dict() if completed_iterations else {},
-                fit_iterations_completed=completed_iterations,
-                max_function_evaluations=config.max_function_evaluations,
-                **context,
-            )
-        except Exception as exc:
-            return _failed_result(
-                status="fit_failed",
-                message="The model fit raised an exception.",
-                bestfit_parameters=current.to_dict() if completed_iterations else {},
-                fit_iterations_completed=completed_iterations,
-                max_function_evaluations=config.max_function_evaluations,
-                failure_exception=_sanitize_log(f"{type(exc).__name__}: {exc}"),
-                **context,
-            )
-        if not fit.success:
-            return _failed_result(
-                status="evaluation_limit_exceeded" if fit.status == 0 else "fit_failed",
-                message=fit.message or "The model fit could not converge for the current selection.",
-                bestfit_parameters=current.to_dict() if completed_iterations else {},
-                fit_statistics=fit.fit_statistics,
-                fit_parameters=list(fit.layout.fit_parameters),
-                fit_iterations_completed=completed_iterations,
-                max_function_evaluations=fit.max_function_evaluations,
-                function_evaluations=fit.function_evaluations,
-                solver_status=fit.status,
-                solver_message=fit.message,
-                **context,
-            )
-        current = fit.parameters
-        completed_iterations += 1
-    assert fit is not None and fit.model is not None
+            if needed <= factor_time_upsample:
+                break
+            factor_time_upsample = needed
+            context["factor_time_upsample"] = needed
+            outcome = run_passes(burst_model(needed), fit.parameters)
+            if isinstance(outcome, ModelFitResult):
+                return outcome
+            fit, completed_iterations = outcome
+    assert fit.model is not None
 
     full_best_parameters: dict[str, list[float] | None] = dict(fit.parameters.to_dict())
     bestfit_uncertainties: dict[str, list[float] | None] = dict(fit.bestfit_uncertainties)
@@ -618,6 +696,7 @@ def fit_model_selected_band(
     tau_sec = _parameter_value(full_best_parameters, "scattering_timescale")
     width_uncertainty_sec = _parameter_value(bestfit_uncertainties, "burst_width")
     tau_uncertainty_sec = _parameter_value(bestfit_uncertainties, "scattering_timescale")
+    resolution_flags = _resolution_flags(fit, time_resolution_ms=float(tsamp_ms))
     uncertainty_details = {
         "width_ms_model": _model_fit_uncertainty_detail(
             value=None if width_uncertainty_sec is None else float(width_uncertainty_sec * 1e3),
@@ -625,6 +704,7 @@ def fit_model_selected_band(
             parameter_label="Intrinsic width",
             covariance_basis=fit.covariance_basis,
             at_lower_bound="burst_width1" in fit.parameters_at_bounds,
+            below_time_resolution=width_sec is not None and width_sec * 1e3 < float(tsamp_ms),
         ),
         "tau_sc_ms": _model_fit_uncertainty_detail(
             value=None if tau_uncertainty_sec is None else float(tau_uncertainty_sec * 1e3),
@@ -632,6 +712,7 @@ def fit_model_selected_band(
             parameter_label="Scattering timescale",
             covariance_basis=fit.covariance_basis,
             at_lower_bound="scattering_timescale" in fit.parameters_at_bounds,
+            below_time_resolution="scattering_below_time_resolution" in resolution_flags,
         ),
     }
 
@@ -651,10 +732,14 @@ def fit_model_selected_band(
         fit_iterations_requested=fit_iterations,
         fit_iterations_completed=completed_iterations,
         factor_time_upsample=factor_time_upsample,
+        time_upsample_basis=time_upsample_basis,
         factor_freq_upsample=factor_freq_upsample,
         ref_freq_mhz=effective_ref_freq_mhz,
         is_folded=config.is_folded,
         exact_jacobian=config.exact_jacobian,
+        fit_window_ms=fit_window_ms,
+        time_resolution_ms=float(tsamp_ms),
+        resolution_flags=resolution_flags,
         max_function_evaluations=fit.max_function_evaluations,
         function_evaluations=fit.function_evaluations,
         solver_status=fit.status,
@@ -690,6 +775,253 @@ def fit_model_selected_band(
         tau_uncertainty_ms=None if tau_uncertainty_sec is None else float(tau_uncertainty_sec * 1e3),
         diagnostics=diagnostics,
     )
+
+
+def compare_component_counts(
+    *,
+    selected_band: np.ndarray,
+    freqs_mhz: np.ndarray,
+    time_axis_ms: np.ndarray,
+    event_rel_start: int,
+    event_rel_end: int,
+    offpulse_bins: np.ndarray,
+    tsamp_ms: float,
+    peak_rel_bin: int | None,
+    width_guess_ms: float | None,
+    config: ModelFitRequestConfig | None = None,
+    max_components: int = 3,
+) -> ModelComparisonDiagnostics:
+    """Fit the selection with one to ``max_components`` components and compare the fits.
+
+    The one-component fit starts from the automatic guess at the strongest
+    peak. Each further fit starts from the previous solution with one more
+    component at the largest positive residual of the event profile, scaled to
+    that residual. All fits share the fit window, the weights and the time
+    upsampling (chosen by the one-component fit when it is automatic), so their
+    chi-squared values compare like with like. The comparison stops at the
+    first fit that fails or when no positive residual is left; the fits that
+    converged are still compared. A component the data do not support often
+    fails to converge, because nothing stops it shrinking onto a noise spike.
+
+    The inputs are those of :func:`fit_model_selected_band`; ``config`` gives
+    the free parameters and solver settings, and its component count and
+    initial parameters are ignored.
+    """
+    base = config if config is not None else ModelFitRequestConfig()
+    max_components = max(2, min(int(max_components), MAX_COMPARISON_COMPONENTS))
+    axis_ms = np.asarray(time_axis_ms, dtype=float)
+    event_window_ms = (
+        float(axis_ms[int(event_rel_start)]),
+        float(axis_ms[max(int(event_rel_start), int(event_rel_end) - 1)] + float(tsamp_ms)),
+    )
+    rows: list[ModelComparisonRow] = []
+    statistics: list[Mapping[str, float | int | None]] = []
+    initial: dict[str, list[float]] | None = None
+    factor_time_upsample = base.factor_time_upsample
+    fit_window_ms: list[float] | None = None
+    message: str | None = None
+    for count in range(1, max_components + 1):
+        trial = replace(
+            base,
+            num_components=count,
+            initial_parameters=initial,
+            initial_parameter_source="current_selection" if initial is None else "component_comparison",
+            factor_time_upsample=factor_time_upsample,
+        )
+        result = fit_model_selected_band(
+            selected_band=selected_band,
+            freqs_mhz=freqs_mhz,
+            time_axis_ms=axis_ms,
+            event_rel_start=event_rel_start,
+            event_rel_end=event_rel_end,
+            offpulse_bins=offpulse_bins,
+            tsamp_ms=tsamp_ms,
+            peak_rel_bin=peak_rel_bin,
+            width_guess_ms=width_guess_ms,
+            config=trial,
+        )
+        diagnostics = result.diagnostics
+        if result.status != "ok":
+            rows.append(ModelComparisonRow(num_components=count, status=result.status, message=result.message))
+            reason = (
+                "it reached the evaluation limit"
+                if result.status == "evaluation_limit_exceeded"
+                else str(result.message or result.status).rstrip(".")
+            )
+            message = (
+                f"The {count}-component fit did not converge: {reason}. A component the data do not support "
+                "often fails this way; to check, fit it with more evaluations or your own initial guesses."
+            )
+            break
+        factor_time_upsample = diagnostics.factor_time_upsample
+        fit_window_ms = diagnostics.fit_window_ms
+        statistics.append(diagnostics.fit_statistics)
+        rows.append(
+            ModelComparisonRow(
+                num_components=count,
+                status="ok",
+                message=result.message,
+                chisq_reduced=_float_statistic(diagnostics.fit_statistics.get("chisq_final_reduced")),
+                bestfit_parameters=dict(diagnostics.bestfit_parameters),
+                bestfit_uncertainties=dict(diagnostics.bestfit_uncertainties),
+                parameters_at_bounds=list(diagnostics.parameters_at_bounds),
+            )
+        )
+        if count == max_components:
+            break
+        initial = _with_component_at_largest_residual(
+            diagnostics,
+            event_window_ms=event_window_ms,
+            time_origin_ms=float(axis_ms[0]),
+            min_width_s=float(tsamp_ms) / 1e3,
+        )
+        if initial is None:
+            message = f"No positive residual is left in the event window after {count} components."
+            break
+
+    converged = [row for row in rows if row.status == "ok"]
+    preferred: int | None = converged[0].num_components if len(converged) == 1 else None
+    if len(converged) >= 2:
+        comparisons = compare_fit_statistics(statistics)
+        for comparison in comparisons:
+            row = converged[comparison.index]
+            converged[comparison.index] = replace(
+                row,
+                num_parameters=comparison.num_parameters,
+                chisq=comparison.chisq,
+                aic=comparison.aic,
+                bic=comparison.bic,
+                delta_aic=comparison.delta_aic,
+                delta_bic=comparison.delta_bic,
+                f_test_p_value=comparison.f_test_p_value,
+            )
+        preferred = min(converged, key=lambda row: row.bic if row.bic is not None else np.inf).num_components
+        by_count = {row.num_components: row for row in converged}
+        rows = [by_count.get(row.num_components, row) for row in rows]
+    status = "ok" if converged else "fit_failed"
+    return ModelComparisonDiagnostics(
+        status=status,
+        message=message,
+        max_components=max_components,
+        preferred_components=preferred,
+        free_parameters=list(base.free_parameters),
+        scintillation=base.scintillation,
+        factor_time_upsample=factor_time_upsample,
+        fit_window_ms=fit_window_ms,
+        rows=rows,
+    )
+
+
+def _float_statistic(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return parsed if np.isfinite(parsed) else None
+
+
+def _with_component_at_largest_residual(
+    diagnostics: ModelFitDiagnostics,
+    *,
+    event_window_ms: tuple[float, float],
+    time_origin_ms: float,
+    min_width_s: float,
+) -> dict[str, list[float]] | None:
+    """The fit's parameters plus a component at the largest positive event-profile residual.
+
+    The new component's amplitude scales the strongest component's by the
+    ratio of the residual peak to the model peak, which holds in either
+    profile normalization; its width is the median fitted width, and its
+    spectrum copies the strongest component's.
+    """
+    times = np.asarray(diagnostics.time_axis_ms, dtype=float)
+    residual = np.asarray(diagnostics.residual_profile_sn, dtype=float)
+    model = np.asarray(diagnostics.model_profile_sn, dtype=float)
+    inside = (times >= event_window_ms[0]) & (times < event_window_ms[1]) & np.isfinite(residual)
+    if times.size != residual.size or not inside.any():
+        return None
+    index = int(np.flatnonzero(inside)[int(np.argmax(residual[inside]))])
+    peak = float(residual[index])
+    if not peak > 0:
+        return None
+    parameters = {
+        key: [float(value) for value in values] for key, values in diagnostics.bestfit_parameters.items() if values
+    }
+    amplitudes = parameters.get("amplitude")
+    widths = parameters.get("burst_width")
+    if not amplitudes or not widths:
+        return None
+    strongest = int(np.argmax(amplitudes))
+    model_peak = float(np.nanmax(model)) if model.size and np.isfinite(model).any() else 0.0
+    amplitude = amplitudes[strongest] + float(np.log10(peak / model_peak)) if model_peak > 0 else float(np.log10(peak))
+    added = {
+        "amplitude": amplitude,
+        "arrival_time": (float(times[index]) - time_origin_ms) / 1e3,
+        "burst_width": max(float(np.median(widths)), min_width_s),
+    }
+    for key, values in parameters.items():
+        if key in added:
+            values.append(added[key])
+        else:
+            # Shared parameters repeat; per-component ones copy the strongest component.
+            values.append(values[0] if key in GLOBAL_PARAMETERS else values[min(strongest, len(values) - 1)])
+    return parameters
+
+
+def _fit_window(
+    *,
+    event_rel_start: int,
+    event_rel_end: int,
+    num_time: int,
+    num_channels: int,
+    padding_bins: int | None,
+) -> tuple[int, int]:
+    """Return the half-open bin range fitted: the event window plus padding on each side.
+
+    Automatic padding is the event length, at least MIN_FIT_PADDING_BINS, and
+    shrinks so the window stays within MAX_MODEL_FIT_CELLS. The window is
+    clipped to the data.
+    """
+    event_length = max(0, event_rel_end - event_rel_start)
+    if padding_bins is None:
+        padding = max(event_length, MIN_FIT_PADDING_BINS)
+        room = MAX_MODEL_FIT_CELLS // max(1, num_channels) - event_length
+        padding = max(0, min(padding, room // 2))
+    else:
+        padding = max(0, int(padding_bins))
+    return max(0, event_rel_start - padding), min(num_time, event_rel_end + padding)
+
+
+def _auto_time_upsample(parameters: BurstParameters, *, time_resolution_s: float, current: int, cells: int) -> int:
+    """Time upsampling that resolves the narrowest fitted component, never below ``current``.
+
+    A scattered profile rises on the scale of the component width, so the
+    width alone sets how finely the model must be sampled.
+    """
+    widths = np.asarray(parameters.burst_width, dtype=float)
+    widths = widths[np.isfinite(widths)]
+    cap = min(MAX_AUTO_TIME_UPSAMPLE, max(1, MAX_UPSAMPLED_FIT_SAMPLES // max(1, cells)))
+    if widths.size == 0 or not time_resolution_s > 0:
+        return current
+    narrowest = float(np.min(widths))
+    if narrowest <= 0:
+        return max(current, cap)
+    needed = int(np.ceil(AUTO_SUBSAMPLES_PER_WIDTH * time_resolution_s / narrowest))
+    return max(current, min(needed, cap))
+
+
+def _resolution_flags(fit: BurstFitResult, *, time_resolution_ms: float) -> list[str]:
+    """Flag fitted timescales shorter than one time bin."""
+    flags: list[str] = []
+    widths_ms = np.asarray(fit.parameters.burst_width, dtype=float) * 1e3
+    if np.any(widths_ms < time_resolution_ms):
+        flags.append("width_below_time_resolution")
+    tau_ms = float(fit.parameters.scattering_timescale) * 1e3
+    if 0 < tau_ms < time_resolution_ms and "scattering_timescale" not in fit.parameters_at_bounds:
+        flags.append("scattering_below_time_resolution")
+    return flags
 
 
 def _normalize_dynamic_spectrum(
@@ -881,7 +1213,7 @@ def _coerce_bool(value: Any, *, default: bool = False) -> bool:
 
 
 def _coerce_initial_parameter_source(value: Any, initial_parameters: Any = None) -> str:
-    allowed = {"current_selection", "previous_fit", "imported_solution", "api"}
+    allowed = {"current_selection", "previous_fit", "imported_solution", "component_comparison", "api"}
     if value is None:
         return "api" if initial_parameters else "current_selection"
     source = str(value).strip().lower().replace("-", "_")
@@ -925,6 +1257,28 @@ def _coerce_positive_int(value: Any) -> int:
     except (TypeError, ValueError):
         return 1
     return max(1, parsed)
+
+
+def _coerce_optional_positive_int(value: Any) -> int | None:
+    """A positive integer, or None for "auto" (None, blank, "auto" or zero)."""
+    if value is None or (isinstance(value, str) and value.strip().lower() in {"", "auto"}):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 1 else None
+
+
+def _coerce_padding_bins(value: Any) -> int | None:
+    """Bins of padding on each side of the event window, or None for automatic padding."""
+    if value is None or (isinstance(value, str) and value.strip().lower() in {"", "auto"}):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0, parsed)
 
 
 def _coerce_ref_freq_mhz(value: Any) -> float | None:
@@ -1143,10 +1497,13 @@ def _failed_result(
     fit_iterations_requested: int | None = None,
     fit_iterations_completed: int | None = None,
     factor_time_upsample: int | None = None,
+    time_upsample_basis: str | None = None,
     factor_freq_upsample: int | None = None,
     ref_freq_mhz: float | None = None,
     is_folded: bool | None = None,
     exact_jacobian: bool | None = None,
+    fit_window_ms: list[float] | None = None,
+    time_resolution_ms: float | None = None,
     max_function_evaluations: int | None = None,
     function_evaluations: int | None = None,
     solver_status: int | None = None,
@@ -1172,10 +1529,13 @@ def _failed_result(
         fit_iterations_requested=fit_iterations_requested,
         fit_iterations_completed=fit_iterations_completed,
         factor_time_upsample=factor_time_upsample,
+        time_upsample_basis=time_upsample_basis,
         factor_freq_upsample=factor_freq_upsample,
         ref_freq_mhz=ref_freq_mhz,
         is_folded=is_folded,
         exact_jacobian=exact_jacobian,
+        fit_window_ms=fit_window_ms,
+        time_resolution_ms=time_resolution_ms,
         max_function_evaluations=max_function_evaluations,
         function_evaluations=function_evaluations,
         solver_status=solver_status,

@@ -870,6 +870,19 @@ class WebApiTest(unittest.TestCase):
 
         session.fit_model.assert_called_once_with(payload)
 
+    def test_session_action_compare_model_components_dispatches_to_session_method(self) -> None:
+        session_id = "synthetic-compare-dispatch"
+        session = _synthetic_session()
+        session.compare_model_components = Mock(return_value=None)
+        payload = {"max_components": 4, "free_parameters": ["amplitude", "arrival_time", "burst_width"]}
+        SESSIONS[session_id] = session
+        try:
+            session_action(session_id, ActionRequest(type="compare_model_components", payload=payload))
+        finally:
+            SESSIONS.pop(session_id, None)
+
+        session.compare_model_components.assert_called_once_with(payload, max_components=4)
+
     def test_session_action_fit_model_rejects_invalid_free_parameters(self) -> None:
         session_id = "synthetic-fit-invalid-free-params"
         session = _synthetic_session()

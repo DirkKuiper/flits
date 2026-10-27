@@ -167,6 +167,29 @@ def test_a_model_fit_runs_from_the_fitting_tab(page, synthetic_waterfall) -> Non
     content = page.locator("#fittingContent")
     expect(content).to_contain_text("Model fit accepted", timeout=60_000)
     expect(content).to_contain_text("Intrinsic Width")
+    expect(content).to_contain_text("Fit Details")
+    assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
+
+
+def test_component_counts_are_compared_and_a_fit_can_be_kept(page, synthetic_waterfall) -> None:
+    _load_session(page, synthetic_waterfall)
+    page.click("#autoLocalizeButton")
+    page.click("#analysisFittingTab")
+    expect(page.locator("#fitCompareButton")).to_be_enabled(timeout=60_000)
+
+    page.select_option("#fitCompareMaxInput", "2")
+    page.click("#fitCompareButton")
+    content = page.locator("#fittingContent")
+    expect(content).to_contain_text("Component Count Comparison", timeout=90_000)
+    expect(content).to_contain_text("lowest BIC")
+    rows = content.locator(".residual-table:has(th:text('ΔBIC')) tbody tr")
+    expect(rows).to_have_count(2)
+
+    content.locator('[data-use-comparison="1"]').click()
+    expect(content).to_contain_text("Model fit accepted", timeout=60_000)
+    # The kept fit records where it started, and the comparison stays alongside it.
+    expect(content).to_contain_text("Component comparison")
+    expect(content).to_contain_text("Component Count Comparison")
     assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
 
 

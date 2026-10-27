@@ -2256,3 +2256,92 @@ button.is-busy::after {
     min-height: 460px;
   }
 }
+
+/* Model fitting: run and compare controls, notes, comparison and correlations. */
+.fit-run-actions {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.fit-compare-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fit-compare-max {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.fit-compare-max select {
+  width: auto;
+  padding: 8px 10px;
+}
+
+.fit-notes {
+  display: grid;
+  gap: 10px;
+}
+
+.fit-notes .secondary-button {
+  justify-self: start;
+}
+
+.compact-button {
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  border-radius: 10px;
+}
+
+.fit-comparison-intro,
+.fit-comparison-message {
+  margin: 10px 0;
+  color: var(--muted-700);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.fit-comparison-message {
+  color: var(--warning);
+}
+
+.residual-table tr.is-preferred td {
+  background: var(--accent-soft);
+}
+
+.fit-preferred-badge {
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.fit-correlation-table {
+  min-width: 0;
+}
+
+.fit-correlation-table th,
+.fit-correlation-table td {
+  padding: 8px 10px;
+}
+
+.fit-correlation-table tbody th {
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+}
+
+.fit-correlation-table td.is-strong {
+  color: var(--alert);
+  font-weight: 600;
+}
