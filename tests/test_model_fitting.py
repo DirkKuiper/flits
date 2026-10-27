@@ -13,7 +13,7 @@ from flits.analysis.fitting import model_fit
 from flits.analysis.fitting.burst_model import BurstModel, BurstParameters
 from flits.analysis.fitting.least_squares import fit_burst_model
 from flits.analysis.fitting.model_fit import ModelFitRequestConfig, ModelFitResult
-from flits.models import FilterbankMetadata, ModelFitDiagnostics
+from flits.models import FilterbankMetadata, MeasurementDiagnostics, ModelFitDiagnostics
 from flits.session import BurstSession
 from flits.settings import ObservationConfig
 
@@ -382,7 +382,8 @@ class ModelFitRequestConfigTest(unittest.TestCase):
             }
         )
 
-        self.assertEqual(config.factor_time_upsample, 1)
+        # Zero time upsampling means automatic.
+        self.assertIsNone(config.factor_time_upsample)
         self.assertEqual(config.factor_freq_upsample, 1)
         self.assertIsNone(config.ref_freq_mhz)
         self.assertEqual(config.weighting_mode, "none")
@@ -479,7 +480,7 @@ class ModelFitRequestConfigTest(unittest.TestCase):
 
 class ModelFitIterationAdapterTest(unittest.TestCase):
     def test_iterations_restart_from_the_previous_best_fit(self) -> None:
-        result, _model_spy, fit_spy = _run_adapter_fit(ModelFitRequestConfig(iterations=2))
+        result, _model_spy, fit_spy = _run_adapter_fit(ModelFitRequestConfig(iterations=2, factor_time_upsample=1))
 
         self.assertEqual(result.status, "ok")
         self.assertEqual(result.diagnostics.fit_iterations_requested, 2)
@@ -653,8 +654,9 @@ class ModelFitIterationAdapterTest(unittest.TestCase):
         self.assertEqual(manual.diagnostics.weight_range_basis, "manual_range")
         self.assertEqual(manual.diagnostics.weight_range, [1, 5])
         fit_data = np.asarray(fit_spy.call_args.args[1])
+        # The range is in event-window bins; the fit window starts 12 bins earlier.
         np.testing.assert_allclose(
-            fit_spy.call_args.kwargs["weights"], 1.0 / np.sqrt(np.mean(fit_data[:, 1:5] ** 2, axis=1))
+            fit_spy.call_args.kwargs["weights"], 1.0 / np.sqrt(np.mean(fit_data[:, 13:17] ** 2, axis=1))
         )
 
         unweighted, _model_spy, fit_spy = _run_adapter_fit()
@@ -1129,3 +1131,219 @@ class ModelFitDispatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# Fit window, time resolution and component-count comparison.
+
+_GUIDANCE_FREQS = np.linspace(1450.0, 1250.0, 16)
+_GUIDANCE_OFFPULSE = np.r_[0:20, 108:128]
+
+
+def _guidance_band(components: list[tuple[float, float, float]], *, tau_ms: float = 0.0, seed: int = 3) -> np.ndarray:
+    """Components (log amplitude, arrival ms, width ms) on a (16, 128) band of 1 ms bins with unit noise.
+
+    The model is averaged from a grid 16 times finer, as real bins integrate the signal.
+    """
+    count = len(components)
+    clean = BurstModel(_GUIDANCE_FREQS, np.arange(128, dtype=float) * 1e-3, factor_time_upsample=16).evaluate(
+        BurstParameters.from_dict(
+            {
+                "amplitude": [amplitude for amplitude, _arrival, _width in components],
+                "arrival_time": [arrival * 1e-3 for _amplitude, arrival, _width in components],
+                "burst_width": [width * 1e-3 for _amplitude, _arrival, width in components],
+                "ref_freq": [1250.0] * count,
+                "scattering_timescale": [tau_ms * 1e-3] * count,
+            }
+        )
+    )
+    return clean + np.random.default_rng(seed).normal(0.0, 1.0, size=clean.shape)
+
+
+def _guidance_inputs(data: np.ndarray, event: tuple[int, int]) -> dict[str, Any]:
+    return {
+        "selected_band": data,
+        "freqs_mhz": _GUIDANCE_FREQS,
+        "time_axis_ms": np.arange(data.shape[1], dtype=float),
+        "event_rel_start": event[0],
+        "event_rel_end": event[1],
+        "offpulse_bins": _GUIDANCE_OFFPULSE,
+        "tsamp_ms": 1.0,
+        "peak_rel_bin": None,
+        "width_guess_ms": None,
+    }
+
+
+_UNSCATTERED = {"free_parameters": ["amplitude", "arrival_time", "burst_width"]}
+_NO_SCATTERING = {"scattering_timescale": [0.0]}
+
+
+def test_the_fit_window_pads_the_event_window_by_its_length() -> None:
+    data = _guidance_band([(1.0, 60.0, 3.0)], tau_ms=1.0)
+
+    padded = model_fit.fit_model_selected_band(**_guidance_inputs(data, (50, 75)), config=ModelFitRequestConfig())
+    exact = model_fit.fit_model_selected_band(
+        **_guidance_inputs(data, (50, 75)), config=ModelFitRequestConfig(fit_window_padding_bins=0)
+    )
+
+    assert padded.status == "ok" and exact.status == "ok"
+    assert padded.diagnostics.fit_window_ms == [25.0, 100.0]
+    assert padded.diagnostics.time_axis_ms[0] == 25.0 and padded.diagnostics.time_axis_ms[-1] == 99.0
+    assert padded.diagnostics.fit_statistics["num_time"] == 75
+    assert exact.diagnostics.fit_window_ms == [50.0, 75.0]
+    assert padded.diagnostics.time_resolution_ms == 1.0
+
+
+def test_fit_window_padding_stays_inside_the_data_and_the_size_limit() -> None:
+    window = model_fit._fit_window
+    assert window(event_rel_start=2, event_rel_end=10, num_time=128, num_channels=16, padding_bins=None) == (0, 18)
+    # A short event still gets eight bins of baseline on each side.
+    assert window(event_rel_start=60, event_rel_end=62, num_time=128, num_channels=16, padding_bins=None) == (52, 70)
+    assert window(event_rel_start=60, event_rel_end=62, num_time=128, num_channels=16, padding_bins=3) == (57, 65)
+    # Padding shrinks to keep the window within the interactive limit.
+    channels = model_fit.MAX_MODEL_FIT_CELLS // 30
+    start, end = window(event_rel_start=100, event_rel_end=110, num_time=1000, num_channels=channels, padding_bins=None)
+    assert (start, end) == (90, 120)
+    assert (end - start) * channels <= model_fit.MAX_MODEL_FIT_CELLS
+
+
+def test_a_burst_narrower_than_a_bin_is_fitted_on_a_finer_time_grid() -> None:
+    data = _guidance_band([(1.3, 60.2, 0.3)], seed=0)
+    inputs = _guidance_inputs(data, (55, 66))
+
+    auto = model_fit.fit_model_selected_band(
+        **inputs, config=ModelFitRequestConfig(**_UNSCATTERED, initial_parameters=_NO_SCATTERING)
+    )
+    plain = model_fit.fit_model_selected_band(
+        **inputs,
+        config=ModelFitRequestConfig(**_UNSCATTERED, initial_parameters=_NO_SCATTERING, factor_time_upsample=1),
+    )
+
+    assert auto.status == "ok" and plain.status == "ok"
+    assert auto.diagnostics.time_upsample_basis == "auto"
+    # Sub-samples no wider than a third of the 0.3 ms width.
+    assert auto.diagnostics.factor_time_upsample >= 9
+    assert plain.diagnostics.time_upsample_basis == "requested" and plain.diagnostics.factor_time_upsample == 1
+    assert auto.width_ms_model is not None and auto.width_uncertainty_ms is not None
+    assert plain.width_ms_model is not None and plain.width_uncertainty_ms is not None
+    # Sampled at bin centres, the model needs a wider Gaussian to put flux in
+    # the neighbouring bins; averaged over each bin, it recovers the width.
+    assert abs(auto.width_ms_model - 0.3) < 2 * auto.width_uncertainty_ms
+    assert plain.width_ms_model - 0.3 > 2 * plain.width_uncertainty_ms
+    assert auto.diagnostics.resolution_flags == ["width_below_time_resolution"]
+    detail = auto.diagnostics.uncertainty_details["width_ms_model"]
+    assert "below_time_resolution" in detail.warning_flags
+    assert "shorter than one time bin" in detail.tooltip
+
+
+def test_a_resolved_burst_keeps_the_time_resolution_of_the_data() -> None:
+    data = _guidance_band([(1.0, 60.0, 6.0)], tau_ms=1.0)
+
+    result = model_fit.fit_model_selected_band(**_guidance_inputs(data, (45, 80)), config=ModelFitRequestConfig())
+
+    assert result.status == "ok"
+    assert result.diagnostics.time_upsample_basis == "auto"
+    assert result.diagnostics.factor_time_upsample == 1
+    assert result.diagnostics.resolution_flags == []
+
+
+def test_the_comparison_finds_both_components_of_a_double_burst() -> None:
+    data = _guidance_band([(1.0, 55.0, 2.0), (0.8, 68.0, 2.0)], tau_ms=0.5, seed=0)
+
+    comparison = model_fit.compare_component_counts(**_guidance_inputs(data, (45, 80)), max_components=3)
+
+    assert comparison.status == "ok"
+    assert comparison.preferred_components == 2
+    one, two, three = comparison.rows
+    assert [row.status for row in comparison.rows] == ["ok", "ok", "ok"]
+    assert two.delta_bic == 0.0
+    assert one.delta_bic is not None and one.delta_bic > 10
+    assert three.delta_bic is not None and three.delta_bic > 0
+    # The second component is needed; a third is not.
+    assert two.f_test_p_value is not None and two.f_test_p_value < 1e-6
+    assert three.f_test_p_value is not None and three.f_test_p_value > 0.01
+    arrivals_ms = np.asarray(two.bestfit_parameters["arrival_time"] or [], dtype=float) * 1e3
+    sigmas_ms = np.asarray(two.bestfit_uncertainties["arrival_time"] or [], dtype=float) * 1e3
+    order = np.argsort(arrivals_ms)
+    assert np.all(np.abs(arrivals_ms[order] - [55.0, 68.0]) < 3 * sigmas_ms[order])
+    assert one.num_parameters is not None and two.num_parameters == one.num_parameters + 3
+
+
+def test_the_comparison_prefers_one_component_for_a_single_burst() -> None:
+    data = _guidance_band([(1.0, 60.0, 2.0)], tau_ms=0.5, seed=0)
+
+    comparison = model_fit.compare_component_counts(**_guidance_inputs(data, (50, 75)), max_components=3)
+
+    assert comparison.status == "ok"
+    assert comparison.preferred_components == 1
+    assert all(row.delta_bic is not None and row.delta_bic > 0 for row in comparison.rows[1:])
+
+
+def test_a_comparison_keeps_the_fits_before_one_that_fails() -> None:
+    data = _guidance_band([(1.0, 60.0, 2.0)], tau_ms=0.5)
+    real_fit = model_fit.fit_model_selected_band
+
+    def fail_from_two_components(**kwargs: Any) -> ModelFitResult:
+        if kwargs["config"].num_components < 2:
+            return real_fit(**kwargs)
+        return model_fit._failed_result(
+            status="evaluation_limit_exceeded", message="The maximum number of function evaluations is exceeded."
+        )
+
+    with patch.object(model_fit, "fit_model_selected_band", side_effect=fail_from_two_components):
+        comparison = model_fit.compare_component_counts(**_guidance_inputs(data, (50, 75)), max_components=3)
+
+    assert comparison.status == "ok"
+    assert comparison.preferred_components == 1
+    assert [row.status for row in comparison.rows] == ["ok", "evaluation_limit_exceeded"]
+    assert comparison.message is not None
+    assert "2-component fit did not converge: it reached the evaluation limit" in comparison.message
+
+
+def test_time_upsampling_and_padding_accept_auto_in_requests() -> None:
+    for value in (None, "", "auto", 0):
+        config = ModelFitRequestConfig.from_dict({"solver": {"factor_time_upsample": value}})
+        assert config.factor_time_upsample is None, value
+    config = ModelFitRequestConfig.from_dict({"solver": {"factor_time_upsample": "4", "fit_window_padding_bins": 6}})
+    assert config.factor_time_upsample == 4
+    assert config.fit_window_padding_bins == 6
+    assert config.to_dict()["solver"]["fit_window_padding_bins"] == 6
+    assert (
+        ModelFitRequestConfig.from_dict({"solver": {"fit_window_padding_bins": "auto"}}).fit_window_padding_bins is None
+    )
+
+
+class ModelComparisonSessionTest(unittest.TestCase):
+    def test_a_stored_comparison_survives_snapshots_and_its_fit_can_be_kept(self) -> None:
+        session, _width_ms, _tau_ms = _synthetic_scattering_session()
+
+        results = session.compare_model_components(max_components=2)
+
+        comparison = results.diagnostics.model_comparison
+        assert comparison is not None
+        self.assertEqual(comparison.status, "ok")
+        self.assertEqual([row.num_components for row in comparison.rows], [1, 2])
+        self.assertEqual(comparison.preferred_components, 1)
+        self.assertIn("model_comparison", session.software_provenance()["products"])
+        self.assertEqual(
+            MeasurementDiagnostics.from_dict(results.diagnostics.to_dict()).to_dict(), results.diagnostics.to_dict()
+        )
+
+        kept = session.fit_model(
+            {
+                "num_components": 1,
+                "initial_parameters": comparison.rows[0].bestfit_parameters,
+                "initial_parameter_source": "component_comparison",
+            }
+        )
+        fit = kept.diagnostics.model_fit
+        assert fit is not None
+        self.assertEqual(fit.initial_parameter_source, "component_comparison")
+        self.assertAlmostEqual(
+            kept.width_ms_model or 0.0,
+            (comparison.rows[0].bestfit_parameters["burst_width"] or [0.0])[0] * 1e3,
+            places=4,
+        )
+        # Recomputing the measurements keeps the comparison, as it keeps the fit.
+        session.compute_properties()
+        assert session.results is not None
+        self.assertIsNotNone(session.results.diagnostics.model_comparison)

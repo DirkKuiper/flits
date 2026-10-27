@@ -95,12 +95,43 @@ successful model fit in the same session when the component count and current
 event window are compatible. The advanced setup can also import a
 fit-compatible solution JSON containing `model_parameters`.
 
+## Fit window
+
+The fit covers the event window plus padding on each side, so the baseline
+around the burst and any scattering tail beyond the event window are part of
+the fit. By default the padding is the event window's own length, at least 8
+bins, and it shrinks if the window would exceed the interactive size limit.
+**Fit Window Padding** sets the number of bins instead; 0 fits the event window
+alone. Fit Details reports the window that was fitted.
+
+## Time resolution and upsampling
+
+The data in each time bin are an average over the bin, so the model has to be
+averaged the same way. Evaluated only at bin centres, a component narrower than
+a bin needs a wider Gaussian to put flux into the neighbouring bins, and its
+fitted width comes out too large: on synthetic 0.3 ms bursts in 1 ms bins,
+fits at bin centres return about 0.4 ms, while upsampled fits recover 0.3 ms.
+
+**Time Upsampling** is the number of sub-samples per bin that the model is
+averaged over. Left blank (auto), FLITS fits once at the data resolution and,
+if the narrowest fitted width is under three bins, refits from that solution
+with enough sub-samples that each is at most a third of that width (up to 16,
+fewer on very large windows). Fit Details shows the factor used and whether it
+was chosen automatically.
+
+When the fitted width or scattering timescale is shorter than one time bin, the
+results say so. An upsampled fit is constrained by how the burst's flux spreads
+into the neighbouring bins, so expect large uncertainties or an upper limit. A
+fit without upsampling offers to fit again with automatic upsampling.
+
 ## Solver setup
 
 Advanced solver controls include weighting mode, optional manual weight range,
 optimizer passes, maximum function evaluations, time and frequency upsampling,
-reference frequency, folded profile mode, exact-Jacobian mode, and
-scintillation mode.
+fit-window padding, reference frequency, folded profile mode, exact-Jacobian
+mode, and scintillation mode. The reference frequency, at which the scattering
+timescale and the spectrum are quoted, defaults to the lowest frequency of the
+selected band.
 
 **Optimizer Passes** restarts the solver from the previous best fit for each
 pass. **Max Evaluations** controls the model-evaluation budget per pass; if
@@ -112,12 +143,65 @@ Weighting modes are:
 - **None**: unweighted residuals.
 - **Auto off-pulse**: derive per-channel weights from current off-pulse bins
   when possible, otherwise fall back to fit-window weighting.
-- **Fit window**: let the solver estimate weights inside the fitted event
+- **Fit window**: estimate each channel's weight from its RMS over the fitted
   window.
-- **Manual range**: use the submitted time-bin range.
+- **Manual range**: estimate it over a range of time bins counted from the start
+  of the event window.
 
 In scintillation mode, amplitude, spectral index, and spectral running are not
 optimizer parameters because per-channel amplitudes are derived from the data.
+
+## Reading the results
+
+The results start with the fit status, then the intrinsic width, the scattering
+timescale at the reference frequency, and the reduced chi-squared. Notes follow
+when something needs attention:
+
+- **A value consistent with zero.** When the width or the scattering timescale
+  ends at its lower bound of zero, only an upper limit is constrained. It is
+  shown as `< value + 1σ`.
+- **Shorter than one time bin.** See [Time resolution and upsampling](#time-resolution-and-upsampling).
+- **Strongly correlated parameters** (|ρ| ≥ 0.8). Each 1σ uncertainty already
+  allows for the other parameters adjusting, but a quantity that combines two
+  correlated parameters needs their covariance, not the separate uncertainties.
+  Correlations with the amplitude are left out of the note: in `fitburst`'s
+  profile normalization the amplitude scales with the scattering timescale, so
+  the two are always strongly correlated.
+
+The parameter table lists each best-fit value with its uncertainty, or says
+`fixed`, `upper limit`, or, in scintillation mode, `per channel`. **Fit
+Details** holds the fitted window, time resolution, upsampling, weighting,
+solver counts, AIC and BIC, which covariance was inverted, and the full
+correlation matrix.
+
+## Comparing component counts
+
+**Compare Component Counts** fits the selection with one component, then two,
+up to the chosen maximum (at most 5). Each fit starts from the one before it
+with a component added at the largest positive residual of the event profile.
+All the fits use the same samples, weights and time upsampling, so their
+chi-squared values compare directly. The table reports, for each component
+count, the reduced chi-squared, ΔBIC and ΔAIC relative to the best, and the
+F-test p-value against one component fewer: the probability of an improvement
+that large if the extra component were not needed. The fit with the lowest BIC
+is marked. **Use This Fit** refits that row from its solution and makes it the
+session's model fit.
+
+A component the data do not support often fails to converge: nothing stops it
+shrinking onto a noise spike. The comparison then stops there and compares the
+fits that converged. Treat BIC and AIC as guidance. At high S/N, components are
+rarely exactly Gaussian, so extra components keep lowering chi-squared even
+when they do not describe separate emission; check the residuals before
+adopting one.
+
+From Python:
+
+```python
+results = session.compare_model_components(max_components=3)
+comparison = results.diagnostics.model_comparison
+best = next(row for row in comparison.rows if row.num_components == comparison.preferred_components)
+session.fit_model({"num_components": best.num_components, "initial_parameters": best.bestfit_parameters})
+```
 
 ## Diagnostics and exports
 

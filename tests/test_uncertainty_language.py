@@ -76,6 +76,12 @@ def _fit_details() -> list[tuple[str, UncertaintyDetail]]:
                 at_lower_bound=True,
             ),
         ),
+        (
+            "model_fit.width_below_time_resolution",
+            _model_fit_uncertainty_detail(
+                value=0.01, units="ms", parameter_label="Intrinsic width", below_time_resolution=True
+            ),
+        ),
     ]
     return [*((f"psd.{key}", d) for key, d in psd.items()), *model_fit]
 

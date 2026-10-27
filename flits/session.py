@@ -25,7 +25,7 @@ from flits.analysis.dm_optimization import (
     optimize_dm_trials,
 )
 from flits.analysis.drift import DriftAnalysisInputs, run_drift_analysis
-from flits.analysis.fitting import fit_model_selected_band
+from flits.analysis.fitting import compare_component_counts, fit_model_selected_band
 from flits.analysis.fitting.model_fit import ModelFitRequestConfig
 from flits.analysis.localization import BurstLocalization, localize_burst
 from flits.analysis.masking import CHANNEL_TESTS, flag_outlying_channels
@@ -413,6 +413,8 @@ class BurstSession:
         if self.results is not None:
             if self.results.diagnostics.model_fit is not None:
                 products.append("model_fit")
+            if self.results.diagnostics.model_comparison is not None:
+                products.append("model_comparison")
             if self.results.width_ms_model is not None or self.results.tau_sc_ms is not None:
                 products.append("model_fit_values")
         return products
@@ -738,7 +740,7 @@ class BurstSession:
     def invalidate_results(self) -> None:
         """Discard cached burst measurements."""
         self.results = None
-        self.provenance.discard("results", "model_fit", "model_fit_values")
+        self.provenance.discard("results", "model_fit", "model_fit_values", "model_comparison")
 
     def clear_width_analysis(self) -> None:
         """Discard the cached width analysis."""
@@ -2461,6 +2463,7 @@ class BurstSession:
                 diagnostics=replace(
                     measurements.diagnostics,
                     model_fit=previous_results.diagnostics.model_fit,
+                    model_comparison=previous_results.diagnostics.model_comparison,
                 ),
             )
         self.results = measurements
@@ -2475,7 +2478,6 @@ class BurstSession:
         assert self.results is not None
 
         grid, context = self._build_measurement_context_for_data()
-        selected_band = np.asarray(grid.masked[context.spec_lo : context.spec_hi + 1, :], dtype=float)
         selected_freqs = np.asarray(grid.freqs_mhz[context.spec_lo : context.spec_hi + 1], dtype=float)
         config_payload = dict(config_data or {})
         component_guesses = config_payload.get("component_guesses")
@@ -2536,26 +2538,7 @@ class BurstSession:
             )
         config = ModelFitRequestConfig.from_dict(config_payload) if config_payload else None
 
-        peak_rel_bin = _primary_peak_bin(
-            peak_bins_abs=grid.peak_bins,
-            profile_sn=context.selected_profile_sn,
-            crop_start_bin=0,
-            event_rel_start=context.event_rel_start,
-            event_rel_end=context.event_rel_end,
-        )
-
-        fit_result = fit_model_selected_band(
-            selected_band=selected_band,
-            freqs_mhz=selected_freqs,
-            time_axis_ms=context.time_axis_ms,
-            event_rel_start=context.event_rel_start,
-            event_rel_end=context.event_rel_end,
-            offpulse_bins=context.offpulse_bins,
-            tsamp_ms=grid.effective_tsamp_ms,
-            peak_rel_bin=None if peak_rel_bin is None else int(peak_rel_bin),
-            width_guess_ms=self.results.width_ms_acf,
-            config=config,
-        )
+        fit_result = fit_model_selected_band(**self._model_fit_inputs(grid, context), config=config)
         self._record_analysis("model_fit", "results")
         if fit_result.status == "ok":
             self._record_analysis("model_fit_values", "model_fit")
@@ -2611,6 +2594,60 @@ class BurstSession:
             self.provenance.annotate("temporal_structure", "model_fit_annotation", "model_fit")
         self._apply_width_analysis_to_results()
         return self.results
+
+    def compare_model_components(
+        self, config_data: dict[str, Any] | None = None, max_components: int = 3
+    ) -> BurstMeasurements:
+        """Fit the selected event with one to ``max_components`` components and compare the fits.
+
+        ``config_data`` takes the free parameters and solver settings of
+        :meth:`fit_model`; each fit starts from the previous one with a
+        component added at the largest residual. The comparison, with AIC,
+        BIC and an F-test for each component count, is stored in
+        ``results.diagnostics.model_comparison``. To keep one of the fits, pass
+        its ``bestfit_parameters`` to :meth:`fit_model` as ``initial_parameters``.
+        """
+        if self.results is None:
+            self.compute_properties()
+        assert self.results is not None
+        payload = {
+            key: value
+            for key, value in dict(config_data or {}).items()
+            if key not in {"component_guesses", "seed_from_previous_fit", "initial_parameters", "num_components"}
+        }
+        config = ModelFitRequestConfig.from_dict(payload)
+        grid, context = self._build_measurement_context_for_data()
+        comparison = compare_component_counts(
+            **self._model_fit_inputs(grid, context), config=config, max_components=max_components
+        )
+        self.results = replace(
+            self.results,
+            diagnostics=replace(self.results.diagnostics, model_comparison=comparison),
+        )
+        self._record_analysis("model_comparison", "results")
+        return self.results
+
+    def _model_fit_inputs(self, grid: ReducedAnalysisGrid, context: MeasurementContext) -> dict[str, Any]:
+        """The selected band and event geometry that model fits and comparisons share."""
+        assert self.results is not None
+        peak_rel_bin = _primary_peak_bin(
+            peak_bins_abs=grid.peak_bins,
+            profile_sn=context.selected_profile_sn,
+            crop_start_bin=0,
+            event_rel_start=context.event_rel_start,
+            event_rel_end=context.event_rel_end,
+        )
+        return {
+            "selected_band": np.asarray(grid.masked[context.spec_lo : context.spec_hi + 1, :], dtype=float),
+            "freqs_mhz": np.asarray(grid.freqs_mhz[context.spec_lo : context.spec_hi + 1], dtype=float),
+            "time_axis_ms": context.time_axis_ms,
+            "event_rel_start": context.event_rel_start,
+            "event_rel_end": context.event_rel_end,
+            "offpulse_bins": context.offpulse_bins,
+            "tsamp_ms": grid.effective_tsamp_ms,
+            "peak_rel_bin": None if peak_rel_bin is None else int(peak_rel_bin),
+            "width_guess_ms": self.results.width_ms_acf,
+        }
 
     def _model_fit_component_widths_ms(self) -> np.ndarray:
         if self.results is None or self.results.diagnostics.model_fit is None:

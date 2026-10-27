@@ -33,7 +33,7 @@ differs is how the minimum is found and described:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -50,6 +50,7 @@ __all__ = [
     "BurstFitResult",
     "ModelComparison",
     "channel_weights",
+    "compare_fit_statistics",
     "compare_fits",
     "fit_burst_model",
 ]
@@ -622,16 +623,21 @@ def compare_fits(fits: Sequence[BurstFitResult]) -> list[ModelComparison]:
     BIC count every fitted value, including per-channel amplitudes in
     scintillation mode; deltas are relative to the lowest value.
     """
-    rows: list[tuple[int, int, int, float]] = []
     for index, fit in enumerate(fits):
-        statistics = fit.fit_statistics
-        chisq = statistics.get("chisq_final")
-        if not fit.success or chisq is None:
+        if not fit.success:
             raise ValueError(f"Fit {index} did not converge, so it cannot be compared.")
-        num_parameters = int(statistics.get("num_fit_parameters") or 0) + int(
-            statistics.get("num_linear_parameters") or 0
-        )
-        num_samples = int(statistics.get("num_freq_good") or 0) * int(statistics.get("num_time") or 0)
+    return compare_fit_statistics([fit.fit_statistics for fit in fits])
+
+
+def compare_fit_statistics(statistics: Sequence[Mapping[str, float | int | None]]) -> list[ModelComparison]:
+    """:func:`compare_fits` from each fit's ``fit_statistics``, as stored with a fit."""
+    rows: list[tuple[int, int, int, float]] = []
+    for index, values in enumerate(statistics):
+        chisq = values.get("chisq_final")
+        if chisq is None:
+            raise ValueError(f"Fit {index} did not converge, so it cannot be compared.")
+        num_parameters = int(values.get("num_fit_parameters") or 0) + int(values.get("num_linear_parameters") or 0)
+        num_samples = int(values.get("num_freq_good") or 0) * int(values.get("num_time") or 0)
         rows.append((index, num_parameters, num_samples, float(chisq)))
     if len({row[2] for row in rows}) > 1:
         raise ValueError("The fits do not cover the same samples.")

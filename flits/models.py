@@ -82,6 +82,13 @@ def _bool_or_none(value: Any) -> bool | None:
     return bool(value)
 
 
+def _float_pair_or_none(values: Any) -> list[float] | None:
+    if values is None:
+        return None
+    pair = [float(value) for value in list(values)[:2]]
+    return pair if len(pair) == 2 else None
+
+
 def _array_1d(
     values: Any, *, dtype: np.dtype[Any] | type[np.floating[Any]] | type[np.integer[Any]] = float
 ) -> np.ndarray:
@@ -1726,10 +1733,17 @@ class ModelFitDiagnostics:
     failure_stderr: str | None = None
     failure_exception: str | None = None
     factor_time_upsample: int | None = None
+    # "auto" when FLITS chose the time upsampling from the fitted width, "requested" otherwise.
+    time_upsample_basis: str | None = None
     factor_freq_upsample: int | None = None
     ref_freq_mhz: float | None = None
     is_folded: bool | None = None
     exact_jacobian: bool | None = None
+    # The fitted time range (the padded event window) and its bin width, in ms.
+    fit_window_ms: list[float] | None = None
+    time_resolution_ms: float | None = None
+    # width_below_time_resolution, scattering_below_time_resolution.
+    resolution_flags: list[str] = field(default_factory=list)
     max_function_evaluations: int | None = None
     function_evaluations: int | None = None
     solver_status: int | None = None
@@ -1791,10 +1805,14 @@ class ModelFitDiagnostics:
             "failure_stderr": self.failure_stderr,
             "failure_exception": self.failure_exception,
             "factor_time_upsample": _int_or_none(self.factor_time_upsample),
+            "time_upsample_basis": self.time_upsample_basis,
             "factor_freq_upsample": _int_or_none(self.factor_freq_upsample),
             "ref_freq_mhz": _float_or_none(self.ref_freq_mhz),
             "is_folded": _bool_or_none(self.is_folded),
             "exact_jacobian": _bool_or_none(self.exact_jacobian),
+            "fit_window_ms": _float_pair_or_none(self.fit_window_ms),
+            "time_resolution_ms": _float_or_none(self.time_resolution_ms),
+            "resolution_flags": list(self.resolution_flags),
             "max_function_evaluations": _int_or_none(self.max_function_evaluations),
             "function_evaluations": _int_or_none(self.function_evaluations),
             "solver_status": _int_or_none(self.solver_status),
@@ -1847,10 +1865,14 @@ class ModelFitDiagnostics:
             failure_stderr=payload.get("failure_stderr"),
             failure_exception=payload.get("failure_exception"),
             factor_time_upsample=_int_or_none(payload.get("factor_time_upsample")),
+            time_upsample_basis=payload.get("time_upsample_basis"),
             factor_freq_upsample=_int_or_none(payload.get("factor_freq_upsample")),
             ref_freq_mhz=_float_or_none(payload.get("ref_freq_mhz")),
             is_folded=_bool_or_none(payload.get("is_folded")),
             exact_jacobian=_bool_or_none(payload.get("exact_jacobian")),
+            fit_window_ms=_float_pair_or_none(payload.get("fit_window_ms")),
+            time_resolution_ms=_float_or_none(payload.get("time_resolution_ms")),
+            resolution_flags=[str(value) for value in payload.get("resolution_flags", [])],
             max_function_evaluations=_int_or_none(payload.get("max_function_evaluations")),
             function_evaluations=_int_or_none(payload.get("function_evaluations")),
             solver_status=_int_or_none(payload.get("solver_status")),
@@ -1932,6 +1954,115 @@ class SaturationDiagnostic:
 
 
 @dataclass(frozen=True)
+class ModelComparisonRow:
+    """One fit in a component-count comparison.
+
+    AIC and BIC count every fitted value; deltas are relative to the lowest
+    value in the comparison. ``f_test_p_value`` compares the fit with the row
+    above it, the one with one component fewer.
+    """
+
+    num_components: int
+    status: str
+    message: str | None = None
+    num_parameters: int | None = None
+    chisq: float | None = None
+    chisq_reduced: float | None = None
+    aic: float | None = None
+    bic: float | None = None
+    delta_aic: float | None = None
+    delta_bic: float | None = None
+    f_test_p_value: float | None = None
+    bestfit_parameters: dict[str, list[float] | None] = field(default_factory=dict)
+    bestfit_uncertainties: dict[str, list[float] | None] = field(default_factory=dict)
+    parameters_at_bounds: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "num_components": int(self.num_components),
+            "status": self.status,
+            "message": self.message,
+            "num_parameters": _int_or_none(self.num_parameters),
+            "chisq": _float_or_none(self.chisq),
+            "chisq_reduced": _float_or_none(self.chisq_reduced),
+            "aic": _float_or_none(self.aic),
+            "bic": _float_or_none(self.bic),
+            "delta_aic": _float_or_none(self.delta_aic),
+            "delta_bic": _float_or_none(self.delta_bic),
+            "f_test_p_value": _float_or_none(self.f_test_p_value),
+            "bestfit_parameters": _jsonable_parameter_dict(self.bestfit_parameters),
+            "bestfit_uncertainties": _jsonable_parameter_dict(self.bestfit_uncertainties),
+            "parameters_at_bounds": list(self.parameters_at_bounds),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ModelComparisonRow:
+        return cls(
+            num_components=int(payload.get("num_components", 0)),
+            status=str(payload.get("status", "unknown")),
+            message=payload.get("message"),
+            num_parameters=_int_or_none(payload.get("num_parameters")),
+            chisq=_float_or_none(payload.get("chisq")),
+            chisq_reduced=_float_or_none(payload.get("chisq_reduced")),
+            aic=_float_or_none(payload.get("aic")),
+            bic=_float_or_none(payload.get("bic")),
+            delta_aic=_float_or_none(payload.get("delta_aic")),
+            delta_bic=_float_or_none(payload.get("delta_bic")),
+            f_test_p_value=_float_or_none(payload.get("f_test_p_value")),
+            bestfit_parameters={str(key): value for key, value in payload.get("bestfit_parameters", {}).items()},
+            bestfit_uncertainties={str(key): value for key, value in payload.get("bestfit_uncertainties", {}).items()},
+            parameters_at_bounds=[str(value) for value in payload.get("parameters_at_bounds", [])],
+        )
+
+
+@dataclass(frozen=True)
+class ModelComparisonDiagnostics:
+    """Fits of the same selection with one, two, ... components, compared.
+
+    Every fit covers the same samples with the same weights and time
+    upsampling, so their chi-squared values are directly comparable.
+    ``preferred_components`` has the lowest BIC among the fits that converged.
+    """
+
+    status: str
+    message: str | None
+    max_components: int
+    preferred_components: int | None = None
+    free_parameters: list[str] = field(default_factory=list)
+    scintillation: bool | None = None
+    factor_time_upsample: int | None = None
+    fit_window_ms: list[float] | None = None
+    rows: list[ModelComparisonRow] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "message": self.message,
+            "max_components": int(self.max_components),
+            "preferred_components": _int_or_none(self.preferred_components),
+            "free_parameters": list(self.free_parameters),
+            "scintillation": _bool_or_none(self.scintillation),
+            "factor_time_upsample": _int_or_none(self.factor_time_upsample),
+            "fit_window_ms": _float_pair_or_none(self.fit_window_ms),
+            "rows": [row.to_dict() for row in self.rows],
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ModelComparisonDiagnostics:
+        return cls(
+            status=str(payload.get("status", "unknown")),
+            message=payload.get("message"),
+            max_components=int(payload.get("max_components", 0)),
+            preferred_components=_int_or_none(payload.get("preferred_components")),
+            free_parameters=[str(value) for value in payload.get("free_parameters", [])],
+            scintillation=_bool_or_none(payload.get("scintillation")),
+            factor_time_upsample=_int_or_none(payload.get("factor_time_upsample")),
+            fit_window_ms=_float_pair_or_none(payload.get("fit_window_ms")),
+            rows=[ModelComparisonRow.from_dict(row) for row in payload.get("rows", [])],
+        )
+
+
+@dataclass(frozen=True)
 class MeasurementDiagnostics:
     gaussian_fits: list[GaussianFit1D]
     time_axis_ms: np.ndarray
@@ -1946,6 +2077,7 @@ class MeasurementDiagnostics:
     spectral_acf_lags_mhz: np.ndarray
     model_fit: ModelFitDiagnostics | None = None
     saturation: SaturationDiagnostic = field(default_factory=SaturationDiagnostic.ok)
+    model_comparison: ModelComparisonDiagnostics | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1962,6 +2094,7 @@ class MeasurementDiagnostics:
             "spectral_acf_lags_mhz": _jsonable_1d(self.spectral_acf_lags_mhz),
             "model_fit": self.model_fit.to_dict() if self.model_fit is not None else None,
             "saturation": self.saturation.to_dict(),
+            "model_comparison": None if self.model_comparison is None else self.model_comparison.to_dict(),
         }
 
     @classmethod
@@ -1982,6 +2115,11 @@ class MeasurementDiagnostics:
                 None if payload.get("model_fit") is None else ModelFitDiagnostics.from_dict(payload["model_fit"])
             ),
             saturation=SaturationDiagnostic.from_dict(payload.get("saturation")),
+            model_comparison=(
+                None
+                if payload.get("model_comparison") is None
+                else ModelComparisonDiagnostics.from_dict(payload["model_comparison"])
+            ),
         )
 
 

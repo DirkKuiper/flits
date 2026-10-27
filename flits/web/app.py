@@ -913,6 +913,8 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
             session.compute_properties()
         elif action == "fit_model":
             session.fit_model(payload)
+        elif action == "compare_model_components":
+            session.compare_model_components(payload, max_components=int(payload.get("max_components", 3)))
         elif action == "run_temporal_structure_analysis":
             session.run_temporal_structure_analysis(
                 segment_length_ms=float(payload["segment_length_ms"]),
