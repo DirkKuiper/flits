@@ -2711,8 +2711,10 @@ function renderFitting(view) {
   }
 
   if (!modelFit) {
+    // A component comparison can come before any fit.
     fittingContent.innerHTML = `
       <div class="empty-state">No 2D model fit yet. Run the fit on the current selection to inspect model width, scattering time, and residuals.</div>
+      ${renderModelComparison(diagnostics.model_comparison)}
     `
     fittingSpectrumPlot.classList.add("is-empty")
     Plotly.purge(fittingSpectrumPlot)
