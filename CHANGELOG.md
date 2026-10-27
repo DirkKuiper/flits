@@ -4,6 +4,41 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.7.0](https://github.com/DirkKuiper/flits/compare/flits-v1.6.0...flits-v1.7.0) (2026-10-27)
+
+
+### Features
+
+* **agents:** add portable installation and routing evaluations ([1ed5888](https://github.com/DirkKuiper/flits/commit/1ed58885887d37fee35dc2d3ffad67bafd002728))
+* **cli:** add per-burst manifests and versioned output schemas ([4ade69c](https://github.com/DirkKuiper/flits/commit/4ade69c3bce75380fcbe3919bccd35387470cc14))
+* **cli:** expose runtime identity and metadata inspection ([b5926e3](https://github.com/DirkKuiper/flits/commit/b5926e3a46326b9f80090d13fd8abdbac0b7c80d))
+* **fitting:** pad the fit window, resolve narrow bursts, compare component counts ([07f8a8e](https://github.com/DirkKuiper/flits/commit/07f8a8e092830a379ea371962ffe7261f18e7e10))
+* **fitting:** pad the fit window, resolve narrow bursts, compare component counts ([e3f060c](https://github.com/DirkKuiper/flits/commit/e3f060c75b033f94112fd0908314c6518ca52a2e))
+* improve FLITS adoption and agent workflows ([6c42b9b](https://github.com/DirkKuiper/flits/commit/6c42b9bc76e3fb00fcae0cc086bb42fcb0c23bbc))
+* **web:** put the fit's answer and its caveats first in the Fitting tab ([bc20b97](https://github.com/DirkKuiper/flits/commit/bc20b97bfb663abd584fc466b8be25de523cee0f))
+
+
+### Bug Fixes
+
+* **agents:** check optional fitting capabilities separately ([687e8fd](https://github.com/DirkKuiper/flits/commit/687e8fdf57918cf95463a306ecaf67502b534135))
+* **agents:** validate trial fixtures and preserve evaluated provenance ([01878fd](https://github.com/DirkKuiper/flits/commit/01878fd4180c3f528f0303720b456e5502aa3b1b))
+* **fitting:** raise automatic budgets and retain capped candidates ([3b32cc6](https://github.com/DirkKuiper/flits/commit/3b32cc61b2481d4ed14ddb13333603119f553e6e))
+* **fitting:** use only converged fits as the temporal width cross-check ([7dbcfac](https://github.com/DirkKuiper/flits/commit/7dbcfac1e29e9f6aafab228bb4879c19f8f0ec2c))
+* **fitting:** use only converged fits as the temporal width cross-check ([455922c](https://github.com/DirkKuiper/flits/commit/455922c85208a06915786f7c35759fdc657b0e90))
+* **packaging:** include reproducible workflows in source distributions ([56774a3](https://github.com/DirkKuiper/flits/commit/56774a3093a3694c85197ef8ee98ee0a9bfbe104))
+* **packaging:** retain contributor and citation guidance in source archives ([d174287](https://github.com/DirkKuiper/flits/commit/d1742875cfd8fbcd4decb09b2cea40074d0a7183))
+* **web:** show a component comparison made before any model fit ([9b394b1](https://github.com/DirkKuiper/flits/commit/9b394b1319b18a396fea400c8f729a4878805d14))
+
+
+### Documentation
+
+* **agents:** verify source checkouts and browser runtimes ([b1f985f](https://github.com/DirkKuiper/flits/commit/b1f985f4468bb3a6314ef5afc4783849e2be2210))
+* clarify CHIME catalog flux calibration limits ([63d6338](https://github.com/DirkKuiper/flits/commit/63d63380dc78c901af6b465e81cde9b4b6c748bc))
+* consolidate validation and add PSRFITS and CHIME examples ([eabf5c3](https://github.com/DirkKuiper/flits/commit/eabf5c31de170f6891c069302396563387f60abf))
+* **paper:** describe how other tools reach FLITS's data, not adapters ([ca8b11b](https://github.com/DirkKuiper/flits/commit/ca8b11b433545264e08344eacaa02f2d0d40d97d))
+* **paper:** describe how other tools reach FLITS's data, not adapters ([03e9b1c](https://github.com/DirkKuiper/flits/commit/03e9b1cc24ba666fc586ef4d3f23cce18d5a4d0f))
+* **paper:** say what the pulsar and FRB 20240209A studies use FLITS for ([a257535](https://github.com/DirkKuiper/flits/commit/a25753539ce486cf0812f7af56fb95eb71f01155))
+
 ## [1.6.0](https://github.com/DirkKuiper/flits/compare/flits-v1.5.0...flits-v1.6.0) (2026-10-27)
 
 
