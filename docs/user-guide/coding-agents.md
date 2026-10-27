@@ -113,6 +113,14 @@ Python 3.11+ and FLITS 1.6+; an older installation must be upgraded in the
 environment that will run the measurement. `python -m flits` ensures the CLI
 uses that same interpreter.
 
+A local source checkout can shadow the installed package. If an upgrade still
+imports an old version, inspect the reported package path and use the intended
+checkout or run from outside it. Installing a release does not update a Git
+branch. Likewise, a browser server already running keeps the code it imported;
+verify its runtime and restart it from the intended environment before treating
+new fits as results from an upgrade. Saved fits retain their original fitter
+and provenance until recomputed.
+
 When the loading DM is unknown, the agent should inspect the input first.
 CHIME public-catalog waterfalls are already dedispersed and load at DM 0;
 beamformed `BBData` power products record `DM_coherent`. Other inputs may

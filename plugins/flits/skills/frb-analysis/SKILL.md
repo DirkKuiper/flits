@@ -28,6 +28,17 @@ Run the check again after installation. Use `python -m flits` in place of
 `flits` if the command on PATH belongs to a different environment. Installing
 this skill does not install FLITS or give a remote agent access to local files.
 
+If an old version is still imported after upgrading, check the reported module
+path. A local source checkout can shadow the installed package; `pip` does not
+update that checkout. Use an appropriate current checkout or run the installed
+package from outside it. Do not switch or reset a research branch just to
+upgrade an analysis environment.
+
+Before reusing a browser server, verify its runtime as well: a process already
+running can still use older code after a package upgrade. A saved fit records
+its own fitter and software provenance, which may differ from the current
+server. Check the provenance of a newly computed fit when validating an upgrade.
+
 ## Pick the entry point
 
 | Task | Use |
