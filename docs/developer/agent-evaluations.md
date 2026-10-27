@@ -31,6 +31,10 @@ the relevant files. Known dispersed signals, a dedispersed catalog waterfall,
 beamformed power, full-Stokes data, drift and a saved replay session are
 generated with fixed seeds. `run-inputs.json` outside the case workspaces
 records data checksums and the skill hash.
+Preparation also opens every intended valid analysis input with FLITS; the
+batch's deliberate corrupt file is excluded. `fixture_revision` distinguishes
+fixture corrections independently of the prompt suite. Keep earlier traces
+with their original fixture hashes; do not repair inputs in a running trial.
 
 Keep these two modes separate:
 
@@ -85,14 +89,17 @@ case, mark failed checks `false`, and never infer success from the agent's
 final claim alone. Have another reviewer check ambiguous outcomes when possible.
 
 ```bash
-python -m tools.evaluate_agent_skill score /tmp/flits-installed/judgments.jsonl --mode installed
+python -m tools.evaluate_agent_skill score /tmp/flits-installed/judgments.jsonl --mode installed --inputs /tmp/flits-installed/run-inputs.json
 ```
 
 The scorer reports selection precision and recall, false positives and false
 negatives, and workflow passes separately. Missing judgments leave the run
 incomplete. Missing traces, missing review evidence, duplicate cases, or
 non-boolean checks are rejected. Trace, skill and case hashes accompany the
-summary. Exit code 0 means every case was reviewed and passed, 1 means failures
+summary. `--inputs` identifies the evaluated skill and fixture revision; without
+it, the evaluated skill hash is unknown (`null`). `grader_skill_sha256` names
+the current checkout's skill separately, so edits after a run cannot relabel
+the skill that was evaluated. Exit code 0 means every case was reviewed and passed, 1 means failures
 or missing cases, and 2 means invalid input.
 
 The scorer calculates metrics from human judgments; it does not decide whether

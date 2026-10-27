@@ -76,6 +76,29 @@ def test_false_positive_and_false_negative_are_separate(tmp_path) -> None:
     assert result["routing"]["precision"] == result["routing"]["recall"] == 0
 
 
+def test_scoring_keeps_the_evaluated_skill_separate_from_later_edits(tmp_path, capsys) -> None:
+    path, _ = _judgment(tmp_path)
+    cases = tmp_path / "cases.json"
+    cases.write_text(
+        json.dumps(
+            [{"id": "measurement", "prompt": "Measure the burst.", "should_select": True, "checks": ["uncertainty"]}]
+        )
+    )
+    inputs = tmp_path / "run-inputs.json"
+    inputs.write_text(json.dumps({"mode": "installed", "skill_sha256": "a" * 64, "fixture_revision": 1}))
+    arguments = ["--cases", str(cases), "score", str(path), "--mode", "installed"]
+    assert EVALUATOR["main"]([*arguments, "--inputs", str(inputs)]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["skill_sha256"] == "a" * 64
+    assert report["grader_skill_sha256"] != report["skill_sha256"]
+    assert report["fixture_revision"] == 1
+    assert EVALUATOR["main"](arguments) == 0
+    assert json.loads(capsys.readouterr().out)["skill_sha256"] is None
+    with pytest.raises(SystemExit) as exc:
+        EVALUATOR["main"]([*arguments[:-1], "discovery", "--inputs", str(inputs)])
+    assert exc.value.code == 2
+
+
 @pytest.mark.parametrize(
     "field,value", [("trace", "missing.txt"), ("evidence", ""), ("selected", "true"), ("checks", {})]
 )
@@ -107,11 +130,25 @@ def test_prepared_workspaces_preserve_known_signals_and_dm_metadata(tmp_path, mo
     assert event[0] <= 128.0 <= event[1]
     assert record["measurements"]["snr_integrated"] > 50
     assert inspect_filterbank(target / "catalog-dm" / "catalog.h5").schema_version == "chime_frb_catalog_v1"
+    catalog = measure_burst(
+        target / "catalog-dm" / "catalog.h5",
+        MeasureOptions(
+            dm=0,
+            telescope="generic",
+            time_factor=1,
+            freq_factor=1,
+            mask="auto",
+            sefd_jy=10,
+        ),
+    )
+    assert catalog["status"] == "ok"
+    assert catalog["selection"]["event_ms"][0] <= 128 <= catalog["selection"]["event_ms"][1]
     assert inspect_filterbank(target / "bbdata-dm" / "power.h5").coherent_dm == 100.0
     assert inspect_filterbank(target / "rotation-measure" / "stokes.fits").stokes_available
     assert (target / "replay" / "burst_flits_session.json").is_file()
     inputs = json.loads((target / "run-inputs.json").read_text(encoding="utf-8"))
     assert inputs["fixtures"]["fluence"]["injected_loading_dm"] == 527.7
+    assert inputs["fixture_revision"] == 2
     assert inputs["fixtures"]["bbdata-dm"]["injected_loading_dm"] == 100.0
     assert not (target / "fluence" / "cases.json").exists()
     with pytest.raises(FileExistsError):

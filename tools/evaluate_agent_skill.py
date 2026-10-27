@@ -119,6 +119,7 @@ def prepare(cases: list[dict[str, Any]], destination: Path, *, mode: str) -> Non
     fixtures = runpy.run_path(str(ROOT / "tests" / "conftest.py"))
     destination.mkdir(parents=True, exist_ok=False)
     provenance: dict[str, Any] = {
+        "fixture_revision": 2,
         "mode": mode,
         "fixtures": {},
         "skill_sha256": hashlib.sha256(SKILL.read_bytes()).hexdigest(),
@@ -158,6 +159,8 @@ def prepare(cases: list[dict[str, Any]], destination: Path, *, mode: str) -> Non
 
             with h5py.File(workspace / "catalog.h5", "w") as handle:
                 group = handle.create_group("frb")
+                # Required by the reader's time axis; the pulse and label are synthetic.
+                group.attrs["tns_name"] = "FRB20230225A"
                 group.create_dataset("plot_freq", data=freqs)
                 group.create_dataset("extent", data=[0.0, 512.0, freqs.min(), freqs.max()])
                 group.create_dataset("calibrated_wfall", data=data)
@@ -177,8 +180,15 @@ def prepare(cases: list[dict[str, Any]], destination: Path, *, mode: str) -> Non
             )
         if case["id"] in {"width", "catalog-dm", "bbdata-dm", "rotation-measure"}:
             (workspace / "burst.fil").unlink()
+        loading_dm = 100.0 if case["id"] == "bbdata-dm" else dm
+        for path in workspace.rglob("*"):
+            if path.suffix in {".fil", ".fits", ".sf", ".h5"} and path.name != "broken.fil":
+                # A routing trial must not also be an accidental corrupt-fixture trial.
+                # This validation is outside the blind workspace prompt and never
+                # supplies the loading DM to the agent.
+                BurstSession.from_file(str(path), dm=loading_dm, telescope="generic")
         provenance["fixtures"][case["id"]] = {
-            "injected_loading_dm": 100.0 if case["id"] == "bbdata-dm" else dm,
+            "injected_loading_dm": loading_dm,
             "sha256": {
                 str(path.relative_to(workspace)): hashlib.sha256(path.read_bytes()).hexdigest()
                 for path in workspace.rglob("*")
@@ -201,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
     grading = subparsers.add_parser("score", help="Grade judgments against their recorded traces.")
     grading.add_argument("judgments", type=Path)
     grading.add_argument("--mode", choices=("installed", "discovery"), required=True)
+    grading.add_argument("--inputs", type=Path, help="The evaluated run's frozen run-inputs.json provenance.")
     args = parser.parse_args(argv)
     try:
         cases = load_cases(args.cases)
@@ -213,10 +224,23 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Prepared {len(cases)} cases in {args.destination.resolve()}")
             return 0
         report = score(cases, args.judgments)
+        report["skill_sha256"] = None
+        report["inputs_sha256"] = None
+        if args.inputs is not None:
+            raw_inputs = args.inputs.read_bytes()
+            inputs = json.loads(raw_inputs)
+            if not isinstance(inputs, dict) or inputs.get("mode") != args.mode:
+                raise ValueError("Run input provenance must identify the selected mode")
+            digest = inputs.get("skill_sha256")
+            if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                raise ValueError("Run input provenance needs its evaluated skill_sha256")
+            report["skill_sha256"] = digest
+            report["inputs_sha256"] = hashlib.sha256(raw_inputs).hexdigest()
+            report["fixture_revision"] = inputs.get("fixture_revision", 1)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     report["mode"] = args.mode
-    report["skill_sha256"] = hashlib.sha256(SKILL.read_bytes()).hexdigest()
+    report["grader_skill_sha256"] = hashlib.sha256(SKILL.read_bytes()).hexdigest()
     report["cases_sha256"] = hashlib.sha256(args.cases.read_bytes()).hexdigest()
     print(json.dumps(report, indent=2))
     return 0 if report["passed"] else 1

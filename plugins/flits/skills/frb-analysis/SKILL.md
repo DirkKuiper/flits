@@ -43,6 +43,11 @@ Before reusing a browser server, verify its runtime as well: a process already
 running can still use older code after a package upgrade. A saved fit records
 its own fitter and software provenance, which may differ from the current
 server. Check the provenance of a newly computed fit when validating an upgrade.
+If the installed package provides `flits.runtime_info`, use
+`python -m flits info --server URL` to compare it with the intended server.
+A legacy health response cannot prove a match. If its runtime cannot be verified,
+preserve the existing session and start the intended environment on a free
+port. Do not assume upgrading a package updates an existing process.
 
 ## Pick the entry point
 
@@ -74,6 +79,12 @@ choices with `--event`, `--offpulse`, `--band` or `--crop`. `--snapshot-dir DIR`
 saves each burst's session, which the user can reopen in the interface and
 which `flits replay SNAPSHOT --check` recomputes. `flits measure --help` lists
 every option.
+
+Start with the documented entry point. Avoid reading package internals or
+writing a replacement analysis when the command already supplies the requested
+measurement. Save JSON and a session, inspect their status/flags/uncertainty
+details, and add further diagnostics only where the task or a warning calls
+for them. Do not claim an artifact was checked visually unless it was opened.
 
 ## Python
 
@@ -119,7 +130,7 @@ with open("burst_flits_session.json", "w") as f:
 | Sub-burst drift rate | `run_drift_analysis` |
 | Rotation measure | `polarization_capability`, then `run_polarization_analysis` |
 | Spectral and temporal structure | `run_spectral_analysis`, `run_temporal_structure_analysis` |
-| Burst model fit (the fitburst model) | `fit_model`; `compare_model_components` to choose the number of components |
+| Burst model fit (FLITS's native implementation of the fitburst model) | `fit_model`; `compare_model_components` to choose the number of components when available |
 | Reopen a saved session | `BurstSession.from_snapshot` |
 
 ## Before reporting a number
