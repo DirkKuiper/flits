@@ -54,6 +54,7 @@ plugins:
           - guided-workflow.md: A complete worked example on a public GBT burst, with reference values
           - installation.md: Python, Docker, Apptainer, and remote or HPC deployment
         Scripting:
+          - user-guide/inspection.md: Inspect file metadata and verify local and server runtime identities
           - user-guide/headless-measurement.md: Measure bursts from the command line or Python, in batches
           - user-guide/headless-replay.md: Recompute and check a saved session without a browser
           - user-guide/coding-agents.md: Have coding agents use FLITS, with the FLITS skill
@@ -108,6 +109,7 @@ nav:
       - Exports and Snapshots: user-guide/exports-and-snapshots.md
       - Uncertainties: user-guide/uncertainties.md
       - Headless Measurement: user-guide/headless-measurement.md
+      - Inspection and Runtime: user-guide/inspection.md
       - Headless Replay: user-guide/headless-replay.md
       - Coding Agents: user-guide/coding-agents.md
       - Supported Formats: user-guide/supported-formats.md

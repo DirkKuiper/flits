@@ -442,6 +442,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setAnalysisTab(initialAnalysisTab())
   setStatus("Idle", "neutral")
   updateControlStates()
+  void loadRuntimeIdentity()
   await loadPresets()
   await loadAutoMaskProfiles()
   await loadFiles()
@@ -455,6 +456,24 @@ document.addEventListener("DOMContentLoaded", async () => {
     void loadSnapshotLibrary()
   }
 })
+
+async function loadRuntimeIdentity() {
+  const label = document.getElementById("runtimeIdentity")
+  try {
+    const runtime = await api("/api/health")
+    if (!runtime.flits_version || !runtime.fitter) {
+      label.textContent = "Server version unavailable"
+      label.title = "This server does not report its version. Restart FLITS from the intended Python environment."
+      return
+    }
+    const fitter = runtime.fitter === "flits" ? "FLITS native fitter" : runtime.fitter
+    label.textContent = `v${runtime.flits_version} · ${fitter}`
+    label.title = `Running server: ${runtime.instance_id || "unknown instance"}. Saved fits retain their own provenance.`
+  } catch (error) {
+    label.textContent = "Server version unavailable"
+    label.title = error.message
+  }
+}
 
 // `?open-snapshot=` takes a saved session's id or its path relative to the data
 // directory. The parameter is consumed so that a reload starts clean.

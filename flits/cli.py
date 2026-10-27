@@ -565,6 +565,75 @@ def measure(argv: Sequence[str]) -> int:
     return 0 if all(record["status"] in {"ok", "low_sn"} for record in records) else 1
 
 
+def inspect(argv: Sequence[str]) -> int:
+    """Read metadata only, retaining a record for every input."""
+    from flits.inspection import INSPECTION_SCHEMA_VERSION, inspect_burst
+
+    parser = argparse.ArgumentParser(
+        prog="flits inspect",
+        formatter_class=_HelpFormatter,
+        description="Inspect burst file metadata without loading a waterfall or measuring. Prints a JSON array.",
+    )
+    parser.add_argument("files", nargs="+", type=Path, metavar="FILE")
+    args = parser.parse_args(list(argv))
+    records = []
+    for path in args.files:
+        try:
+            records.append(inspect_burst(path))
+        except Exception as exc:
+            records.append(
+                {
+                    "schema_version": INSPECTION_SCHEMA_VERSION,
+                    "file": str(path.expanduser().resolve()),
+                    "status": "error",
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+            )
+    print(json.dumps(records, indent=2, allow_nan=False))
+    return 0 if all(record["status"] == "ok" for record in records) else 1
+
+
+def info(argv: Sequence[str]) -> int:
+    """Identify local code, optionally comparing it with a running server."""
+    from urllib.error import URLError
+    from urllib.parse import urlsplit
+    from urllib.request import urlopen
+
+    from flits.runtime import compare_server_runtime, runtime_info
+
+    parser = argparse.ArgumentParser(
+        prog="flits info",
+        formatter_class=_HelpFormatter,
+        description=(
+            "Print runtime identity and capabilities as JSON. Local paths identify source-checkout shadowing. "
+            "With --server, compare the running server's FLITS code against this interpreter. "
+            "Exit 1 on mismatch, unidentified legacy server, or connection failure."
+        ),
+    )
+    parser.add_argument("--server", metavar="URL", help="Server base URL, for example http://127.0.0.1:8000.")
+    args = parser.parse_args(list(argv))
+    local = runtime_info(include_paths=True)
+    if args.server is None:
+        print(json.dumps(local, indent=2, allow_nan=False))
+        return 0
+    if urlsplit(args.server).scheme not in {"http", "https"}:
+        parser.error("--server must be an http or https base URL")
+    report: dict[str, Any] = {"local": local, "server": None, "same_flits_code": None, "error": None}
+    try:
+        with urlopen(args.server.rstrip("/") + "/api/health", timeout=10) as response:
+            server = json.load(response)
+        if not isinstance(server, dict) or server.get("status") != "ok":
+            raise ValueError("Server did not return a FLITS health object with status ok")
+        json.dumps(server, allow_nan=False)
+        report["server"] = server
+        report["same_flits_code"] = compare_server_runtime(local, server)
+    except (OSError, URLError, ValueError) as exc:
+        report["error"] = f"{type(exc).__name__}: {exc}"
+    print(json.dumps(report, indent=2, allow_nan=False))
+    return 0 if report["same_flits_code"] is True else 1
+
+
 def _print_report(report: dict[str, Any]) -> None:
     print(f"snapshot   {report['snapshot']}")
     print(f"burst      {report['burst_file']}")
@@ -693,6 +762,8 @@ COMMANDS = {
     "replay": replay,
     "demo": demo,
     "measure": measure,
+    "inspect": inspect,
+    "info": info,
 }
 
 
@@ -704,6 +775,8 @@ def _print_usage() -> None:
         "  serve    Start the browser interface (default when no command is given)\n"
         "  demo     Open a prepared example burst in the interface\n"
         "  measure  Measure bursts without a browser (JSON, JSONL or CSV)\n"
+        "  inspect  Read burst metadata without starting an analysis (JSON)\n"
+        "  info     Identify loaded FLITS code and compare a running server (JSON)\n"
         "  replay   Re-run a saved session snapshot without a browser\n"
         "\n"
         "examples:\n"
