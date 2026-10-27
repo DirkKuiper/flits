@@ -506,6 +506,27 @@ def test_the_evaluation_budget_ends_the_fit_with_status_zero() -> None:
     assert fit.message == "The maximum number of function evaluations is exceeded."
 
 
+def test_auto_budget_still_scales_for_larger_component_models() -> None:
+    truth = _parameters(
+        amplitude=[0.5, 0.3],
+        arrival_time=[0.016, 0.022],
+        burst_width=[0.0008, 0.0006],
+        ref_freq=[1400.0, 1400.0],
+        spectral_index=[1.0, 0.0],
+        spectral_running=[-4.0, -3.0],
+        dm=[0.02],
+    )
+    free = ("amplitude", "arrival_time", "burst_width", "spectral_index", "spectral_running", "dm")
+    model = BurstModel(FREQS, TIMES)
+    fit = fit_burst_model(model, model.evaluate(truth), truth, free)
+    assert fit.success
+    # Five component-specific values per component, plus one shared DM.
+    assert fit.layout.size == 11
+    assert fit.max_function_evaluations == 1100
+    assert fit.function_evaluations < 10
+    np.testing.assert_allclose(fit.values, ParameterLayout(free, 2).vector(truth), rtol=1e-10, atol=1e-12)
+
+
 def test_fit_rejects_invalid_requests() -> None:
     model = BurstModel(FREQS, TIMES)
     data = np.zeros(model.shape)

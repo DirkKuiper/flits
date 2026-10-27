@@ -56,6 +56,11 @@ __all__ = [
 ]
 
 LOWER_BOUNDS: dict[str, float] = {"burst_width": 0.0, "scattering_timescale": 0.0}
+# A handful of correlated physical parameters can need several hundred steps.
+# Give small models headroom while retaining parameter-count scaling for larger
+# models. This is a ceiling: convergence still stops the solver early.
+MIN_AUTO_FUNCTION_EVALUATIONS = 1000
+FUNCTION_EVALUATIONS_PER_PARAMETER = 100
 # Gradient-difference step for the observed Hessian, as a fraction of each
 # parameter's Gauss-Newton 1-sigma uncertainty.
 HESSIAN_STEP_FRACTION = 1e-3
@@ -202,7 +207,9 @@ def fit_burst_model(
     exact_jacobian
         Use the analytic Jacobian. ``False`` uses two-point finite differences.
     max_function_evaluations
-        Solver budget. Defaults to SciPy's, 100 times the number of fitted values.
+        Solver budget per pass. Auto allows at least 1000 evaluations, or 100
+        times the number of fitted values when that is larger. Explicit budgets
+        are respected, including smaller ones. Convergence can stop a pass early.
     bounded
         Keep widths and the scattering timescale non-negative.
     observed_hessian
@@ -246,7 +253,11 @@ def fit_burst_model(
         [LOWER_BOUNDS.get(name, -np.inf) if bounded else -np.inf for name, _component in layout.entries], dtype=float
     )
     x0 = layout.vector(initial)
-    budget = 100 * layout.size if max_function_evaluations is None else max(1, int(max_function_evaluations))
+    budget = (
+        max(MIN_AUTO_FUNCTION_EVALUATIONS, FUNCTION_EVALUATIONS_PER_PARAMETER * layout.size)
+        if max_function_evaluations is None
+        else max(1, int(max_function_evaluations))
+    )
     good_channels = int(np.count_nonzero(channel_weight > 0))
     num_samples = good_channels * model.num_time
     chisq_initial = float(np.sum((sample_weight * values) ** 2))

@@ -135,8 +135,28 @@ selected band.
 
 **Optimizer Passes** restarts the solver from the previous best fit for each
 pass. **Max Evaluations** controls the model-evaluation budget per pass; if
-left blank, FLITS uses 100 times the number of fitted values, SciPy's default
-for least squares.
+left blank, FLITS allows at least 1,000 evaluations, or 100 times the number
+of fitted values when that is larger. Correlated width, scattering and DM
+parameters can need several hundred evaluations even for a small model. This
+is a maximum, so a converged fit still stops early. An explicit value overrides
+Auto, including a smaller budget.
+
+When a pass reaches its limit, the result remains `evaluation_limit_exceeded`:
+its width, scattering time and uncertainties are not accepted measurements.
+The best parameters reached are retained in `bestfit_parameters`, including
+in saved sessions. Increase the limit and select **Seed from Previous Fit**
+to continue from that candidate instead of the original guesses. The Python
+equivalent is `session.fit_model({"seed_from_previous_fit": True, "solver":
+{"max_function_evaluations": 2000}})`. The resumed fit must converge before its
+measurements are accepted. A larger budget cannot resolve an unconstrained
+model or an inappropriate selection; inspect the residuals and parameter
+correlations after convergence.
+
+**Fit Details → Fitter** identifies the implementation that produced the
+saved result. Older sessions can retain `fitburst` results; rerun the fit in
+the current FLITS environment to compute a new native result. Restart a server
+after upgrading its environment, and check that it imports the intended
+checkout when running from source.
 
 Weighting modes are:
 
