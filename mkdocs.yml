@@ -55,6 +55,7 @@ plugins:
           - installation.md: Python, Docker, Apptainer, and remote or HPC deployment
         Scripting:
           - user-guide/headless-measurement.md: Measure bursts from the command line or Python, in batches
+          - user-guide/automation-contracts.md: Per-burst JSON manifests and versioned offline output schemas
           - user-guide/headless-replay.md: Recompute and check a saved session without a browser
           - user-guide/coding-agents.md: Have coding agents use FLITS, with the FLITS skill
           - developer/api-reference.md: The Python API, BurstSession first
@@ -108,6 +109,7 @@ nav:
       - Exports and Snapshots: user-guide/exports-and-snapshots.md
       - Uncertainties: user-guide/uncertainties.md
       - Headless Measurement: user-guide/headless-measurement.md
+      - Batch Manifests and Schemas: user-guide/automation-contracts.md
       - Headless Replay: user-guide/headless-replay.md
       - Coding Agents: user-guide/coding-agents.md
       - Supported Formats: user-guide/supported-formats.md

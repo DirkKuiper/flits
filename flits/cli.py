@@ -227,8 +227,13 @@ def build_measure_parser(prog: str = "flits measure") -> argparse.ArgumentParser
             f"same record. Docs: {DOCS_URL}user-guide/headless-measurement/"
         ),
     )
-    parser.add_argument("files", nargs="+", type=Path, metavar="FILE", help="Burst files to measure.")
-    parser.add_argument("--dm", type=float, required=True, help="Dispersion measure to load each burst at (pc cm^-3).")
+    parser.add_argument("files", nargs="*", type=Path, metavar="FILE", help="Burst files to measure.")
+    parser.add_argument(
+        "--manifest", type=Path, help="JSON manifest with per-burst settings; replaces FILE and selection options."
+    )
+    parser.add_argument(
+        "--dm", type=float, help="Dispersion measure to load each burst at (pc cm^-3); required with FILE."
+    )
     parser.add_argument(
         "--telescope",
         choices=sorted(PRESETS),
@@ -266,20 +271,21 @@ def build_measure_parser(prog: str = "flits measure") -> argparse.ArgumentParser
     parser.add_argument(
         "--mask",
         choices=MASK_CHOICES,
-        default="auto",
+        default=None,
         help="Automatic interference-masking profile, or none (default: auto).",
     )
     parser.add_argument(
         "--detection-snr",
         type=float,
-        default=6.0,
+        default=None,
         metavar="SNR",
         help="Detection threshold for automatic localization (default: 6).",
     )
-    parser.add_argument("--widths", action="store_true", help="Also run the width analysis.")
+    parser.add_argument("--widths", action="store_true", default=None, help="Also run the width analysis.")
     parser.add_argument(
         "--diagnostics",
         action="store_true",
+        default=None,
         help="Include diagnostic profiles and autocorrelations in JSON output.",
     )
     parser.add_argument(
@@ -501,28 +507,72 @@ def measure(argv: Sequence[str]) -> int:
 
     from flits.measure import CSV_COLUMNS, MeasureOptions, csv_row, format_records, measure_bursts
 
-    args = build_measure_parser().parse_args(list(argv))
+    parser = build_measure_parser()
+    args = parser.parse_args(list(argv))
     _configure_logging(args.log_level)
 
     if args.data_dir is not None:
         os.environ["FLITS_DATA_DIR"] = str(Path(args.data_dir).expanduser().resolve())
 
-    options = MeasureOptions(
-        dm=args.dm,
-        telescope=args.telescope,
-        sefd_jy=args.sefd,
-        sefd_fractional_uncertainty=args.sefd_uncertainty,
-        crop_ms=None if args.crop is None else (args.crop[0], args.crop[1]),
-        event_ms=None if args.event is None else (args.event[0], args.event[1]),
-        offpulse_ms=tuple((start, end) for start, end in (args.offpulse or [])),
-        band_mhz=None if args.band is None else (args.band[0], args.band[1]),
-        time_factor=args.time_factor,
-        freq_factor=args.freq_factor,
-        mask=args.mask,
-        detection_snr=args.detection_snr,
-        widths=args.widths,
-        include_diagnostics=args.diagnostics,
-    )
+    if args.manifest is not None:
+        from flits.manifest import load_measure_manifest, measure_manifest_entries
+
+        per_burst_flags = (
+            "dm",
+            "telescope",
+            "sefd",
+            "sefd_uncertainty",
+            "crop",
+            "event",
+            "offpulse",
+            "band",
+            "time_factor",
+            "freq_factor",
+            "mask",
+            "detection_snr",
+            "widths",
+            "diagnostics",
+        )
+        if args.files or any(getattr(args, name) is not None for name in per_burst_flags):
+            parser.error("--manifest replaces FILE and per-burst options; put those settings in the manifest")
+        try:
+            entries = load_measure_manifest(args.manifest)
+        except (ValueError, OSError) as exc:
+            parser.error(str(exc))
+        total = len(entries)
+        iterator = measure_manifest_entries(entries, snapshot_dir=args.snapshot_dir, overwrite=args.overwrite)
+        input_paths = [args.manifest, *(entry.file for entry in entries)]
+    else:
+        if not args.files or args.dm is None:
+            parser.error("provide FILE... and --dm, or use --manifest PATH")
+        options = MeasureOptions(
+            dm=args.dm,
+            telescope=args.telescope,
+            sefd_jy=args.sefd,
+            sefd_fractional_uncertainty=args.sefd_uncertainty,
+            crop_ms=None if args.crop is None else (args.crop[0], args.crop[1]),
+            event_ms=None if args.event is None else (args.event[0], args.event[1]),
+            offpulse_ms=tuple((start, end) for start, end in (args.offpulse or [])),
+            band_mhz=None if args.band is None else (args.band[0], args.band[1]),
+            time_factor=args.time_factor,
+            freq_factor=args.freq_factor,
+            mask=args.mask or "auto",
+            detection_snr=6.0 if args.detection_snr is None else args.detection_snr,
+            widths=bool(args.widths),
+            include_diagnostics=bool(args.diagnostics),
+        )
+        total = len(args.files)
+        iterator = measure_bursts(args.files, options, snapshot_dir=args.snapshot_dir, overwrite=args.overwrite)
+        input_paths = args.files
+
+    if args.output is not None:
+        for input_path in input_paths:
+            same_file = args.output.resolve() == input_path.resolve()
+            if not same_file:
+                with contextlib.suppress(OSError):
+                    same_file = args.output.samefile(input_path)
+            if same_file:
+                parser.error(f"--output would replace an input file: {input_path}")
 
     with contextlib.ExitStack() as stack:
         if args.output is None:
@@ -538,11 +588,7 @@ def measure(argv: Sequence[str]) -> int:
             writer.writeheader()
 
         records: list[dict[str, Any]] = []
-        total = len(args.files)
-        for index, record in enumerate(
-            measure_bursts(args.files, options, snapshot_dir=args.snapshot_dir, overwrite=args.overwrite),
-            start=1,
-        ):
+        for index, record in enumerate(iterator, start=1):
             records.append(record)
             if record["status"] == "error":
                 logger.error("[%d/%d] %s: %s", index, total, record["file"], record["error"])
@@ -688,11 +734,23 @@ def demo(argv: Sequence[str]) -> int:
     return 0
 
 
+def schema(argv: Sequence[str]) -> int:
+    """Print a packaged JSON schema without performing an analysis."""
+    from flits.schema import SCHEMAS, get_schema
+
+    parser = argparse.ArgumentParser(prog="flits schema", description="Print an offline JSON schema.")
+    parser.add_argument("name", choices=SCHEMAS)
+    args = parser.parse_args(list(argv))
+    print(json.dumps(get_schema(args.name), indent=2))
+    return 0
+
+
 COMMANDS = {
     "serve": serve,
     "replay": replay,
     "demo": demo,
     "measure": measure,
+    "schema": schema,
 }
 
 
@@ -704,6 +762,7 @@ def _print_usage() -> None:
         "  serve    Start the browser interface (default when no command is given)\n"
         "  demo     Open a prepared example burst in the interface\n"
         "  measure  Measure bursts without a browser (JSON, JSONL or CSV)\n"
+        "  schema   Print a versioned measurement or batch-manifest JSON schema\n"
         "  replay   Re-run a saved session snapshot without a browser\n"
         "\n"
         "examples:\n"

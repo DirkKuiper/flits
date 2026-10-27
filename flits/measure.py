@@ -31,6 +31,7 @@ STATUSES = ("ok", "low_sn", "no_detection", "error")
 measure, or the burst could not be processed."""
 
 MASK_CHOICES = ("fast", "auto", "thorough", "none")
+MEASUREMENT_SCHEMA_VERSION = "1.0"
 
 _SNAPSHOT_SUFFIX = "_flits_session.json"
 
@@ -178,6 +179,7 @@ def measure_burst(
     channel_mask = session.channel_mask
     masked_channels = 0 if channel_mask is None else int(channel_mask.sum())
     record = {
+        "schema_version": MEASUREMENT_SCHEMA_VERSION,
         "file": str(burst_path),
         "status": status,
         "error": None,
@@ -206,6 +208,7 @@ def measure_burst(
 def error_record(path: str | Path, exc: BaseException) -> dict[str, Any]:
     """The record for a burst that could not be processed."""
     return {
+        "schema_version": MEASUREMENT_SCHEMA_VERSION,
         "file": str(path),
         "status": "error",
         "error": f"{type(exc).__name__}: {exc}",
@@ -246,6 +249,8 @@ CSV_COLUMNS = (
     "measurement_flags",
     "snapshot",
     "error",
+    "schema_version",
+    "id",
 )
 
 
@@ -288,6 +293,8 @@ def csv_row(record: dict[str, Any]) -> dict[str, Any]:
         "measurement_flags": ";".join(measurements.get("measurement_flags") or []),
         "snapshot": record.get("snapshot"),
         "error": record.get("error"),
+        "schema_version": record.get("schema_version"),
+        "id": record.get("id"),
     }
 
 
