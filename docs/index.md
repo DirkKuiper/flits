@@ -9,6 +9,11 @@ formats include SIGPROC filterbank (`.fil`), PSRFITS search/fold data
 catalog waterfalls and beamformed `BBData` power files, extensible via a
 plugin-based reader framework.
 
+The FLITS paper is available as an
+[arXiv preprint](https://arxiv.org/abs/2610.37034). See
+[Citing FLITS](references.md#citing-flits) for the paper citation, BibTeX,
+and software archive.
+
 ![FLITS aligned viewer showing a GBT burst, its time profile, dynamic spectrum, frequency profile, event and off-pulse windows, and selected spectral band.](assets/guided-workflow/prepared-viewer.png)
 
 *The aligned viewer in the [GBT guided workflow](guided-workflow.md). Blue marks

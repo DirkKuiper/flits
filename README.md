@@ -1,6 +1,7 @@
 # FLITS
 
 [![Docs](https://img.shields.io/badge/docs-online-0A66C2.svg)](https://dirkkuiper.github.io/flits/)
+[![arXiv](https://img.shields.io/badge/arXiv-2610.37034-b31b1b.svg)](https://arxiv.org/abs/2610.37034)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23596340.svg)](https://doi.org/10.5281/zenodo.23596340)
 [![PyPI](https://img.shields.io/pypi/v/flits.svg)](https://pypi.org/project/flits/)
 [![Python](https://img.shields.io/pypi/pyversions/flits.svg)](https://pypi.org/project/flits/)
@@ -172,7 +173,17 @@ sub-burst drift, exports, and release procedures.
 
 ## Citation
 
-If you use FLITS in research, please cite the software archive on Zenodo:
+If you use FLITS in research, please cite the paper and the software version
+you used:
+
+- Kuiper, D., Pleunis, Z. & Hessels, J. W. T. (2026), *FLITS: an interactive,
+  reproducible workbench for fast radio burst analysis*.
+  [arXiv:2610.37034](https://arxiv.org/abs/2610.37034) (preprint).
+
+A copyable BibTeX entry is in the
+[citation guide](https://dirkkuiper.github.io/flits/references/#citing-flits).
+
+The software archive is on Zenodo:
 [doi:10.5281/zenodo.23596340](https://doi.org/10.5281/zenodo.23596340). That
 DOI always resolves to the latest release; each release also has its own DOI,
 listed on the Zenodo page, for citing the exact version you used.
