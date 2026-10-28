@@ -104,6 +104,11 @@ does not establish that a separate archival deposit exists.
 
 ## arXiv timing
 
+The FLITS preprint is available as
+[arXiv:2610.37034](https://arxiv.org/abs/2610.37034), submitted on
+27 October 2026. The [citation guide](../references.md#citing-flits) lists
+the paper and software archive.
+
 The [JOSS preprint policy](https://joss.readthedocs.io/en/latest/submitting.html#preprint-policy)
 allows preprints before, during, or after review. There is no need to wait for
 JOSS publication. A practical sequence is to finish the technical claims and

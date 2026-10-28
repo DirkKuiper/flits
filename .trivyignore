@@ -24,3 +24,14 @@ GHSA-6v7p-g79w-8964
 CVE-2025-47273
 CVE-2026-97687
 CVE-2026-97689
+
+# CVE-2026-114613 - msgpack C-extension memory leak / parser reference handling.
+# Trivy reports pip 26.2.2's vendored msgpack 1.1.2 from its vendor manifest.
+# That pip wheel contains no _cmsgpack extension: both Unpacker and unpackb
+# resolve to pip._vendor.msgpack.fallback. The upstream advisory identifies
+# the C extension as affected and reports the Python fallback unaffected:
+# https://github.com/msgpack/msgpack-python/security/advisories/GHSA-j586-36cw-2gc2
+# The separately installed msgpack is protected by an asserted >=1.2.3 floor
+# in Dockerfile and docker/verify_security_floors.py. Recheck this exception
+# when pip changes its vendored implementation or updates msgpack.
+CVE-2026-114613
