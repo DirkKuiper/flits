@@ -15,7 +15,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 # package -> (minimum version, advisory that set it)
 FLOORS: dict[str, tuple[tuple[int, ...], str]] = {
-    "msgpack": ((1, 2, 1), "GHSA-6v7p-g79w-8964"),
+    "msgpack": ((1, 2, 3), "CVE-2026-114613"),
     "setuptools": ((78, 1, 1), "CVE-2025-47273"),
 }
 

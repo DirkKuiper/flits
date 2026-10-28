@@ -44,7 +44,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # instead of reaching the registry and the scheduled scan.
 COPY docker/verify_security_floors.py /tmp/verify_security_floors.py
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade "msgpack>=1.2.1" "setuptools>=78.1.1" && \
+    pip install --upgrade "msgpack>=1.2.3" "setuptools>=78.1.1" && \
     python /tmp/verify_security_floors.py && \
     rm /tmp/verify_security_floors.py
 
