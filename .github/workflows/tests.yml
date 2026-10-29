@@ -17,6 +17,40 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  changes:
+    # The wheel and container jobs below run on macOS, Windows and ARM runners,
+    # which queue for a long time. A pull request that touches none of the files
+    # those jobs exercise skips them; pushes, schedules and manual runs never do.
+    runs-on: ubuntu-latest
+    outputs:
+      platform: ${{ steps.filter.outputs.platform }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether platform checks apply
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "platform=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$BASE_SHA"...HEAD)
+          printf '%s\n' "$changed"
+          pattern='^(flits/|tests/conftest\.py$|docker/|\.github/|pyproject\.toml$|requirements[^/]*\.txt$|MANIFEST\.in$|Dockerfile$|\.dockerignore$|\.trivyignore$)'
+          if printf '%s\n' "$changed" | grep -Eq "$pattern"; then
+            echo "platform=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "platform=false" >> "$GITHUB_OUTPUT"
+            echo "No packaged code, tests, container or CI files changed; skipping platform checks."
+          fi
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -53,6 +87,8 @@ jobs:
 
   wheel-platforms:
     name: wheel (${{ matrix.os }}, ${{ matrix.python-version }})
+    needs: changes
+    if: needs.changes.outputs.platform == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -229,8 +265,11 @@ jobs:
 
   container:
     runs-on: ubuntu-latest
-    if: always()
+    # always() so that a failed unit or platform job fails this check loudly
+    # rather than skipping it; skipped only when the platform checks do not apply.
+    if: always() && needs.changes.outputs.platform == 'true'
     needs:
+      - changes
       - test
       - wheel-platforms
       - container-arm64
@@ -269,6 +308,8 @@ jobs:
           if-no-files-found: warn
 
   container-arm64:
+    needs: changes
+    if: needs.changes.outputs.platform == 'true'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     steps:
