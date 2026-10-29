@@ -82,7 +82,7 @@ def test_optional_component_comparison_does_not_block_basic_measurement(monkeypa
     import flits
 
     check = runpy.run_path(str(CHECK))["check_environment"]
-    # Published FLITS 1.6 includes the native fitter but not the newer comparison method.
+    # A build with the native fitter but without the component comparison method.
     session = type(
         "PublishedSession",
         (),
@@ -92,7 +92,7 @@ def test_optional_component_comparison_does_not_block_basic_measurement(monkeypa
         },
     )
     package = SimpleNamespace(
-        __version__="1.6.0",
+        __version__="1.7.0",
         __file__=flits.__file__,
         BurstSession=session,
         MeasureOptions=flits.MeasureOptions,
@@ -117,13 +117,13 @@ def test_environment_check_explains_an_unsupported_interpreter(monkeypatch) -> N
     assert report["problems"] == ["Select Python 3.11 or later before installing FLITS."]
 
 
-@pytest.mark.parametrize("version", ["0.7.0", "1.5.0", "unknown"])
+@pytest.mark.parametrize("version", ["0.7.0", "1.6.0", "unknown"])
 def test_environment_check_rejects_old_installations(version, monkeypatch) -> None:
     check = runpy.run_path(str(CHECK))["check_environment"]
     monkeypatch.setitem(sys.modules, "flits", SimpleNamespace(__version__=version))
     report = check()
     assert not report["ready"]
-    assert any("1.6" in problem for problem in report["problems"])
+    assert any("1.7" in problem for problem in report["problems"])
     assert any("Missing Python entry point" in problem for problem in report["problems"])
 
 

@@ -13,16 +13,14 @@ uncertainty says what it includes, and selections can be saved and replayed.
 
 ## Set up
 
-FLITS needs Python 3.11+ and must run where the burst files are; installing
-this skill does not install it. Run
+This skill needs FLITS 1.7+ on Python 3.11+, running where the burst files
+are; installing the skill does not install FLITS. Run
 [scripts/check_environment.py](scripts/check_environment.py) with the
 interpreter that will do the analysis. It prints JSON; exit code 0 means it is
-ready to measure. Add `--require native_fitting` before a model fit and
-`--require component_comparison` before choosing a component count. A missing
-optional capability does not block a basic measurement. To install or upgrade:
+ready. To install or upgrade:
 
 ```bash
-python -m pip install --upgrade "flits>=1.6"
+python -m pip install --upgrade "flits>=1.7"
 ```
 
 If `flits` on PATH belongs to another environment, use `python -m flits`. If
@@ -35,32 +33,39 @@ branch or stop the user's server to upgrade; start a new one on a free port.
 
 | Task | Use |
 | --- | --- |
+| Read a file's metadata and loading DM | `flits inspect FILE...`, which prints JSON |
 | Measure one or many bursts | `flits measure FILE... --dm DM`, which prints JSON |
+| Different DM or settings per burst | `flits measure --manifest batch.json` |
 | The same from Python | `flits.measure_burst(path, flits.MeasureOptions(dm=...))` |
 | DM sweeps, widths, drift, polarization, model fits | `flits.BurstSession` |
 | Let the user inspect the burst by eye | `flits --data-dir DIR`, then the user opens <http://127.0.0.1:8000> |
 
-Use the user's DM when supplied. Otherwise inspect the file with
-`flits.io.inspect_filterbank(path)` before asking: CHIME public-catalog
-waterfalls are already dedispersed and are loaded at DM 0; beamformed `BBData`
-power products carry their native `coherent_dm`. Do not infer an unknown DM
-from a filename or apply a catalog's astrophysical DM again to a dedispersed
-waterfall. Ask when the appropriate loading DM remains unknown. Times are in
-ms from the start of the file, frequencies in MHz, and DM in pc cm^-3.
+Use the user's DM when supplied. Otherwise run `flits inspect FILE` before
+asking. Its `suggested_dm` and `dm_guidance` give the loading DM when the
+format defines one: CHIME public-catalog waterfalls are already dedispersed
+and load at DM 0, and beamformed `BBData` power products carry their coherent
+DM. Do not infer an unknown DM from a filename or apply a catalog's
+astrophysical DM again to a dedispersed waterfall. Ask when `suggested_dm` is
+null. Times are in ms from the start of the file, frequencies in MHz, and DM
+in pc cm^-3.
 
 ## Command line
 
 ```bash
+flits inspect burst.fil
 flits measure burst.fil --dm 527.7
 flits measure data/*.fil --dm 527.7 --format csv --output results.csv
 flits measure burst.fil --dm 527.7 --event 235 250 --band 1300 1750 --sefd 10 --sefd-uncertainty 0.1
+flits measure --manifest batch.json --snapshot-dir sessions
 ```
 
 Each file is masked, localized and measured automatically. Pin any of those
 choices with `--event`, `--offpulse`, `--band` or `--crop`. `--snapshot-dir DIR`
 saves each burst's session, which the user can reopen in the interface and
 which `flits replay SNAPSHOT --check` recomputes. `flits measure --help` lists
-every option.
+every option. A manifest gives each burst its own file, DM and options; relative
+paths are resolved from the manifest's directory. `flits schema batch-manifest`
+and `flits schema measurement` print the input and output JSON schemas.
 
 Start with the documented entry point. Avoid reading package internals or
 writing a replacement analysis when the command already supplies the requested

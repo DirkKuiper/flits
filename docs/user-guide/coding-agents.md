@@ -108,8 +108,8 @@ report the selection, status, warning flags and uncertainty classifications.
 ```
 
 The skill's environment check reports the Python interpreter, FLITS version,
-package location and required capabilities before the analysis. It requires
-Python 3.11+ and FLITS 1.6+; an older installation must be upgraded in the
+package location and fitting capabilities before the analysis. It requires
+Python 3.11+ and FLITS 1.7+; an older installation must be upgraded in the
 environment that will run the measurement. `python -m flits` ensures the CLI
 uses that same interpreter.
 
@@ -117,25 +117,22 @@ A local source checkout can shadow the installed package. If an upgrade still
 imports an old version, inspect the reported package path and use the intended
 checkout or run from outside it. Installing a release does not update a Git
 branch. Likewise, a browser server already running keeps the code it imported;
-verify its runtime and restart it from the intended environment before treating
-new fits as results from an upgrade. Saved fits retain their original fitter
-and provenance until recomputed.
+compare it with `python -m flits info --server URL` (see
+[Inspection and Runtime](inspection.md)) and restart it from the intended
+environment before treating new fits as results from an upgrade. Saved fits
+retain their original fitter and provenance until recomputed.
 
-When the loading DM is unknown, the agent should inspect the input first.
-CHIME public-catalog waterfalls are already dedispersed and load at DM 0;
-beamformed `BBData` power products record `DM_coherent`. Other inputs may
-require a DM from the user. FLITS does not search observations for new bursts.
+When the loading DM is unknown, the agent should run `flits inspect FILE`
+first. Its `suggested_dm` is 0 for CHIME public-catalog waterfalls, which are
+already dedispersed, and the coherent DM for beamformed `BBData` power
+products. Other inputs need a DM from the user. FLITS does not search
+observations for new bursts.
 
 Review `status`, `localization.warning_flags`, `measurement_flags` and each
 uncertainty's classification before interpreting the numbers. Ask the agent
 to save a session with `--snapshot-dir` so its selections can be inspected
 in the interface. See [Headless Measurement](headless-measurement.md) and
 [Uncertainties](uncertainties.md).
-
-The checker reports optional fitting capabilities separately. Basic measurement
-does not require component comparison, which is absent from some releases.
-For a fitting task, pass `--require native_fitting`; add
-`--require component_comparison` only when choosing a component count.
 
 ## Project instructions and documentation
 

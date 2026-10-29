@@ -112,7 +112,8 @@ def test_skill_names_only_existing_command_line_options() -> None:
     named = set()
     for line in "\n".join(_code_blocks(body, "bash")).splitlines():
         if line.startswith("flits "):
-            assert line.split()[1] in {"measure", "replay", "demo"} or line.split()[1].startswith("--")
+            command = line.split()[1]
+            assert command in {"measure", "replay", "demo", "inspect", "schema"} or command.startswith("--")
             named.update(word for word in shlex.split(line) if word.startswith("--"))
     assert named and named <= known, sorted(named - known)
 
