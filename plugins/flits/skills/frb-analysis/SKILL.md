@@ -11,49 +11,25 @@ dedispersion, interference masking, localization and measurement routines when
 they fit the task. Preserve the user's chosen package or method. Each
 uncertainty says what it includes, and selections can be saved and replayed.
 
-For CHIME catalog `calibrated_wfall`, the current reader normalizes amplitudes
-and FLITS flux/fluence use SEFD-based radiometer calibration. They do not
-directly integrate the file's native Jy scale. If the task requires the catalog's
-original flux calibration, preserve that data and follow its calibrated-data
-workflow; do not relabel an SEFD-based estimate as native catalog fluence.
-
 ## Set up
 
-Use Python 3.11+ and FLITS 1.6+ in an environment that can access the burst files.
-
-Run [scripts/check_environment.py](scripts/check_environment.py) with the Python
-interpreter that will analyse the data. It reports the interpreter, FLITS
-version and location, and missing capabilities as JSON. Exit code 0 means it
-is ready for measurement. For a model fit, add `--require native_fitting`;
-for choosing the component count, also add `--require component_comparison`.
-These capabilities are reported separately: some released versions support
-native fits but lack component comparison. Do not call a missing method or
-block a basic measurement on that optional method. If setup is needed, select
-a Python 3.11+ environment and run:
+FLITS needs Python 3.11+ and must run where the burst files are; installing
+this skill does not install it. Run
+[scripts/check_environment.py](scripts/check_environment.py) with the
+interpreter that will do the analysis. It prints JSON; exit code 0 means it is
+ready to measure. Add `--require native_fitting` before a model fit and
+`--require component_comparison` before choosing a component count. A missing
+optional capability does not block a basic measurement. To install or upgrade:
 
 ```bash
 python -m pip install --upgrade "flits>=1.6"
 ```
 
-Run the check again after installation. Use `python -m flits` in place of
-`flits` if the command on PATH belongs to a different environment. Installing
-this skill does not install FLITS or give a remote agent access to local files.
-
-If an old version is still imported after upgrading, check the reported module
-path. A local source checkout can shadow the installed package; `pip` does not
-update that checkout. Use an appropriate current checkout or run the installed
-package from outside it. Do not switch or reset a research branch just to
-upgrade an analysis environment.
-
-Before reusing a browser server, verify its runtime as well: a process already
-running can still use older code after a package upgrade. A saved fit records
-its own fitter and software provenance, which may differ from the current
-server. Check the provenance of a newly computed fit when validating an upgrade.
-If the installed package provides `flits.runtime_info`, use
-`python -m flits info --server URL` to compare it with the intended server.
-A legacy health response cannot prove a match. If its runtime cannot be verified,
-preserve the existing session and start the intended environment on a free
-port. Do not assume upgrading a package updates an existing process.
+If `flits` on PATH belongs to another environment, use `python -m flits`. If
+the check still reports an old version, a source checkout on the path may
+shadow the installed package (see the reported path), and a server that is
+already running keeps its old code until restarted. Do not reset a research
+branch or stop the user's server to upgrade; start a new one on a free port.
 
 ## Pick the entry point
 
@@ -154,6 +130,10 @@ with open("burst_flits_session.json", "w") as f:
 - Flux and fluence depend on the SEFD, taken from the detected telescope preset
   or from `--sefd`. `measurement_flags` notes missing inputs such as
   `missing_distance`.
+- CHIME catalog `calibrated_wfall` data are normalized on reading, so FLITS
+  flux and fluence come from the SEFD, not the file's native Jy scale. Do not
+  report them as the catalog's calibrated fluence; when that calibration is
+  required, follow the catalog's own calibrated-data workflow.
 
 ## What FLITS does not do
 
