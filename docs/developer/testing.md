@@ -128,6 +128,22 @@ python -m build
 python -m twine check dist/*
 ```
 
+## Platform checks in CI
+
+The `wheel-platforms` jobs build the wheel and exercise the installed package
+outside the checkout on Linux (x86-64 and ARM64), macOS (Apple silicon and
+Intel) and Windows, with Python 3.11 and 3.14. The `container` and
+`container-arm64` jobs build the Docker image natively on both architectures
+and run the same checks inside it. Each job uploads its results as an artifact;
+a failed upload does not fail the job.
+
+These jobs run on every push to `main`, on the weekly schedule, on manual runs,
+and on pull requests that change `flits/`, `tests/conftest.py`, `docker/`,
+`.github/`, `pyproject.toml`, `requirements*.txt`, `MANIFEST.in`,
+`Dockerfile`, `.dockerignore` or `.trivyignore`. On other pull requests, such
+as documentation-only changes, the `changes` job skips them. Unit, browser,
+lint, minimum-version and packaging jobs run on every pull request.
+
 ## Targeted runs
 
 Examples:
