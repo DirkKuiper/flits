@@ -132,6 +132,12 @@ def _reference_metadata_errors(bibliography_path: Path) -> list[str]:
     return errors
 
 
+def _cff_block(citation: str, key: str) -> str:
+    """Return the indented lines under a top-level CITATION.cff key, or "" if absent."""
+    match = re.search(rf"^{key}:[ \t]*\n((?:[ \t].*(?:\n|$))*)", citation, re.MULTILINE)
+    return match.group(1) if match else ""
+
+
 def validate(check_dois: bool) -> list[str]:
     errors: list[str] = []
     paper = PAPER_PATH.read_text(encoding="utf-8")
@@ -165,7 +171,8 @@ def validate(check_dois: bool) -> list[str]:
         errors.append("paper.md and CITATION.cff titles must match exactly")
 
     paper_orcids = re.findall(r"^\s+orcid:\s*(\S+)$", frontmatter, re.MULTILINE)
-    cff_orcids = re.findall(r"^\s+orcid:\s*(\S+)$", citation, re.MULTILINE)
+    # Only the software's own authors; preferred-citation repeats them and is checked below.
+    cff_orcids = re.findall(r"^\s+orcid:\s*(\S+)$", _cff_block(citation, "authors"), re.MULTILINE)
     invalid_paper_orcids = [orcid for orcid in paper_orcids if not _orcid_is_valid(orcid)]
     invalid_cff_orcids = [orcid for orcid in cff_orcids if not _orcid_is_valid(orcid)]
     if not paper_orcids:
@@ -180,6 +187,17 @@ def validate(check_dois: bool) -> list[str]:
     normalized_cff_orcids = [orcid.removeprefix("https://orcid.org/") for orcid in cff_orcids]
     if paper_orcids != normalized_cff_orcids:
         errors.append("paper.md and CITATION.cff author ORCIDs do not match in order")
+
+    # The preferred citation is this paper: same title and authors, in order.
+    preferred = _cff_block(citation, "preferred-citation")
+    if preferred:
+        preferred_title_match = re.search(r'^\s+title:\s*["\']?(.+?)["\']?\s*$', preferred, re.MULTILINE)
+        preferred_title = preferred_title_match.group(1).rstrip("\"'") if preferred_title_match else ""
+        if preferred_title != paper_title:
+            errors.append("CITATION.cff preferred-citation title must match paper.md")
+        preferred_orcids = re.findall(r"^\s+orcid:\s*(\S+)$", preferred, re.MULTILINE)
+        if [orcid.removeprefix("https://orcid.org/") for orcid in preferred_orcids] != paper_orcids:
+            errors.append("CITATION.cff preferred-citation author ORCIDs must match paper.md in order")
 
     used_keys = set(re.findall(r"@([A-Za-z0-9_:-]+)", body))
     defined_keys = set(re.findall(r"^@[A-Za-z]+\{([^,]+),", bibliography, re.MULTILINE))
