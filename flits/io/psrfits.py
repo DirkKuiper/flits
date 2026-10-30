@@ -256,7 +256,9 @@ def _coerce_coordinate_deg(value: object, *, is_ra: bool) -> float | None:
     numeric = _safe_float(value)
     if numeric is None:
         return None
-    if abs(numeric) > 360.0:
+    # A magnitude beyond the coordinate's range in degrees can only be a packed
+    # hhmmss.s or ddmmss.s value. Declinations stop at 90, not 360.
+    if abs(numeric) > (360.0 if is_ra else 90.0):
         return _packed_sexagesimal_to_deg(numeric, is_ra=is_ra)
     return numeric
 
