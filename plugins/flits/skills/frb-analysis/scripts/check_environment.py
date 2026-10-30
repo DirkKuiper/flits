@@ -13,8 +13,8 @@ import re
 import sys
 from typing import Any
 
-MINIMUM_VERSION = (1, 6, 0)
-INSTALL_COMMAND = 'python -m pip install --upgrade "flits>=1.6"'
+MINIMUM_VERSION = (1, 7, 0)
+INSTALL_COMMAND = 'python -m pip install --upgrade "flits>=1.7"'
 OPTIONAL_CAPABILITIES = ("native_fitting", "component_comparison")
 
 
@@ -39,7 +39,7 @@ def check_environment(required: tuple[str, ...] = ()) -> dict[str, Any]:
         report["flits_path"] = str(getattr(flits, "__file__", "unknown"))
         match = re.match(r"^(\d+)\.(\d+)\.(\d+)", version)
         if match is None or tuple(map(int, match.groups())) < MINIMUM_VERSION:
-            problems.append("This skill requires FLITS 1.6 or later.")
+            problems.append("This skill requires FLITS 1.7 or later.")
         for name in ("MeasureOptions", "measure_burst", "measure_bursts", "BurstSession"):
             if not callable(getattr(flits, name, None)):
                 problems.append(f"Missing Python entry point: flits.{name}")

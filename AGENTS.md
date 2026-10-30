@@ -14,6 +14,9 @@ have; it does not search for bursts.
   (`--format jsonl` or `csv` also work). Check each record's `status` (`ok`,
   `low_sn`, `no_detection`, `error`) and `localization.warning_flags` before
   trusting a number. Exit code 0 means every burst was measured.
+- Unknown loading DM: `flits inspect FILE` prints the file's metadata and, when
+  the format defines one, a `suggested_dm` (0 for CHIME catalog waterfalls,
+  the coherent DM for `BBData` power products). Otherwise ask for the DM.
 - One call per burst from Python: `flits.measure_burst(path, flits.MeasureOptions(dm=...))`.
 - Different settings per burst: `flits measure --manifest batch.json`; relative
   paths belong to the manifest's directory. `flits schema batch-manifest` and

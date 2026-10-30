@@ -11,80 +11,61 @@ dedispersion, interference masking, localization and measurement routines when
 they fit the task. Preserve the user's chosen package or method. Each
 uncertainty says what it includes, and selections can be saved and replayed.
 
-For CHIME catalog `calibrated_wfall`, the current reader normalizes amplitudes
-and FLITS flux/fluence use SEFD-based radiometer calibration. They do not
-directly integrate the file's native Jy scale. If the task requires the catalog's
-original flux calibration, preserve that data and follow its calibrated-data
-workflow; do not relabel an SEFD-based estimate as native catalog fluence.
-
 ## Set up
 
-Use Python 3.11+ and FLITS 1.6+ in an environment that can access the burst files.
-
-Run [scripts/check_environment.py](scripts/check_environment.py) with the Python
-interpreter that will analyse the data. It reports the interpreter, FLITS
-version and location, and missing capabilities as JSON. Exit code 0 means it
-is ready for measurement. For a model fit, add `--require native_fitting`;
-for choosing the component count, also add `--require component_comparison`.
-These capabilities are reported separately: some released versions support
-native fits but lack component comparison. Do not call a missing method or
-block a basic measurement on that optional method. If setup is needed, select
-a Python 3.11+ environment and run:
+This skill needs FLITS 1.7+ on Python 3.11+, running where the burst files
+are; installing the skill does not install FLITS. Run
+[scripts/check_environment.py](scripts/check_environment.py) with the
+interpreter that will do the analysis. It prints JSON; exit code 0 means it is
+ready. To install or upgrade:
 
 ```bash
-python -m pip install --upgrade "flits>=1.6"
+python -m pip install --upgrade "flits>=1.7"
 ```
 
-Run the check again after installation. Use `python -m flits` in place of
-`flits` if the command on PATH belongs to a different environment. Installing
-this skill does not install FLITS or give a remote agent access to local files.
-
-If an old version is still imported after upgrading, check the reported module
-path. A local source checkout can shadow the installed package; `pip` does not
-update that checkout. Use an appropriate current checkout or run the installed
-package from outside it. Do not switch or reset a research branch just to
-upgrade an analysis environment.
-
-Before reusing a browser server, verify its runtime as well: a process already
-running can still use older code after a package upgrade. A saved fit records
-its own fitter and software provenance, which may differ from the current
-server. Check the provenance of a newly computed fit when validating an upgrade.
-If the installed package provides `flits.runtime_info`, use
-`python -m flits info --server URL` to compare it with the intended server.
-A legacy health response cannot prove a match. If its runtime cannot be verified,
-preserve the existing session and start the intended environment on a free
-port. Do not assume upgrading a package updates an existing process.
+If `flits` on PATH belongs to another environment, use `python -m flits`. If
+the check still reports an old version, a source checkout on the path may
+shadow the installed package (see the reported path), and a server that is
+already running keeps its old code until restarted. Do not reset a research
+branch or stop the user's server to upgrade; start a new one on a free port.
 
 ## Pick the entry point
 
 | Task | Use |
 | --- | --- |
+| Read a file's metadata and loading DM | `flits inspect FILE...`, which prints JSON |
 | Measure one or many bursts | `flits measure FILE... --dm DM`, which prints JSON |
+| Different DM or settings per burst | `flits measure --manifest batch.json` |
 | The same from Python | `flits.measure_burst(path, flits.MeasureOptions(dm=...))` |
 | DM sweeps, widths, drift, polarization, model fits | `flits.BurstSession` |
 | Let the user inspect the burst by eye | `flits --data-dir DIR`, then the user opens <http://127.0.0.1:8000> |
 
-Use the user's DM when supplied. Otherwise inspect the file with
-`flits.io.inspect_filterbank(path)` before asking: CHIME public-catalog
-waterfalls are already dedispersed and are loaded at DM 0; beamformed `BBData`
-power products carry their native `coherent_dm`. Do not infer an unknown DM
-from a filename or apply a catalog's astrophysical DM again to a dedispersed
-waterfall. Ask when the appropriate loading DM remains unknown. Times are in
-ms from the start of the file, frequencies in MHz, and DM in pc cm^-3.
+Use the user's DM when supplied. Otherwise run `flits inspect FILE` before
+asking. Its `suggested_dm` and `dm_guidance` give the loading DM when the
+format defines one: CHIME public-catalog waterfalls are already dedispersed
+and load at DM 0, and beamformed `BBData` power products carry their coherent
+DM. Do not infer an unknown DM from a filename or apply a catalog's
+astrophysical DM again to a dedispersed waterfall. Ask when `suggested_dm` is
+null. Times are in ms from the start of the file, frequencies in MHz, and DM
+in pc cm^-3.
 
 ## Command line
 
 ```bash
+flits inspect burst.fil
 flits measure burst.fil --dm 527.7
 flits measure data/*.fil --dm 527.7 --format csv --output results.csv
 flits measure burst.fil --dm 527.7 --event 235 250 --band 1300 1750 --sefd 10 --sefd-uncertainty 0.1
+flits measure --manifest batch.json --snapshot-dir sessions
 ```
 
 Each file is masked, localized and measured automatically. Pin any of those
 choices with `--event`, `--offpulse`, `--band` or `--crop`. `--snapshot-dir DIR`
 saves each burst's session, which the user can reopen in the interface and
 which `flits replay SNAPSHOT --check` recomputes. `flits measure --help` lists
-every option.
+every option. A manifest gives each burst its own file, DM and options; relative
+paths are resolved from the manifest's directory. `flits schema batch-manifest`
+and `flits schema measurement` print the input and output JSON schemas.
 
 Start with the documented entry point. Avoid reading package internals or
 writing a replacement analysis when the command already supplies the requested
@@ -154,6 +135,10 @@ with open("burst_flits_session.json", "w") as f:
 - Flux and fluence depend on the SEFD, taken from the detected telescope preset
   or from `--sefd`. `measurement_flags` notes missing inputs such as
   `missing_distance`.
+- CHIME catalog `calibrated_wfall` data are normalized on reading, so FLITS
+  flux and fluence come from the SEFD, not the file's native Jy scale. Do not
+  report them as the catalog's calibrated fluence; when that calibration is
+  required, follow the catalog's own calibrated-data workflow.
 
 ## What FLITS does not do
 
