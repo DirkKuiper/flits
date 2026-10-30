@@ -4,6 +4,14 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.7.2](https://github.com/DirkKuiper/flits/compare/flits-v1.7.1...flits-v1.7.2) (2026-10-30)
+
+
+### Documentation
+
+* **testing:** describe when CI runs the platform checks ([aab5aba](https://github.com/DirkKuiper/flits/commit/aab5aba0d39795c76c7a92a26e8935bc8502e7c1))
+* **testing:** describe when CI runs the platform checks ([66fcfec](https://github.com/DirkKuiper/flits/commit/66fcfec3ed5a279e1f3b663b6def25c625d6f317))
+
 ## [1.7.1](https://github.com/DirkKuiper/flits/compare/flits-v1.7.0...flits-v1.7.1) (2026-10-30)
 
 
