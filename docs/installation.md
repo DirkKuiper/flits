@@ -93,8 +93,11 @@ The published image is available at `ghcr.io/dirkkuiper/flits`.
 Recommended tags:
 
 - `latest` for the newest stable release
-- an exact tag such as `1.2.0` when you want a reproducible deployment
+- a minor version such as `1.7` for its newest patch release
+- an exact tag such as `1.7.0` when you want a reproducible deployment
 - `edge` for snapshots built from `main`
+
+Every release image is built for `linux/amd64` and `linux/arm64`.
 
 Run the latest stable release:
 
@@ -111,7 +114,7 @@ To pin a specific stable release instead:
 docker run --rm -p 8123:8123 \
   -e FLITS_DATA_DIR=/data \
   -v /path/to/filterbanks:/data \
-  ghcr.io/dirkkuiper/flits:1.2.0
+  ghcr.io/dirkkuiper/flits:1.7.0
 ```
 
 To build locally instead:
@@ -170,6 +173,40 @@ ssh -L 8123:127.0.0.1:8123 user@remote-host
 Then start FLITS on the remote host and open `http://127.0.0.1:8123` locally.
 
 On clusters where Docker is unavailable, Apptainer is usually the right runtime.
+
+### On a Slurm worker node
+
+Clusters usually expect interactive work to run in a job on a worker node, not
+on the login node. Start an interactive job, then run FLITS from the Apptainer
+image inside it:
+
+```bash
+srun --time=04:00:00 --cpus-per-task=2 --pty bash -l
+hostname -s    # the worker's short name, for example wn-01
+APPTAINERENV_FLITS_DATA_DIR=/data \
+  apptainer exec --bind /path/to/filterbanks:/data flits.sif \
+  flits --data-dir /data --host 127.0.0.1 --port 8123
+```
+
+From your own computer, tunnel through the login node to the worker:
+
+```bash
+ssh -N -L 8123:127.0.0.1:8123 -J user@login-node user@wn-01
+```
+
+and open `http://127.0.0.1:8123`. This needs SSH access from the login node to
+a worker where you have a running job, which most clusters allow. If yours
+does not, FLITS has to listen on the worker's network interface
+(`--host 0.0.0.0`) and the tunnel ends there instead:
+
+```bash
+ssh -N -L 8123:wn-01:8123 user@login-node
+```
+
+FLITS has no authentication. With `--host 0.0.0.0`, anyone who can reach that
+worker node can use the interface and read the data directory, so prefer the
+first form on shared clusters, and stop FLITS when you are done. Check that it
+is serving with `curl http://127.0.0.1:8123/api/health` on the worker.
 
 ## Data-directory behavior
 
