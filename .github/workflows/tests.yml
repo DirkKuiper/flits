@@ -130,6 +130,9 @@ jobs:
 
       - name: Retain platform evidence
         if: always()
+        # The evidence is a convenience; an artifact-service outage must not
+        # fail a platform check whose tests passed.
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
@@ -301,6 +304,9 @@ jobs:
 
       - name: Retain container evidence
         if: always()
+        # The evidence is a convenience; an artifact-service outage must not
+        # fail a platform check whose tests passed.
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: container-amd64
@@ -325,6 +331,9 @@ jobs:
             flits-ci sh -c 'python -m pip install pytest && python /smoke-source/.github/scripts/wheel_smoke.py --source-root /smoke-source --output /evidence/wheel-smoke.json'
       - name: Retain ARM64 container evidence
         if: always()
+        # The evidence is a convenience; an artifact-service outage must not
+        # fail a platform check whose tests passed.
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: container-arm64
