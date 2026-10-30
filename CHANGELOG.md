@@ -4,6 +4,29 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.7.1](https://github.com/DirkKuiper/flits/compare/flits-v1.7.0...flits-v1.7.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **container:** require patched msgpack and document pip scanner exception ([264cee9](https://github.com/DirkKuiper/flits/commit/264cee944892e2db41aacc34aef3ebc4d5ce6212))
+* **io:** read numeric PSRFITS declinations above 90 as packed ddmmss ([4ce1b56](https://github.com/DirkKuiper/flits/commit/4ce1b566c12bf9c90c4c8a1513fd2674ffdbd188))
+* **io:** read numeric PSRFITS declinations above 90 as packed ddmmss ([13e15a2](https://github.com/DirkKuiper/flits/commit/13e15a24a33093194eda29a23383748a78af129b))
+* **paper:** compare only the software's authors with the paper ([9b24a97](https://github.com/DirkKuiper/flits/commit/9b24a9755c86152a4dd75ccf4c2ab59de22b5a6c))
+
+
+### Documentation
+
+* **agents:** point the skill at FLITS 1.7 inspection and manifests ([4f0aaee](https://github.com/DirkKuiper/flits/commit/4f0aaee038f42a1e92ff8aa62a9d4a3f84deb59d))
+* **agents:** shorten the skill's setup and point it at FLITS 1.7 ([8f3f836](https://github.com/DirkKuiper/flits/commit/8f3f836e39f87611aed3c5376a8d7db664f2d332))
+* **agents:** shorten the skill's setup section ([e2e0ee3](https://github.com/DirkKuiper/flits/commit/e2e0ee34ae987dc4c277faeb18bd9c77b5173960))
+* **citation:** make the arXiv paper the preferred citation ([b878053](https://github.com/DirkKuiper/flits/commit/b87805384eb953e8e433da205f3e61da96033c00))
+* **citation:** make the arXiv paper the preferred citation ([ee77dcb](https://github.com/DirkKuiper/flits/commit/ee77dcbfc19a29b06246cc30c22492bcecc30214))
+* **installation:** run FLITS in a Slurm job and tunnel to the worker ([6b293f2](https://github.com/DirkKuiper/flits/commit/6b293f2293eaff03915ac139d562a897640eaa3c))
+* **installation:** run FLITS in a Slurm job and tunnel to the worker ([ad0b4da](https://github.com/DirkKuiper/flits/commit/ad0b4dab747270817ccf7761fc5be9f1df37712d))
+* link the arXiv preprint and update container security checks ([#149](https://github.com/DirkKuiper/flits/issues/149)) ([4422e67](https://github.com/DirkKuiper/flits/commit/4422e679a29619dd9366b6e7df96b3ad1e7403f8))
+* link the FLITS arXiv preprint ([5ca5fe4](https://github.com/DirkKuiper/flits/commit/5ca5fe440e99f66903471e3f929b10b1a3fba570))
+
 ## [1.7.0](https://github.com/DirkKuiper/flits/compare/flits-v1.6.0...flits-v1.7.0) (2026-10-27)
 
 

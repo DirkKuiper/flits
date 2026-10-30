@@ -24,8 +24,8 @@ identifiers:
   - type: doi
     value: 10.48550/arXiv.2610.37034
     description: The FLITS paper on arXiv (arXiv:2610.37034).
-version: 1.7.0 # x-release-please-version
-date-released: 2026-10-27 # x-release-please-date
+version: 1.7.1 # x-release-please-version
+date-released: 2026-10-30 # x-release-please-date
 keywords:
   - fast radio bursts
   - FRB
