@@ -112,7 +112,7 @@ with open("burst_flits_session.json", "w") as f:
 | --- | --- |
 | Pin the selection | `set_event_ms`, `add_offpulse_ms`, `set_spectral_extent_freq`, `set_crop_ms` |
 | Mask channels by hand | `mask_channel_freq`, `mask_range_freq` |
-| DM sweep | `optimize_dm(center_dm, half_range, step, metric=...)` with `integrated_event_snr`, `dm_phase` or `smoothed_structure`, then `apply_best_dm` |
+| DM sweep | `optimize_dm(center_dm, half_range, step, metric=...)` with `integrated_event_snr`, `dm_phase`, `smoothed_structure` or `peak_snr` (add `peak_snr_filter="boxcar"` for faint or wide bursts), then `apply_best_dm` |
 | Widths by several methods | `compute_widths` |
 | Sub-burst drift rate | `run_drift_analysis` |
 | Rotation measure | `polarization_capability`, then `run_polarization_analysis` |

@@ -21,8 +21,9 @@ it — see `flits.signal.dedispersion_bin_resolution` and
 
 ## DM optimization
 
-Three criteria are available. The integrated-event signal-to-noise metric
-maximizes the S/N of the summed burst profile. The structure-maximizing metric
+Four criteria are available. The integrated-event signal-to-noise metric
+maximizes the S/N of the summed burst profile. The peak-S/N metric fits a
+Gaussian to the burst's peak S/N against DM. The structure-maximizing metric
 is a clean-room implementation of the DM\_phase algorithm, which maximizes the
 coherence of the burst's Fourier phases across the band and is preferable for
 bursts with sharp temporal structure. The smoothed-structure metric is a

@@ -7,6 +7,7 @@ skill's Python examples run.
 
 from __future__ import annotations
 
+import inspect
 import json
 import re
 import shlex
@@ -121,11 +122,14 @@ def test_skill_names_only_existing_command_line_options() -> None:
 def test_skill_names_only_existing_session_methods_and_dm_metrics() -> None:
     _, body = _skill()
     table = body.split("| Analysis | Method |", 1)[1].split("\n\n", 1)[0]
+    sweep_options = set(inspect.signature(BurstSession.optimize_dm).parameters)
     for name in re.findall(r"`([a-z_]+)", table):
-        if name in {"fitburst", "integrated_event_snr", "dm_phase", "smoothed_structure"}:
+        if name in {"fitburst", "integrated_event_snr", "dm_phase", "smoothed_structure", "peak_snr"}:
+            continue
+        if name in sweep_options:
             continue
         assert callable(getattr(BurstSession, name, None)), name
-    assert {"integrated_event_snr", "dm_phase", "smoothed_structure"} <= set(DM_METRIC_REGISTRY)
+    assert {"integrated_event_snr", "dm_phase", "smoothed_structure", "peak_snr"} <= set(DM_METRIC_REGISTRY)
     for name in re.findall(r"session\.([a-z_]+)\(", body):
         assert callable(getattr(BurstSession, name, None)), name
 
