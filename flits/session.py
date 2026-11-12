@@ -19,6 +19,7 @@ import numpy as np
 
 from flits.analysis.dm_optimization import (
     DEFAULT_FILTER_ORDER,
+    DEFAULT_PEAK_SNR_FILTER,
     STRUCTURE_METRIC,
     DMMetricInput,
     available_dm_metrics,
@@ -2244,23 +2245,28 @@ class BurstSession:
         *,
         structure_cutoff: int | None = None,
         structure_filter_order: int = DEFAULT_FILTER_ORDER,
+        peak_snr_filter: str = DEFAULT_PEAK_SNR_FILTER,
     ) -> DmOptimizationResult:
         """Sweep DM around a centre value and score each trial.
 
         `metric` selects the criterion: integrated event signal-to-noise
         (``integrated_event_snr``), the structure-maximizing DM_phase score
-        (``dm_phase``), or the smoothed-structure score of Sutinjo et al. (2023)
-        (``smoothed_structure``), which also reports a conservative DM interval.
-        For that metric, `structure_cutoff` sets the low-pass cutoff k_c (None
-        chooses it from the DCT spectrum) and `structure_filter_order` the
-        filter order.
+        (``dm_phase``), the smoothed-structure score of Sutinjo et al. (2023)
+        (``smoothed_structure``), which also reports a conservative DM interval,
+        or the burst's peak S/N with a Gaussian fitted to the curve
+        (``peak_snr``). For the smoothed-structure metric, `structure_cutoff`
+        sets the low-pass cutoff k_c (None chooses it from the DCT spectrum) and
+        `structure_filter_order` the filter order. For the peak-S/N metric,
+        `peak_snr_filter` is ``peak_bin`` (highest single sample at the analysis
+        resolution) or ``boxcar`` (also try boxcars up to the event window).
         """
         # Structure metrics score the reduced analysis grid, so they respect the
         # time and frequency downsampling the user is analysing at.
         reduced_grid_metric = metric in {"dm_phase", STRUCTURE_METRIC}
-        structure_options = {
+        metric_options: dict[str, Any] = {
             "structure_cutoff": structure_cutoff,
             "structure_filter_order": structure_filter_order,
+            "peak_snr_filter": peak_snr_filter,
         }
         grid, context = self._build_measurement_context_for_data(self.data)
         reduced_metric_data = np.asarray(grid.masked, dtype=float)
@@ -2294,7 +2300,7 @@ class BurstSession:
                 freqres_mhz=grid.effective_freqres_mhz,
             ),
             metric=metric,
-            **structure_options,
+            **metric_options,
         )
         component_results: list[DmComponentOptimizationResult] = []
         for index, (label, event_bounds_abs) in enumerate(self._dm_component_windows(), start=1):
@@ -2345,7 +2351,7 @@ class BurstSession:
                     freqres_mhz=component_grid.effective_freqres_mhz,
                 ),
                 metric=metric,
-                **structure_options,
+                **metric_options,
             )
             component_results.append(
                 DmComponentOptimizationResult(
@@ -2368,6 +2374,7 @@ class BurstSession:
                     fit_status=component_optimization.fit_status,
                     uncertainty_details=dict(component_optimization.uncertainty_details),
                     structure=component_optimization.structure,
+                    gaussian_fit=component_optimization.gaussian_fit,
                 )
             )
 

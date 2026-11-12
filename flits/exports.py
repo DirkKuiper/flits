@@ -1183,6 +1183,9 @@ def _build_catalog_csv(snapshot: ExportSnapshotData) -> bytes:
         # Smoothed-structure metric only: the DM range consistent with the best DM.
         "dm_range_low": (dm.get("structure") or {}).get("interval_low_dm", ""),
         "dm_range_high": (dm.get("structure") or {}).get("interval_high_dm", ""),
+        # Peak-S/N metric only: how the peak was found, and where the fitted S/N falls by 1.
+        "dm_peak_snr_filter": (dm.get("gaussian_fit") or {}).get("peak_snr_filter", ""),
+        "dm_snr_drop_one_half_width": (dm.get("gaussian_fit") or {}).get("snr_drop_one_half_width", ""),
         "dm_fit_status": dm.get("fit_status", ""),
         "dm_best_snr": dm.get("best_sn", ""),
         "dm_sampled_best_dm": dm.get("sampled_best_dm", ""),
@@ -1685,6 +1688,13 @@ def _dm_curve_figure(snapshot: ExportSnapshotData) -> plt.Figure:
     metric_definition = dm_metric_definition(metric_key)
     metric_label = metric_definition.label if metric_definition is not None else "DM Metric"
     ax.plot(trial_dms, scores, color=ASTROFLASH_COLORS["accent"], linewidth=1.5, marker="o", markersize=3.5)
+    gaussian = optimization.get("gaussian_fit") or {}
+    parameters = [gaussian.get(key) for key in ("amplitude", "center_dm", "sigma_dm", "baseline")]
+    if trial_dms.size and all(value is not None for value in parameters):
+        amplitude, center, sigma, baseline = (float(value) for value in parameters)
+        model_dms = np.linspace(float(np.min(trial_dms)), float(np.max(trial_dms)), 400)
+        model = amplitude * np.exp(-0.5 * ((model_dms - center) / sigma) ** 2) + baseline
+        ax.plot(model_dms, model, color=ASTROFLASH_COLORS["accent_strong"], linewidth=1.2, linestyle="--")
     ax.axvline(
         float(optimization.get("center_dm", np.nan)), color=ASTROFLASH_COLORS["neutral"], linewidth=1.0, linestyle=":"
     )

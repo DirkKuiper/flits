@@ -888,6 +888,7 @@ def session_action(session_id: str, request: ActionRequest) -> dict[str, Any]:
                 float(payload["step"]),
                 metric=str(payload.get("metric", "integrated_event_snr")),
                 structure_cutoff=None if structure_cutoff in (None, "") else int(structure_cutoff),
+                peak_snr_filter=str(payload.get("peak_snr_filter") or "peak_bin"),
             )
         elif action == "compute_widths":
             session.compute_widths()
