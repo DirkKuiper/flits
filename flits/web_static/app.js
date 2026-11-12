@@ -94,7 +94,10 @@ const dmHalfRangeInput = document.getElementById("dmHalfRangeInput")
 const dmStepInput = document.getElementById("dmStepInput")
 const dmStructureCutoffField = document.getElementById("dmStructureCutoffField")
 const dmStructureCutoffInput = document.getElementById("dmStructureCutoffInput")
+const dmPeakSnrFilterField = document.getElementById("dmPeakSnrFilterField")
+const dmPeakSnrFilterInput = document.getElementById("dmPeakSnrFilterInput")
 const STRUCTURE_METRIC = "smoothed_structure"
+const PEAK_SNR_METRIC = "peak_snr"
 const detectionHint = document.getElementById("detectionHint")
 const resolutionLabel = document.getElementById("resolutionLabel")
 const appliedDmLabel = document.getElementById("appliedDmLabel")
@@ -587,7 +590,7 @@ function bindControls() {
   refreshSnapshotsButton.addEventListener("click", () => loadSnapshotLibrary({ refresh: true }))
   openSnapshotButton.addEventListener("click", () => openStoredSession(state.selectedSnapshotId))
   dmMetricInput.addEventListener("change", () => {
-    syncDmStructureCutoffField()
+    syncDmMetricFields()
     if (state.view) {
       renderDmOptimization(state.view)
     }
@@ -619,6 +622,9 @@ function bindControls() {
     if (metric === STRUCTURE_METRIC) {
       const cutoff = dmStructureCutoffInput.value.trim()
       payload.structure_cutoff = cutoff === "" ? null : Number(cutoff)
+    }
+    if (metric === PEAK_SNR_METRIC) {
+      payload.peak_snr_filter = dmPeakSnrFilterInput.value || "peak_bin"
     }
     postAction("optimize_dm", payload)
   })
@@ -1828,11 +1834,13 @@ function dmMetricOptions(view) {
     { key: "integrated_event_snr", label: "Integrated-event S/N", summary: "Legacy sweep metric.", formula: "", origin: "", references: [] },
     { key: "dm_phase", label: "DMphase", summary: "Use the automatic DMphase coherent-power curve on the selected reduced waterfall.", formula: "", origin: "", references: [] },
     { key: STRUCTURE_METRIC, label: "Smoothed structure", summary: "Maximize the sharpness of the smoothed event light curve and report a conservative DM range.", formula: "", origin: "", references: [] },
+    { key: PEAK_SNR_METRIC, label: "Peak S/N (Gaussian fit)", summary: "Fit a Gaussian to the burst's peak S/N across trial DMs: its centre is the best DM and its sigma how sharply the S/N peaks.", formula: "", origin: "", references: [] },
   ]
 }
 
-function syncDmStructureCutoffField() {
+function syncDmMetricFields() {
   dmStructureCutoffField.hidden = dmMetricInput.value !== STRUCTURE_METRIC
+  dmPeakSnrFilterField.hidden = dmMetricInput.value !== PEAK_SNR_METRIC
 }
 
 function syncDmMetricOptions(view) {
@@ -1846,7 +1854,11 @@ function syncDmMetricOptions(view) {
     .join("")
   const availableValues = new Set(options.map((option) => option.key))
   dmMetricInput.value = availableValues.has(currentValue) ? currentValue : "integrated_event_snr"
-  syncDmStructureCutoffField()
+  const sweptFilter = view?.dm_optimization?.settings?.peak_snr_filter
+  if (sweptFilter === "peak_bin" || sweptFilter === "boxcar") {
+    dmPeakSnrFilterInput.value = sweptFilter
+  }
+  syncDmMetricFields()
 }
 
 function findDmMetricDefinition(view, metricKey) {
@@ -2493,6 +2505,7 @@ function renderDmOptimization(view) {
   const snrLabel = snrMetricLabel(optimization.snr_metric)
   const isStructure = optimization.snr_metric === STRUCTURE_METRIC
   const structure = isStructure ? optimization.structure || null : null
+  const gaussian = optimization.snr_metric === PEAK_SNR_METRIC ? optimization.gaussian_fit || null : null
   const scoreLabel = optimization.snr_metric === "dm_phase" ? "DMphase Score" : isStructure ? "Structure Score" : snrLabel
   const metricSummary = definition?.summary || snrMetricSummary(optimization.snr_metric)
   const residualTone = residualStatusTone(optimization.residual_status)
@@ -2510,7 +2523,9 @@ function renderDmOptimization(view) {
     ? "Sampled Peak DM is the discrete argmax of the DMphase curve. Best DM is the upstream-style weighted polynomial refinement used for comparison with DM_phase."
     : isStructure
       ? "Best DM is the trial with the highest structure score. The DM range holds every trial whose score, raised by its noise allowance (dotted curve), reaches the best score. The range is conservative: several times the scatter of the best DM."
-      : "Sampled Peak DM is the best discrete grid point. Best DM is the local quadratic refinement around that sampled peak."
+      : gaussian
+        ? "Best DM is the centre of a Gaussian plus a constant fitted to the peak S/N of every trial (dashed curve). Its sigma, shaded around the best DM, is how quickly the peak S/N falls away from it. It is set by the burst's width and the band, and does not shrink as the burst gets brighter."
+        : "Sampled Peak DM is the best discrete grid point. Best DM is the local quadratic refinement around that sampled peak."
   const currentDm = view?.meta?.dm
 
   const uncertaintyTile = structure
@@ -2518,10 +2533,15 @@ function renderDmOptimization(view) {
       tooltip: "DMs the noise cannot distinguish from the best DM (Sutinjo et al. 2023, eq. 15). A conservative range: several times the scatter of the best DM.",
       detail: bestDmDetail,
     })
-    : resultTile("DM Fit Width", formatDetailUncertainty(displayedBestDmDetail, { digits: 6, units: "pc cm^-3" }) || "n/a", "primary", {
-      tooltip: "Local width from the DM peak-refinement fit.",
-      detail: displayedBestDmDetail,
-    })
+    : gaussian
+      ? resultTile("Gaussian σ", formatDetailUncertainty(displayedBestDmDetail, { digits: 6, units: "pc cm^-3" }) || "n/a", "primary", {
+        tooltip: "Standard deviation of the Gaussian fitted to peak S/N against DM: how sharply the S/N peaks. It is set by the burst's width and the band, and does not shrink as the burst gets brighter.",
+        detail: displayedBestDmDetail,
+      })
+      : resultTile("DM Fit Width", formatDetailUncertainty(displayedBestDmDetail, { digits: 6, units: "pc cm^-3" }) || "n/a", "primary", {
+        tooltip: "Local width from the DM peak-refinement fit.",
+        detail: displayedBestDmDetail,
+      })
   const primaryTiles = [
     resultTile("Best DM From Sweep", fmt(optimization.best_dm, 6), "primary", "Refined best-fit DM reported by the selected metric model for this retained sweep."),
     uncertaintyTile,
@@ -2549,6 +2569,19 @@ function renderDmOptimization(view) {
       resultTile("Filter Order", String(structure.filter_order), "secondary", "Order of the Butterworth-like low-pass filter."),
     )
   }
+  if (gaussian) {
+    secondaryTiles.push(...gaussianFitTiles(gaussian, optimization))
+  }
+  const gaussianFlagNotes = gaussian
+    ? (gaussian.warning_flags || [])
+      .filter((flag) => flag.startsWith("gaussian_") && flag !== optimization.fit_status)
+      .map((flag) => `
+        <div class="dm-fit-note" data-tone="warning">
+          <strong>${escapeHtml(fitStatusLabel(flag))}</strong>
+          <span>${escapeHtml(fitStatusCopy(flag))}</span>
+        </div>`)
+      .join("")
+    : ""
 
   dmOptimizationContent.innerHTML = `
     <div class="results-primary">
@@ -2569,6 +2602,7 @@ function renderDmOptimization(view) {
       <strong>${escapeHtml(fitStatusLabel(optimization.fit_status))}</strong>
       <span>${escapeHtml(fitStatusCopy(optimization.fit_status))}</span>
     </div>
+    ${gaussianFlagNotes}
     ${renderDmMetricDefinition(definition)}
     ${optimization.provenance ? `
       <details class="details-card results-details">
@@ -2603,6 +2637,68 @@ function renderDmOptimization(view) {
     </div>
   `
   dmComponentsContent.innerHTML = renderDmComponentSummary(optimization)
+}
+
+function gaussianFitTiles(gaussian, optimization) {
+  const isBoxcar = gaussian.peak_snr_filter === "boxcar"
+  const dropOne = Number(gaussian.snr_drop_one_half_width)
+  const tiles = [
+    resultTile(
+      "Peak S/N From",
+      isBoxcar ? "Boxcar" : "Peak bin",
+      "secondary",
+      isBoxcar
+        ? "Each trial's peak S/N is the best of single samples and boxcars up to the event window's length."
+        : "Each trial's peak S/N is its highest single sample at the analysis resolution.",
+    ),
+    resultTile(
+      "S/N Drop of 1",
+      gaussian.snr_drop_one_half_width === null || !Number.isFinite(dropOne) ? "n/a" : `±${fmt(dropOne, 6)} pc cm^-3`,
+      "secondary",
+      "Distance from the best DM at which the fitted S/N has fallen by 1. It narrows as the burst gets brighter.",
+    ),
+    resultTile(
+      "Fit Residual RMS",
+      gaussian.residual_rms === null ? "n/a" : fmt(gaussian.residual_rms, 3),
+      "secondary",
+      "Root-mean-square difference between the trial S/N values and the fitted Gaussian. When it is large compared with the depth of the curve, the curve is not Gaussian-shaped. A sweep much wider than the peak is the usual cause: its shoulders then widen sigma, so narrow the half-range to a few sigma either side.",
+    ),
+  ]
+  if (isBoxcar) {
+    const scores = (optimization.snr || []).map(Number)
+    const peakIndex = scores.indexOf(maxFinite(scores))
+    const width = Number((gaussian.matched_width_ms || [])[peakIndex])
+    tiles.push(
+      resultTile(
+        "Boxcar at Sampled Peak",
+        Number.isFinite(width) ? `${fmt(width, 4)} ms` : "n/a",
+        "secondary",
+        "Width of the boxcar that gave the highest S/N at the best sampled trial.",
+      ),
+    )
+  }
+  return tiles
+}
+
+function gaussianModelCurve(gaussian, trialDms) {
+  if (!gaussian) return null
+  const amplitude = Number(gaussian.amplitude)
+  const center = Number(gaussian.center_dm)
+  const sigma = Number(gaussian.sigma_dm)
+  const baseline = Number(gaussian.baseline)
+  if (![amplitude, center, sigma, baseline].every(Number.isFinite) || sigma <= 0) return null
+  const dms = (trialDms || []).map(Number).filter(Number.isFinite)
+  if (dms.length < 2) return null
+  const low = Math.min(...dms)
+  const high = Math.max(...dms)
+  const x = []
+  const y = []
+  for (let index = 0; index <= 200; index += 1) {
+    const dm = low + ((high - low) * index) / 200
+    x.push(dm)
+    y.push(amplitude * Math.exp(-0.5 * ((dm - center) / sigma) ** 2) + baseline)
+  }
+  return { x, y }
 }
 
 function formatDmRange(structure) {
@@ -5231,7 +5327,10 @@ async function renderDmOptimizationPlot(optimization, appliedDm) {
   const structureNoise = optimization.snr_metric === STRUCTURE_METRIC && Array.isArray(optimization.structure?.noise_terms)
     ? optimization.snr.map((value, index) => Number(value) + Number(optimization.structure.noise_terms[index]))
     : []
-  const yRange = dmOptimizationYRange([optimization.snr, ...componentCurves, structureNoise].flat())
+  const gaussianCurve = optimization.snr_metric === PEAK_SNR_METRIC
+    ? gaussianModelCurve(optimization.gaussian_fit, optimization.trial_dms)
+    : null
+  const yRange = dmOptimizationYRange([optimization.snr, ...componentCurves, structureNoise, gaussianCurve?.y || []].flat())
   const traces = []
   const snrLabel = snrMetricLabel(optimization.snr_metric)
   const bestDmFitWidth = Number(optimization?.uncertainty_details?.best_dm?.value)
@@ -5264,6 +5363,18 @@ async function renderDmOptimizationPlot(optimization, appliedDm) {
     hovertemplate: `DM %{x:.6f}<br>${escapeHtml(snrLabel)} %{y:.3f}<extra></extra>`,
     name: `${snrLabel} sweep`,
   })
+
+  if (gaussianCurve) {
+    traces.push({
+      x: gaussianCurve.x,
+      y: gaussianCurve.y,
+      mode: "lines",
+      type: "scattergl",
+      line: { color: plotTheme.accentAlt, width: 1.8, dash: "dash" },
+      hovertemplate: "DM %{x:.6f}<br>Gaussian fit %{y:.3f}<extra></extra>",
+      name: "Gaussian fit",
+    })
+  }
 
   if (structure && Array.isArray(structure.noise_terms) && structure.noise_terms.length === optimization.snr.length) {
     // A trial is consistent with the best DM where this curve reaches the best score.
@@ -6960,6 +7071,7 @@ function updateControlStates() {
   notesInput.disabled = !hasSession || isBusy
   dmMetricInput.disabled = !hasSession || isBusy
   dmStructureCutoffInput.disabled = !hasSession || isBusy
+  dmPeakSnrFilterInput.disabled = !hasSession || isBusy
   exportPlotPng.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("plots")
   exportPlotSvg.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("plots")
   exportWindowNpz.disabled = !hasSession || isBusy || !state.exportSelection.include.includes("window")
@@ -7375,7 +7487,7 @@ function snrMetricSummary(metric) {
     integrated_event_snr: "Sum the event-profile S/N across the selected event window. This is the legacy FLITS DM sweep metric.",
     dm_phase: "Use the automatic DMphase coherent-power curve on the selected reduced waterfall.",
     smoothed_structure: "Maximize the sharpness of the DCT-smoothed event light curve (Sutinjo et al. 2023) and report the DM range the noise cannot distinguish from the best trial.",
-    peak_snr: "Use the single highest-S/N time bin inside the selected event window.",
+    peak_snr: "Find the burst's peak S/N inside the event window at each trial DM, in single samples or the best boxcar, and fit a Gaussian to the curve.",
     profile_sharpness: "Use the smoothed in-window profile power to favor temporally sharp dedispersion solutions.",
     burst_compactness: "Use a fluence-to-width compactness score so broader smeared solutions are penalized.",
     minimal_residual_drift: "Use sub-band arrival-time residual scatter so flatter delay trends score higher.",
@@ -7450,6 +7562,7 @@ function fitStatusTone(status) {
   if (status === "dmphase_weighted_polyfit") return "success"
   if (status === "dmphase_weighted_polyfit_uncertainty_unavailable") return "warning"
   if (status === "structure_noise_interval") return "success"
+  if (status === "gaussian_fit") return "success"
   return "warning"
 }
 
@@ -7501,6 +7614,13 @@ function fitStatusLabel(status) {
     structure_noise_interval: "Smoothed-structure DM range found",
     structure_interval_on_sweep_edge: "DM range reaches the sweep edge",
     structure_interval_has_gaps: "DM range has gaps",
+    gaussian_fit: "Gaussian fitted to peak S/N",
+    gaussian_fit_failed: "Gaussian fit failed",
+    gaussian_fit_flat_curve: "Peak S/N does not change across the sweep",
+    gaussian_fit_insufficient_trials: "Too few trials for a Gaussian fit",
+    gaussian_center_on_sweep_edge: "Gaussian centre is at the sweep edge",
+    gaussian_width_exceeds_sweep: "Sweep does not reach the curve's wings",
+    gaussian_width_below_step: "Peak is narrower than the DM step",
   }
   return labels[status] || "DM sweep completed"
 }
@@ -7521,6 +7641,13 @@ function fitStatusCopy(status) {
     structure_noise_interval: "Every trial DM whose structure score, raised by its noise allowance, reaches the best score is consistent with the best DM. That set spans the reported range.",
     structure_interval_on_sweep_edge: "Trials at the edge of the sweep are still consistent with the best DM, so the true range extends beyond it. Widen the half-range and run the sweep again.",
     structure_interval_has_gaps: "Some trials inside the range fail the noise criterion, so the score curve has more than one acceptable region. Inspect the curve before quoting a range.",
+    gaussian_fit: "Best DM is the centre of a Gaussian plus a constant fitted to the peak S/N of every trial. Its sigma is how quickly the peak S/N falls away from that DM.",
+    gaussian_fit_failed: "No Gaussian could be fitted to the peak S/N curve, so the best sampled trial is reported without a width. Inspect the curve; a narrower sweep around the peak or the boxcar option may help.",
+    gaussian_fit_flat_curve: "Every trial has the same peak S/N, so there is no peak to fit. Check that the event window holds the burst.",
+    gaussian_fit_insufficient_trials: "A Gaussian needs at least five trials with a finite peak S/N.",
+    gaussian_center_on_sweep_edge: "The fitted centre lies within one step of the end of the sweep, so the far side of the peak was not sampled. Move the sweep centre or widen the half-range and run it again.",
+    gaussian_width_exceeds_sweep: "The fitted sigma is more than half the sweep, so the sweep does not reach where the S/N levels off and the width trades off against the constant. Widen the half-range.",
+    gaussian_width_below_step: "The fitted sigma is smaller than the DM step, so only a few trials define the peak. Use a smaller step.",
   }
   return labels[status] || "Review the sampled S/N curve before applying a new DM."
 }

@@ -429,6 +429,39 @@ def test_a_smoothed_structure_sweep_reports_a_dm_range(page, synthetic_waterfall
     assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
 
 
+def test_a_peak_snr_sweep_shows_the_gaussian_fit(page, synthetic_waterfall) -> None:
+    _load_session(page, synthetic_waterfall)
+    _apply_exact_selection(page, "event", 100.0, 160.0)
+    _apply_exact_selection(page, "offpulse", 0.0, 50.0)
+
+    page.click("#analysisDmTab")
+    expect(page.locator("#analysisDmPanel")).to_be_visible()
+    # The filter only applies to this metric, so it only shows for it.
+    expect(page.locator("#dmPeakSnrFilterField")).to_be_hidden()
+    page.select_option("#dmMetricInput", "peak_snr")
+    expect(page.locator("#dmPeakSnrFilterField")).to_be_visible()
+    expect(page.locator("#dmStructureCutoffField")).to_be_hidden()
+    page.select_option("#dmPeakSnrFilterInput", "boxcar")
+
+    page.fill("#dmHalfRangeInput", "60")
+    page.fill("#dmStepInput", "6")
+    page.click("#optimizeDmButton")
+
+    content = page.locator("#dmOptimizationContent")
+    expect(content).to_contain_text("Gaussian σ", timeout=60_000)
+    expect(content).to_contain_text("Gaussian fitted to peak S/N")
+    expect(content).to_contain_text("Boxcar at Sampled Peak")
+    expect(content).to_contain_text("S/N Drop of 1")
+    expect(page.locator("#dmOptimizationPlot.js-plotly-plot")).to_be_visible()
+    expect(page.locator("#dmOptimizationPlot")).to_contain_text("Gaussian fit")
+    # The filter the sweep used stays selected.
+    expect(page.locator("#dmPeakSnrFilterInput")).to_have_value("boxcar")
+
+    page.select_option("#dmMetricInput", "dm_phase")
+    expect(page.locator("#dmPeakSnrFilterField")).to_be_hidden()
+    assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
+
+
 def test_uncertainties_say_what_they_are(page, synthetic_waterfall) -> None:
     """A statistical fluence error is labelled as such and says how to add the SEFD term."""
     _load_session(page, synthetic_waterfall)

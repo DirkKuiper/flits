@@ -381,11 +381,11 @@
             <section class="analysis-panel" id="analysisDmPanel" data-tab-panel="dm" role="tabpanel" aria-labelledby="analysisDmTab" hidden>
               <div class="analysis-panel-head">
                 <h4>DM Optimization</h4>
-                <p>Run a DM sweep with integrated-event S/N, DMphase, or smoothed structure, which also reports the range of DMs consistent with the best one. Inspect the selected metric curve, compare residual drift before and after, and review per-component DM estimates for complex bursts.</p>
+                <p>Run a DM sweep with integrated-event S/N, DMphase, smoothed structure, which also reports the range of DMs consistent with the best one, or peak S/N, which fits a Gaussian to the curve. Inspect the selected metric curve, compare residual drift before and after, and review per-component DM estimates for complex bursts.</p>
               </div>
               <div class="field-row">
                 <label class="field">
-                  <span>Metric <span class="tooltip-icon" data-tooltip="Choose how the DM sweep is scored. Integrated-event S/N uses the off-pulse-normalized event profile. DMphase follows the upstream automatic coherent-power method on the reduced waterfall. Smoothed structure (Sutinjo et al. 2023) maximizes the sharpness of the smoothed event light curve and reports a conservative DM range.">?</span></span>
+                  <span>Metric <span class="tooltip-icon" data-tooltip="Choose how the DM sweep is scored. Integrated-event S/N uses the off-pulse-normalized event profile. DMphase follows the upstream automatic coherent-power method on the reduced waterfall. Smoothed structure (Sutinjo et al. 2023) maximizes the sharpness of the smoothed event light curve and reports a conservative DM range. Peak S/N fits a Gaussian to the burst's peak S/N at each trial DM: its centre is the best DM and its sigma how sharply the S/N peaks.">?</span></span>
                   <select id="dmMetricInput"></select>
                 </label>
                 <label class="field">
@@ -399,6 +399,13 @@
                 <label class="field" id="dmStructureCutoffField" hidden>
                   <span>Cutoff k<sub>c</sub> <span class="tooltip-icon" data-tooltip="Low-pass cutoff index for the smoothed-structure metric. Leave blank to choose it from the DCT spectrum of the event light curve, where the signal gives way to noise.">?</span></span>
                   <input id="dmStructureCutoffInput" type="number" min="1" step="1" placeholder="auto">
+                </label>
+                <label class="field" id="dmPeakSnrFilterField" hidden>
+                  <span>Peak S/N from <span class="tooltip-icon" data-tooltip="Peak bin takes the highest single sample of the band-summed profile at the analysis resolution; it pins down bright, narrow bursts best. Boxcar also smooths the profile with boxcars up to the event window's length and keeps the best; use it for faint or wide bursts that single samples do not detect clearly.">?</span></span>
+                  <select id="dmPeakSnrFilterInput">
+                    <option value="peak_bin">Peak bin</option>
+                    <option value="boxcar">Boxcar</option>
+                  </select>
                 </label>
               </div>
               <div class="button-grid two">
