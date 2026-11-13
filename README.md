@@ -171,6 +171,26 @@ sub-burst drift, exports, and release procedures.
 - `ghcr.io/dirkkuiper/flits:<version>` pins an exact release.
 - `ghcr.io/dirkkuiper/flits:edge` tracks the current `main` branch for snapshot testing.
 
+## Community
+
+FLITS has grown from issues and pull requests by people outside the core
+team. Thank you:
+
+- [Maxwell A. Fine](https://github.com/afinemax) reported that folded pulsar
+  PSRFITS files could not be read ([#62](https://github.com/DirkKuiper/flits/issues/62))
+  and contributed the first reader for them ([#65](https://github.com/DirkKuiper/flits/pull/65)).
+- [Jeff Huang](https://github.com/j-huang05) found that Nançay (NRT) files
+  labelled IQUV actually hold AA/BB products, so Stokes I was missing half its
+  signal, and fixed the readers ([#88](https://github.com/DirkKuiper/flits/pull/88)).
+- [Vishwangi Shah](https://github.com/VishwangiShah312) requested DM estimation
+  from peak S/N against DM ([#160](https://github.com/DirkKuiper/flits/issues/160)),
+  released as the `peak_snr` DM metric in 1.8.0.
+
+Questions, bug reports, and requests for formats or analyses are welcome as
+[GitHub issues](https://github.com/DirkKuiper/flits/issues). See
+[CONTRIBUTING.md](https://github.com/DirkKuiper/flits/blob/main/CONTRIBUTING.md)
+for how to propose a change.
+
 ## Citation
 
 If you use FLITS in research, please cite the paper and the software version
