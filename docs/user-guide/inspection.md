@@ -20,6 +20,14 @@ polarization basis when the file establishes them. Missing metadata is `null`;
 it is not inferred from a filename. `metadata.schema_version` describes the
 **input format**, separately from the inspection record's version.
 
+Each record also says how big the file is and what loading it would take:
+`duration_s`, `nsamples`, `bytes_on_disk`, `estimated_load_bytes` (the peak
+memory FLITS expects loading the whole file as Stokes I to need),
+`load_budget_bytes` and `max_window_s` (the longest read window that fits the
+budget). [Large Files](large-files.md) explains these and how to load only the
+burst when the whole file does not fit. `flits schema inspection` prints the
+record's JSON schema.
+
 `suggested_dm` is a loading convention, not a fitted or estimated DM:
 
 | Input | Suggested loading DM |

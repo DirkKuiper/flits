@@ -40,6 +40,7 @@ flits measure ~/.cache/flits/demo/flits-tutorial-gbt-frb20240114a-v1.fil --dm 0
     "telescope": "gbt",
     "selection": {
       "event_source": "auto_localized",
+      "read_window_s": [0.0, 0.4234752],
       "crop_ms": [0.0, 423.4752],
       "event_ms": [234.88512, 249.91744],
       "offpulse_ms": [[0.0, 218.112], [266.69056, 423.4752]],
@@ -106,6 +107,23 @@ as in the interface. Other options:
     the band (1128–1146 MHz), flags `band_touches_edge`, and reports `low_sn`.
     Keep masking on, and review bursts whose status is `low_sn` or whose
     `localization.warning_flags` are not empty.
+
+## Load part of a long file
+
+`flits measure` loads the whole file unless told otherwise, and refuses a load
+that would not fit in its memory budget. For a long search-mode file, give the
+burst's arrival time in seconds from the start of the file (at the top of the
+band) and FLITS loads only the span that holds the dispersed burst:
+
+```bash
+flits measure search.fil --dm 527.7 --around 312.418
+flits measure search.fil --dm 527.7 --read 311.5 314.0
+```
+
+`--pad S` sets the data kept either side of the burst (default 0.5 s), and
+`--max-load-gb GB` the budget. Times in the result stay in ms from the start of
+the file; `selection.read_window_s` records the span loaded. See
+[Large Files](large-files.md).
 
 ## Measure many bursts
 
