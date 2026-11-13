@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import sys
 import textwrap
@@ -248,7 +249,43 @@ def build_measure_parser(prog: str = "flits measure") -> argparse.ArgumentParser
         metavar="FRACTION",
         help="Fractional SEFD uncertainty, carried into the flux and fluence uncertainties.",
     )
-    parser.add_argument("--crop", nargs=2, type=float, metavar=("START", "END"), help="Restrict to this time range.")
+    window = parser.add_mutually_exclusive_group()
+    window.add_argument(
+        "--read",
+        nargs=2,
+        type=float,
+        metavar=("START_S", "END_S"),
+        help="Load only this span of the file, in seconds from its start (default: the whole file).",
+    )
+    window.add_argument(
+        "--around",
+        type=float,
+        metavar="T_S",
+        help=(
+            "Load only the span holding a burst that arrives at T_S seconds from the start of the file "
+            "(top of the band): T_S - pad to T_S + dispersion sweep at --dm + pad. For files too big to load whole."
+        ),
+    )
+    parser.add_argument(
+        "--pad",
+        type=float,
+        default=None,
+        metavar="S",
+        help="Seconds of data kept either side of the burst with --around (default: 0.5).",
+    )
+    parser.add_argument(
+        "--max-load-gb",
+        type=float,
+        default=None,
+        metavar="GB",
+        help=(
+            "Refuse a burst whose load is estimated to need more memory than this; 0 turns the check off "
+            "(default: FLITS_MAX_LOAD_GB, or half the available memory). Applies to the whole batch."
+        ),
+    )
+    parser.add_argument(
+        "--crop", nargs=2, type=float, metavar=("START", "END"), help="Restrict to this time range (ms)."
+    )
     parser.add_argument(
         "--event",
         nargs=2,
@@ -513,12 +550,17 @@ def measure(argv: Sequence[str]) -> int:
 
     if args.data_dir is not None:
         os.environ["FLITS_DATA_DIR"] = str(Path(args.data_dir).expanduser().resolve())
+    if args.max_load_gb is not None and not math.isfinite(args.max_load_gb):
+        parser.error("--max-load-gb must be finite")
 
     if args.manifest is not None:
         from flits.manifest import load_measure_manifest, measure_manifest_entries
 
         per_burst_flags = (
             "dm",
+            "read",
+            "around",
+            "pad",
             "telescope",
             "sefd",
             "sefd_uncertainty",
@@ -540,16 +582,30 @@ def measure(argv: Sequence[str]) -> int:
         except (ValueError, OSError) as exc:
             parser.error(str(exc))
         total = len(entries)
-        iterator = measure_manifest_entries(entries, snapshot_dir=args.snapshot_dir, overwrite=args.overwrite)
+        iterator = measure_manifest_entries(
+            entries, snapshot_dir=args.snapshot_dir, overwrite=args.overwrite, max_load_gb=args.max_load_gb
+        )
         input_paths = [args.manifest, *(entry.file for entry in entries)]
     else:
         if not args.files or args.dm is None:
             parser.error("provide FILE... and --dm, or use --manifest PATH")
+        if args.pad is not None and args.around is None:
+            parser.error("--pad only applies together with --around")
+        if args.read is not None and not (
+            all(math.isfinite(value) for value in args.read) and 0 <= args.read[0] < args.read[1]
+        ):
+            parser.error("--read needs finite seconds with 0 <= START_S < END_S")
+        for flag, value in (("--around", args.around), ("--pad", args.pad)):
+            if value is not None and not (math.isfinite(value) and value >= 0):
+                parser.error(f"{flag} must be a finite, non-negative number of seconds")
         options = MeasureOptions(
             dm=args.dm,
             telescope=args.telescope,
             sefd_jy=args.sefd,
             sefd_fractional_uncertainty=args.sefd_uncertainty,
+            read_window_s=None if args.read is None else (args.read[0], args.read[1]),
+            burst_time_s=args.around,
+            burst_pad_s=args.pad,
             crop_ms=None if args.crop is None else (args.crop[0], args.crop[1]),
             event_ms=None if args.event is None else (args.event[0], args.event[1]),
             offpulse_ms=tuple((start, end) for start, end in (args.offpulse or [])),
@@ -562,7 +618,9 @@ def measure(argv: Sequence[str]) -> int:
             include_diagnostics=bool(args.diagnostics),
         )
         total = len(args.files)
-        iterator = measure_bursts(args.files, options, snapshot_dir=args.snapshot_dir, overwrite=args.overwrite)
+        iterator = measure_bursts(
+            args.files, options, snapshot_dir=args.snapshot_dir, overwrite=args.overwrite, max_load_gb=args.max_load_gb
+        )
         input_paths = args.files
 
     if args.output is not None:
@@ -835,7 +893,7 @@ def _print_usage() -> None:
         "  measure  Measure bursts without a browser (JSON, JSONL or CSV)\n"
         "  inspect  Read burst metadata without starting an analysis (JSON)\n"
         "  info     Identify loaded FLITS code and compare a running server (JSON)\n"
-        "  schema   Print a versioned measurement or batch-manifest JSON schema\n"
+        "  schema   Print a versioned measurement, batch-manifest or inspection JSON schema\n"
         "  replay   Re-run a saved session snapshot without a browser\n"
         "\n"
         "examples:\n"

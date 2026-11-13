@@ -27,7 +27,6 @@ from flits.io.chime import (
     _is_bbdata_beamformed,
     _is_chime_catalog,
     _looks_like_chime_intensity,
-    _normalize_waterfall,
     _parse_event_mjd,
     _parse_tns_mjd,
     _read_attr,
@@ -46,11 +45,11 @@ from flits.io.errors import (
     MetadataMissingError,
     UnsupportedSchemaError,
 )
-from flits.io.reader import FilterbankInspection
+from flits.io.reader import DataLayout, FilterbankInspection
 from flits.io.validation import require_fields, validate_metadata
 from flits.models import FilterbankMetadata
 from flits.settings import ObservationConfig, detect_preset, resolve_default_sefd_jy
-from flits.signal import dedisperse
+from flits.signal import dedisperse_and_normalize
 
 try:
     import h5py as _h5py
@@ -168,6 +167,7 @@ class ChimeHdf5Reader:
                     source_ra_deg, source_dec_deg, source_position_basis = bb_ra, bb_dec, bb_basis
 
             freq_lo, freq_hi = self._peek_freq_range(root, schema, path)
+            layout = self._peek_layout(root, schema, path)
 
             attrs: dict[str, object] = {
                 "schema": schema,
@@ -210,8 +210,64 @@ class ChimeHdf5Reader:
             source_position_basis=attrs["source_position_basis"],  # type: ignore[arg-type]
             time_scale="utc",
             time_reference_frame="topocentric",
+            **layout,
         )
         return inspection, attrs
+
+    @staticmethod
+    def _peek_layout(root: _h5py.Group, schema: str, path: Path) -> DataLayout:
+        """The data layout, for estimating what a load costs; unknown fields stay None.
+
+        Intensity and catalog waterfalls are sliced to the read window as they
+        are read. Beamformed BBData is read in full, because its channels must
+        be realigned before the window can be cut.
+        """
+        layout: DataLayout = {
+            "nchans": None,
+            "nsamples": None,
+            "tsamp_s": None,
+            "nbits": None,
+            "data_bytes": None,
+            "in_memory_bytes_per_value": 4.0,
+            "windowed_read": None,
+        }
+        try:
+            if schema == _CHIME_BBDATA_BEAMFORMED_SCHEMA:
+                dataset = _safe_lookup(root, "tiedbeam_power")
+                tsamp_attr = _decode_attr(root.attrs.get("delta_time"))
+                windowed = False
+            elif schema == _CHIME_CATALOG_SCHEMA:
+                frb = root["frb"]
+                dataset = frb["calibrated_wfall"] if "calibrated_wfall" in frb else frb["wfall"]
+                tsamp_attr = None
+                windowed = True
+            else:
+                dataset = _resolve_waterfall_dataset(root)
+                tsamp_attr = _read_attr(root, "tsamp_s", "t_sample", "dt")
+                windowed = True
+            if not isinstance(dataset, _h5py.Dataset) or dataset.ndim not in (2, 3):  # type: ignore[arg-type]
+                return layout
+            shape = tuple(int(dim) for dim in dataset.shape)
+            nchans, ntime = shape[0], shape[-1]
+            if schema == _CHIME_CATALOG_SCHEMA:
+                tsamp: float | None = _catalog_tsamp_seconds(np.asarray(root["frb"]["extent"][:]), ntime, path)
+            else:
+                tsamp = None if tsamp_attr is None else float(tsamp_attr)  # type: ignore[arg-type]
+            itemsize = int(dataset.dtype.itemsize)
+            layout.update(
+                nchans=nchans,
+                nsamples=ntime,
+                tsamp_s=tsamp if tsamp is not None and np.isfinite(tsamp) and tsamp > 0 else None,
+                nbits=8 * itemsize,
+                data_bytes=int(np.prod(shape)) * itemsize,
+                # A 3-D BBData power array holds every polarization of each channel as float32.
+                in_memory_bytes_per_value=4.0 * (shape[1] if len(shape) == 3 else 1),
+                windowed_read=windowed,
+            )
+        except Exception:
+            # The layout only informs the load estimate; never fail inspection over it.
+            return layout
+        return layout
 
     @staticmethod
     def _peek_freq_range(
@@ -354,8 +410,7 @@ class ChimeHdf5Reader:
 
         effective_npol = max(1, int(config.npol_override)) if config.npol_override is not None else header_npol
 
-        stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp, fill_value=0.0)
-        stokes_i = _normalize_waterfall(stokes_i, config.normalization_tail_fraction)
+        stokes_i = dedisperse_and_normalize(stokes_i, config.dm, freqs_mhz, tsamp, config.normalization_tail_fraction)
 
         metadata = FilterbankMetadata(
             source_path=resolved,
@@ -471,7 +526,7 @@ class ChimeHdf5Reader:
         header_npol = 1
         effective_npol = max(1, int(config.npol_override)) if config.npol_override is not None else header_npol
 
-        stokes_i = _normalize_waterfall(stokes_i, config.normalization_tail_fraction)
+        stokes_i = dedisperse_and_normalize(stokes_i, 0.0, plot_freq, tsamp, config.normalization_tail_fraction)
 
         metadata = FilterbankMetadata(
             source_path=resolved,
@@ -642,8 +697,7 @@ class ChimeHdf5Reader:
             filterbank_inspection = inspection
 
         residual_dm = float(config.dm) - float(coherent_dm)
-        stokes_i = dedisperse(stokes_i, residual_dm, freqs_mhz, tsamp, fill_value=0.0)
-        stokes_i = _normalize_waterfall(stokes_i, config.normalization_tail_fraction)
+        stokes_i = dedisperse_and_normalize(stokes_i, residual_dm, freqs_mhz, tsamp, config.normalization_tail_fraction)
 
         freq_lo = float(np.min(freqs_mhz))
         freq_hi = float(np.max(freqs_mhz))

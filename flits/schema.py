@@ -6,7 +6,11 @@ import json
 from importlib.resources import files
 from typing import Any
 
-SCHEMAS = {"measurement": "measurement-v1.json", "batch-manifest": "batch-manifest-v1.json"}
+SCHEMAS = {
+    "measurement": "measurement-v1.json",
+    "batch-manifest": "batch-manifest-v1.json",
+    "inspection": "inspection-v1.json",
+}
 
 
 def get_schema(name: str) -> dict[str, Any]:

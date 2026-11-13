@@ -18,9 +18,9 @@ from typing import Any
 from uuid import uuid4
 
 import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.types import Scope
@@ -28,7 +28,7 @@ from starlette.types import Scope
 from flits.analysis.polarization import run_rm_synthesis
 from flits.inspection import loading_dm_hint
 from flits.io import inspect_filterbank, list_readers
-from flits.io.errors import PolarizationUnavailableError
+from flits.io.errors import LoadTooLargeError, PolarizationUnavailableError
 from flits.models import DriftAnalysisSettings
 from flits.runtime import runtime_info
 from flits.session import BurstSession
@@ -90,6 +90,8 @@ class CreateSessionRequest(BaseModel):
     npol_override: int | None = None
     read_start_sec: float | None = None
     read_end_sec: float | None = None
+    burst_time_sec: float | None = None
+    burst_pad_sec: float | None = None
     auto_mask_profile: str | None = "auto"
     distance_mpc: float | None = None
     distance_fractional_uncertainty: float | None = None
@@ -136,6 +138,22 @@ class RMSynthesisRequest(BaseModel):
 
 
 app = FastAPI(title="FLITS")
+
+
+@app.exception_handler(LoadTooLargeError)
+def _load_too_large(request: Request, exc: LoadTooLargeError) -> JSONResponse:
+    """Refuse an oversized load as a client error, with the remedy, rather than exhausting memory."""
+    del request
+    return JSONResponse(
+        status_code=413,
+        content={
+            "detail": str(exc),
+            "error_type": "LoadTooLargeError",
+            "estimated_load_bytes": exc.estimated_load_bytes,
+            "budget_bytes": exc.budget_bytes,
+            "max_window_sec": exc.max_window_sec,
+        },
+    )
 
 
 def cors_origins() -> list[str]:
@@ -698,26 +716,32 @@ def detect_filterbank(request: DetectFilterbankRequest) -> dict[str, Any]:
 @app.post("/api/sessions")
 def create_session(request: CreateSessionRequest) -> dict[str, Any]:
     burst_path = resolve_burst_path(request.bfile)
-    session = BurstSession.from_file(
-        str(burst_path),
-        dm=request.dm,
-        telescope=request.telescope,
-        sefd_jy=request.sefd_jy,
-        npol_override=request.npol_override,
-        read_start_sec=request.read_start_sec,
-        read_end_sec=request.read_end_sec,
-        auto_mask_profile=request.auto_mask_profile,
-        distance_mpc=request.distance_mpc,
-        sefd_fractional_uncertainty=request.sefd_fractional_uncertainty,
-        distance_fractional_uncertainty=request.distance_fractional_uncertainty,
-        redshift=request.redshift,
-        source_ra_deg=request.source_ra_deg,
-        source_dec_deg=request.source_dec_deg,
-        time_scale=request.time_scale,
-        observatory_longitude_deg=request.observatory_longitude_deg,
-        observatory_latitude_deg=request.observatory_latitude_deg,
-        observatory_height_m=request.observatory_height_m,
-    )
+    try:
+        session = BurstSession.from_file(
+            str(burst_path),
+            dm=request.dm,
+            telescope=request.telescope,
+            sefd_jy=request.sefd_jy,
+            npol_override=request.npol_override,
+            read_start_sec=request.read_start_sec,
+            read_end_sec=request.read_end_sec,
+            burst_time_sec=request.burst_time_sec,
+            burst_pad_sec=request.burst_pad_sec,
+            auto_mask_profile=request.auto_mask_profile,
+            distance_mpc=request.distance_mpc,
+            sefd_fractional_uncertainty=request.sefd_fractional_uncertainty,
+            distance_fractional_uncertainty=request.distance_fractional_uncertainty,
+            redshift=request.redshift,
+            source_ra_deg=request.source_ra_deg,
+            source_dec_deg=request.source_dec_deg,
+            time_scale=request.time_scale,
+            observatory_longitude_deg=request.observatory_longitude_deg,
+            observatory_latitude_deg=request.observatory_latitude_deg,
+            observatory_height_m=request.observatory_height_m,
+        )
+    except ValueError as exc:
+        # An inconsistent read window, such as a burst time past the end of the file.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     session_id = uuid4().hex
     register_session(session_id, session)
     return {"session_id": session_id, "view": session.get_view()}

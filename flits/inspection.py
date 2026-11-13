@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from flits.io import FilterbankInspection, detect_reader
+from flits.io.load_budget import estimate_load, load_budget_bytes, max_window_sec
 from flits.measure import _jsonable
 
 INSPECTION_SCHEMA_VERSION = "1.0"
@@ -25,6 +26,12 @@ def loading_dm_hint(inspection: FilterbankInspection) -> tuple[float | None, str
 def inspect_burst(path: str | Path) -> dict[str, Any]:
     """Inspect a file without loading its waterfall or measuring a burst.
 
+    Besides the header metadata, the record says how long the file is, its size
+    on disk, the memory FLITS estimates loading all of it would take
+    (`estimated_load_bytes`, Stokes I), the current load budget
+    (`load_budget_bytes`, None for no limit) and the longest read window that
+    fits it (`max_window_s`, None when unlimited or unknown).
+
     Raises on missing or unsupported input. The CLI reports such failures per
     file, so one invalid input does not prevent inspection of the others.
     """
@@ -34,6 +41,8 @@ def inspect_burst(path: str | Path) -> dict[str, Any]:
     reader = detect_reader(resolved)
     inspection = reader.inspect(resolved)
     suggested_dm, guidance = loading_dm_hint(inspection)
+    estimate = estimate_load(inspection)
+    budget = load_budget_bytes()
     return _jsonable(
         {
             "schema_version": INSPECTION_SCHEMA_VERSION,
@@ -46,5 +55,11 @@ def inspect_burst(path: str | Path) -> dict[str, Any]:
             "suggested_dm": suggested_dm,
             "dm_guidance": guidance,
             "stokes_available": inspection.stokes_available,
+            "duration_s": inspection.duration_s,
+            "nsamples": inspection.nsamples,
+            "bytes_on_disk": resolved.stat().st_size,
+            "estimated_load_bytes": None if estimate is None else estimate.estimated_load_bytes,
+            "load_budget_bytes": budget,
+            "max_window_s": None if budget is None else max_window_sec(inspection, budget),
         }
     )

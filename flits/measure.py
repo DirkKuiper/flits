@@ -44,12 +44,22 @@ class MeasureOptions:
     and `band_mhz` then replace the localized values when given. With
     `event_ms` set, unset off-pulse windows fall back to everything outside the
     event and an unset band to the full band.
+
+    Only part of the file need be loaded, which large files require.
+    `read_window_s` is the span to load, in seconds from the start of the file.
+    `burst_time_s` instead loads the span around a burst arriving at that time
+    (seconds from the start of the file, at the top of the band):
+    ``[T - pad, T + dispersion sweep + pad]``, with `burst_pad_s` the padding
+    (default 0.5 s). Times in the result stay in ms from the start of the file.
     """
 
     dm: float
     telescope: str | None = None
     sefd_jy: float | None = None
     sefd_fractional_uncertainty: float | None = None
+    read_window_s: tuple[float, float] | None = None
+    burst_time_s: float | None = None
+    burst_pad_s: float | None = None
     crop_ms: tuple[float, float] | None = None
     event_ms: tuple[float, float] | None = None
     offpulse_ms: tuple[tuple[float, float], ...] = ()
@@ -99,6 +109,7 @@ def measure_burst(
     *,
     snapshot_dir: Path | None = None,
     overwrite: bool = False,
+    max_load_gb: float | None = None,
     _taken: set[Path] | None = None,
 ) -> dict[str, Any]:
     """Measure one burst and return a JSON-compatible record of the result.
@@ -106,7 +117,10 @@ def measure_burst(
     Problems with the input, such as a missing file or an unknown preset, raise;
     a burst that loads but cannot be found is reported as ``no_detection``.
     With `snapshot_dir`, the session is saved there, without replacing an
-    existing snapshot unless `overwrite` is set.
+    existing snapshot unless `overwrite` is set. A burst whose load would
+    exceed the memory budget raises :class:`~flits.io.errors.LoadTooLargeError`
+    before reading; `max_load_gb` sets the budget (see
+    :meth:`flits.session.BurstSession.from_file`).
     """
     from flits.session import BurstSession
 
@@ -122,6 +136,11 @@ def measure_burst(
         sefd_jy=options.sefd_jy,
         sefd_fractional_uncertainty=options.sefd_fractional_uncertainty,
         auto_mask_profile=mask_profile or "auto",
+        read_start_sec=None if options.read_window_s is None else float(options.read_window_s[0]),
+        read_end_sec=None if options.read_window_s is None else float(options.read_window_s[1]),
+        burst_time_sec=options.burst_time_s,
+        burst_pad_sec=options.burst_pad_s,
+        max_load_gb=max_load_gb,
     )
     if options.time_factor is not None:
         session.set_time_factor(int(options.time_factor))
@@ -188,6 +207,10 @@ def measure_burst(
         "telescope": session.config.preset_key,
         "selection": {
             "event_source": "auto_localized" if localization is not None else "manual",
+            "read_window_s": [
+                float(session.metadata.read_start_sec),
+                float(session.metadata.read_start_sec) + session.data.shape[1] * float(session.metadata.tsamp),
+            ],
             "crop_ms": [session.bin_to_ms(session.crop_start), session.bin_to_ms(session.crop_end)],
             "event_ms": [session.bin_to_ms(session.event_start), session.bin_to_ms(session.event_end)],
             "offpulse_ms": [[session.bin_to_ms(lo), session.bin_to_ms(hi)] for lo, hi in session.offpulse_regions],
@@ -321,6 +344,7 @@ def measure_bursts(
     *,
     snapshot_dir: Path | None = None,
     overwrite: bool = False,
+    max_load_gb: float | None = None,
 ) -> Iterable[dict[str, Any]]:
     """Measure each burst in turn, yielding a record per file.
 
@@ -329,6 +353,8 @@ def measure_bursts(
     taken: set[Path] = set()
     for path in paths:
         try:
-            yield measure_burst(path, options, snapshot_dir=snapshot_dir, overwrite=overwrite, _taken=taken)
+            yield measure_burst(
+                path, options, snapshot_dir=snapshot_dir, overwrite=overwrite, max_load_gb=max_load_gb, _taken=taken
+            )
         except Exception as exc:
             yield error_record(path, exc)

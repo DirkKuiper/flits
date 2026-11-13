@@ -87,10 +87,35 @@ class UnsupportedSchemaError(FlitsReaderError):
         self.detected_schema = detected_schema
 
 
+class LoadTooLargeError(FlitsReaderError):
+    """Loading the requested read window would take more memory than the load budget allows.
+
+    Raised before any sample is read. `estimated_load_bytes` is FLITS's
+    estimate of the peak memory the load needs and `budget_bytes` the budget it
+    exceeds; `max_window_sec` is the longest read window that would fit, when it
+    can be worked out.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: Path | str | None = None,
+        estimated_load_bytes: int,
+        budget_bytes: int,
+        max_window_sec: float | None = None,
+    ) -> None:
+        super().__init__(message, path=path)
+        self.estimated_load_bytes = int(estimated_load_bytes)
+        self.budget_bytes = int(budget_bytes)
+        self.max_window_sec = max_window_sec
+
+
 __all__ = [
     "CorruptedDataError",
     "FlitsReaderError",
     "FormatDetectionError",
+    "LoadTooLargeError",
     "MetadataMissingError",
     "PolarizationUnavailableError",
     "UnsupportedFormatError",

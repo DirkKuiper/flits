@@ -39,6 +39,8 @@ run. As with `flits measure FILE...`, exit 0 means every record is `ok` or
 | `dm` | Required finite number after merging defaults and options; pc cm⁻³. |
 | `telescope` | Known preset key, or `null` to detect it from the file. |
 | `sefd_jy`, `sefd_fractional_uncertainty` | Positive SEFD in Jy and non-negative fractional uncertainty; `null` uses the usual default. |
+| `read_window_s` | `[start, end]` in seconds from the start of the file: the span to load. `null` loads the whole file. |
+| `burst_time_s`, `burst_pad_s` | Load only the span around a burst arriving at this time (seconds from the start of the file, top of the band), with this padding (default 0.5 s). Excludes `read_window_s`. See [Large Files](large-files.md). |
 | `crop_ms`, `event_ms`, `band_mhz` | `[start, end]`, or `null` to use the ordinary automatic/default selection. |
 | `offpulse_ms` | Array of `[start, end]` windows; `[]` uses the usual default. |
 | `time_factor`, `freq_factor` | Positive integers, or `null` for the preset default. |
@@ -48,7 +50,8 @@ run. As with `flits measure FILE...`, exit 0 means every record is `ok` or
 
 Options replace whole default values. For example, `offpulse_ms` replaces the
 default list rather than appending to it. Times are milliseconds from the start
-of the file's read window; frequencies are MHz. Ranges must be finite,
+of the file, also when only part of it is loaded; read windows are seconds from
+the start of the file; frequencies are MHz. Ranges must be finite,
 non-negative and increasing. JSON numbers and booleans are required: `"false"`
 is a string and `true` is not a downsampling factor. Unknown fields and duplicate
 JSON keys are rejected rather than silently ignored. These strict input rules
@@ -85,7 +88,10 @@ Print the schemas offline from the installed package:
 ```bash
 flits schema measurement > measurement-schema.json
 flits schema batch-manifest > manifest-schema.json
+flits schema inspection > inspection-schema.json
 ```
+
+The inspection schema describes one record of `flits inspect`.
 
 Or read them in Python:
 
