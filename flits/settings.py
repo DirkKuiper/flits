@@ -316,9 +316,14 @@ def _resolve_band_calibration(
         if overlap > best_overlap:
             best_overlap = overlap
             best = calibration
-        elif overlap == best_overlap and overlap > 0 and best is not None:
-            if calibration.contains(center_mhz) and not best.contains(center_mhz):
-                best = calibration
+        elif (
+            overlap == best_overlap
+            and overlap > 0
+            and best is not None
+            and calibration.contains(center_mhz)
+            and not best.contains(center_mhz)
+        ):
+            best = calibration
 
     if best is not None and (best_overlap > 0 or best.contains(center_mhz)):
         return best
