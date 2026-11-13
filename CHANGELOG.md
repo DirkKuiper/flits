@@ -4,6 +4,27 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.8.0](https://github.com/DirkKuiper/flits/compare/flits-v1.7.1...flits-v1.8.0) (2026-11-13)
+
+
+### Features
+
+* **dm:** add a peak-S/N DM metric with a Gaussian fit ([be64ef4](https://github.com/DirkKuiper/flits/commit/be64ef47a221dad144d2c8c55a3b1ad1b82eb15b))
+* **dm:** peak-S/N DM metric with a Gaussian fit ([c6c9792](https://github.com/DirkKuiper/flits/commit/c6c97924af5dcef9358fa57fbcf50d533dd3bba2))
+* **web:** choose the peak-S/N filter and show the Gaussian fit ([49475d3](https://github.com/DirkKuiper/flits/commit/49475d32978063d958261bac2baa33aa7df22e63))
+
+
+### Bug Fixes
+
+* **dm:** make peak S/N independent of the analysis grid ([748322b](https://github.com/DirkKuiper/flits/commit/748322bedd7ac13da63483f7114af1935d3dfb67))
+
+
+### Documentation
+
+* document the peak-S/N DM metric ([e5de55b](https://github.com/DirkKuiper/flits/commit/e5de55b91c8ee88f40b9768a12bc63c18c31319e))
+* **testing:** describe when CI runs the platform checks ([aab5aba](https://github.com/DirkKuiper/flits/commit/aab5aba0d39795c76c7a92a26e8935bc8502e7c1))
+* **testing:** describe when CI runs the platform checks ([66fcfec](https://github.com/DirkKuiper/flits/commit/66fcfec3ed5a279e1f3b663b6def25c625d6f317))
+
 ## [1.7.1](https://github.com/DirkKuiper/flits/compare/flits-v1.7.0...flits-v1.7.1) (2026-10-30)
 
 
