@@ -153,6 +153,83 @@ def test_the_peak_is_searched_only_inside_the_event_window() -> None:
     assert profile_peak_snr(profile, 100, 150, offpulse_bins=np.arange(0, 80))[0] == pytest.approx(6.0)
 
 
+def test_a_window_on_native_samples_does_not_depend_on_where_the_burst_falls() -> None:
+    """A burst one analysis sample long scores the same at every native offset."""
+    factor = 8
+    offpulse = np.arange(0, 400)
+    sliding, fixed_grid = [], []
+    for offset in range(factor):
+        profile = np.zeros(1000)
+        profile[600 + offset : 600 + offset + factor] = 1.0
+        sliding.append(
+            profile_peak_snr(profile, 560, 680, offpulse_bins=offpulse, peak_snr_filter=PEAK_BIN, min_width=factor)
+        )
+        # The same profile averaged into fixed blocks, as the analysis grid does.
+        blocks = profile.reshape(-1, factor).sum(axis=1) / np.sqrt(factor)
+        fixed_grid.append(float(blocks[70:85].max()))
+
+    assert {width for _, width in sliding} == {factor}
+    np.testing.assert_allclose([snr for snr, _ in sliding], np.sqrt(factor))
+    # On the fixed grid a burst straddling two blocks loses up to half its peak.
+    assert min(fixed_grid) == pytest.approx(np.sqrt(factor) / 2)
+
+
+def test_boxcars_start_at_the_analysis_resolution() -> None:
+    profile = np.zeros(1000)
+    profile[600:640] = 0.8
+    _, width = profile_peak_snr(profile, 560, 700, offpulse_bins=np.arange(0, 400), peak_snr_filter=BOXCAR, min_width=8)
+    assert width >= 8
+    assert boxcar_widths(40, min_width=8) == [8, 12, 18, 27, 40]
+
+
+def test_where_the_burst_falls_on_a_coarse_grid_does_not_move_the_fit(tmp_path) -> None:
+    """At 8x downsampling the fixed analysis grid made the fit depend on the burst's position.
+
+    The same burst, shifted by a few native samples relative to the 8-sample
+    blocks, gave a sigma from 0.69 to 3.25 and best DMs spread over 0.33
+    pc cm^-3 before the windows slid along the native samples.
+    """
+    from conftest import _write_sigproc
+
+    nchan, ntime, tsamp = 64, 4096, 64e-6
+    freqs = 1500.0 - (300.0 / nchan) * np.arange(nchan)
+    t = np.arange(ntime) * tsamp
+    true_dm = 350.30
+    delays = K_DM * true_dm * (freqs**-2 - freqs.max() ** -2)
+    best, sigmas = [], []
+    for offset in (0, 2, 4, 6):
+        data = np.random.default_rng(11).normal(size=(nchan, ntime)).astype(np.float32)
+        for row, delay in zip(data, delays, strict=True):
+            row += (4.0 * np.exp(-0.5 * ((t - (640 + offset) * tsamp - delay) / 0.4e-3) ** 2)).astype(np.float32)
+        path = tmp_path / f"offset{offset}.fil"
+        _write_sigproc(
+            path,
+            data,
+            tsamp_s=tsamp,
+            fch1_mhz=1500.0,
+            foff_mhz=-300.0 / nchan,
+            tstart_mjd=60000.0,
+            source_name="SIM",
+            telescope_id=0,
+        )
+        session = BurstSession.from_file(str(path), dm=350.0, sefd_jy=10.0)
+        session.set_time_factor(8)
+        session.set_event_ms(36.0, 46.0)
+        session.clear_offpulse()
+        session.add_offpulse_ms(5.0, 30.0)
+        session.add_offpulse_ms(60.0, 120.0)
+        result = session.optimize_dm(350.0, 3.0, 0.05, metric="peak_snr")
+        assert result.gaussian_fit is not None and result.gaussian_fit.sigma_dm is not None
+        # Windows are one analysis sample (8 native samples of 64 us) long.
+        np.testing.assert_allclose(result.gaussian_fit.matched_width_ms, 8 * 0.064)
+        best.append(result.best_dm)
+        sigmas.append(result.gaussian_fit.sigma_dm)
+
+    assert max(sigmas) / min(sigmas) < 1.3
+    assert max(best) - min(best) < 0.2
+    assert all(abs(value - true_dm) < 0.2 for value in best)
+
+
 def test_an_unknown_filter_is_refused() -> None:
     with pytest.raises(ValueError, match="Valid filters: peak_bin, boxcar"):
         profile_peak_snr(np.zeros(10), 0, 10, offpulse_bins=np.arange(5), peak_snr_filter="matched")

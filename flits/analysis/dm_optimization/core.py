@@ -93,6 +93,10 @@ class DMMetricInput:
         Frequency axis in MHz matching ``selected_waterfall`` rows.
     tsamp_sec
         Effective time resolution of ``waterfall`` in seconds.
+    analysis_window_samples
+        Samples of ``waterfall`` per analysis sample. It is 1 unless the
+        metric is handed native-resolution data while the session analyses a
+        downsampled grid, as the peak-S/N metric is.
     """
 
     context: MeasurementContext
@@ -102,6 +106,7 @@ class DMMetricInput:
     offpulse_bins: np.ndarray
     freqs_mhz: np.ndarray
     tsamp_sec: float
+    analysis_window_samples: int = 1
 
 
 @dataclass(frozen=True)
@@ -302,8 +307,23 @@ DM_METRIC_METADATA: dict[str, DmMetricDefinition] = {
             "score = max over the event window of the band-summed S/N profile (single samples, or boxcar-smoothed "
             "over widths up to the event window); fit S/N(DM) = A exp(-(DM - DM_0)^2 / 2 sigma^2) + C to all trials."
         ),
-        origin="Direct FLITS implementation of the S/N-versus-DM sweep with a Gaussian fitted to the whole curve.",
+        origin=(
+            "FLITS implementation of the S/N-versus-DM method of Ould-Boukattine et al. (2026), on incoherently "
+            "dedispersed data, with a Gaussian fitted to the whole curve."
+        ),
         references=[
+            _dm_ref(
+                label="Ould-Boukattine et al. 2026",
+                citation=(
+                    "Ould-Boukattine, O. S., Cooper, A. J., Hessels, J. W. T., et al. 2026, MNRAS 546, stag090: "
+                    "A HyperFlash and ÉCLAT view of the local environment and energetics of the repeating FRB 20240619D"
+                ),
+                url="https://doi.org/10.1093/mnras/stag090",
+                note=(
+                    "Takes each burst's DM as the centre of a Gaussian fitted to peak S/N against trial DM, on "
+                    "coherently dedispersed baseband data (their Section 3.2 and Figure 2)."
+                ),
+            ),
             _dm_ref(
                 label="PDMP",
                 citation="Teoh 2005, PDMP User Manual",
@@ -336,7 +356,12 @@ def _run_peak_snr_prepare(
     *,
     peak_snr_filter: str = DEFAULT_PEAK_SNR_FILTER,
 ) -> DMMetricPreparedTrial:
-    """Score one trial by the peak S/N of its band-summed profile inside the event window."""
+    """Score one trial by the peak S/N of its band-summed profile inside the event window.
+
+    The windows are `analysis_window_samples` long or longer and slide one
+    sample of the profile at a time, so a native-resolution profile gives the
+    analysis resolution without its fixed sample grid.
+    """
     context = metric_input.context
     score, width_bins = profile_peak_snr(
         context.selected_profile_sn,
@@ -344,6 +369,7 @@ def _run_peak_snr_prepare(
         context.event_rel_end,
         offpulse_bins=metric_input.offpulse_bins,
         peak_snr_filter=peak_snr_filter,
+        min_width=metric_input.analysis_window_samples,
     )
     width_ms = float(width_bins) * float(metric_input.tsamp_sec) * 1000.0 if width_bins > 0 else None
     return DMMetricPreparedTrial(scalar_score=score, peak_snr_width_ms=width_ms)

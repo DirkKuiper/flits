@@ -23,7 +23,8 @@ it — see `flits.signal.dedispersion_bin_resolution` and
 
 Four criteria are available. The integrated-event signal-to-noise metric
 maximizes the S/N of the summed burst profile. The peak-S/N metric fits a
-Gaussian to the burst's peak S/N against DM. The structure-maximizing metric
+Gaussian to the burst's peak S/N against DM, following Ould-Boukattine et al.
+(2026). The structure-maximizing metric
 is a clean-room implementation of the DM\_phase algorithm, which maximizes the
 coherence of the burst's Fourier phases across the band and is preferable for
 bursts with sharp temporal structure. The smoothed-structure metric is a
@@ -37,6 +38,10 @@ the DM range consistent with the best DM.
 - Hessels, J. W. T. et al. (2019), *FRB 121102 Bursts Show Complex Single-pulse
   Structures Consistent with Strong Propagation Effects*, ApJL 876, L23.
   [doi:10.3847/2041-8213/ab13ae](https://doi.org/10.3847/2041-8213/ab13ae)
+- Ould-Boukattine, O. S., Cooper, A. J., Hessels, J. W. T. et al. (2026), *A
+  HyperFlash and ÉCLAT view of the local environment and energetics of the
+  repeating FRB 20240619D*, MNRAS 546, stag090.
+  [doi:10.1093/mnras/stag090](https://doi.org/10.1093/mnras/stag090)
 - Sutinjo, A. T., Scott, D. R., James, C. W. et al. (2023), *Calculation and
   Uncertainty of Fast Radio Burst Structure Based on Smoothed Data*, ApJ 954, 37.
   [doi:10.3847/1538-4357/ace774](https://doi.org/10.3847/1538-4357/ace774)

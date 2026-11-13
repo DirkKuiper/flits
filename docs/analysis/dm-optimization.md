@@ -155,6 +155,11 @@ Requirements and caveats:
 
 ### Peak S/N (Gaussian fit)
 
+This follows Ould-Boukattine et al. (2026), who take each burst's DM as the
+centre of a Gaussian fitted to its peak S/N against trial DM. They dedisperse
+baseband data coherently; FLITS dedisperses the filterbank incoherently, so
+smearing within each channel stays in the data.
+
 For each trial DM, FLITS sums the selected, unmasked channels into a profile in
 off-pulse noise units and takes its highest S/N inside the event window. A wrong
 DM smears the burst in time and lowers that peak. FLITS then fits a Gaussian plus
@@ -171,16 +176,25 @@ draws the fitted curve dashed over the sweep.
 
 `peak_snr_filter` chooses how the peak is found:
 
-- **`peak_bin`** (the default) takes the highest single sample at the analysis
-  resolution. Smearing lowers it fastest, so it gives the most precise best DM
-  for bright, narrow bursts. It needs the burst to stand out in single samples;
-  choose the resolution with the time downsampling, as for any profile.
+- **`peak_bin`** (the default) takes the highest S/N of a window one analysis
+  sample long. Smearing lowers it fastest, so it gives the most precise best DM
+  for bright, narrow bursts. It needs the burst to stand out at the analysis
+  resolution; choose that resolution with the time downsampling, as for any
+  profile.
 - **`boxcar`** also smooths the profile with boxcars from one sample up to the
   event window's length and keeps the highest S/N, like a search pipeline's
   matched filter. It finds faint or wide bursts that single samples miss. Its
   curve is flatter, because a wider boxcar recovers part of the smeared signal.
   The boxcar width that won at each trial is stored in
   `gaussian_fit.matched_width_ms`.
+
+Both filters slide their windows along the native samples instead of reading
+the downsampled analysis grid. On a fixed grid the peak also depends on whether
+the burst falls inside one sample or across two, and changing the DM moves the
+burst in time. At 8× downsampling that made the fit depend on where the burst
+happened to sit: for one simulated burst moved by a few native samples, σ
+ranged from 0.7 to 3.2, and on a narrow sweep the curve split into two humps
+around the true DM. With sliding windows σ varied by under 15%.
 
 ```python
 result = session.optimize_dm(session.dm, half_range=2.0, step=step, metric="peak_snr", peak_snr_filter="boxcar")

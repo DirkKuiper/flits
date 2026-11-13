@@ -20,6 +20,7 @@ import numpy as np
 from flits.analysis.dm_optimization import (
     DEFAULT_FILTER_ORDER,
     DEFAULT_PEAK_SNR_FILTER,
+    PEAK_SNR_METRIC,
     STRUCTURE_METRIC,
     DMMetricInput,
     available_dm_metrics,
@@ -925,16 +926,20 @@ class BurstSession:
         data: np.ndarray | None = None,
         *,
         event_bounds_abs: tuple[int, int] | None = None,
+        time_factor: int | None = None,
     ) -> ReducedAnalysisGrid:
+        # `time_factor` overrides the session's time downsampling, for callers
+        # that need another resolution of the same selection.
+        tfac = self.time_factor if time_factor is None else max(1, int(time_factor))
         masked = self.get_masked_crop(data)
         display = self.get_display_crop(data)
-        reduced_masked = block_reduce_mean(masked, tfac=self.time_factor, ffac=self.freq_factor)
-        reduced_display = block_reduce_mean(display, tfac=self.time_factor, ffac=self.freq_factor)
+        reduced_masked = block_reduce_mean(masked, tfac=tfac, ffac=self.freq_factor)
+        reduced_display = block_reduce_mean(display, tfac=tfac, ffac=self.freq_factor)
 
         reduced_time_bins = int(reduced_masked.shape[1])
         reduced_freq_bins = int(reduced_masked.shape[0])
         time_axis_ms = (
-            self._bins_to_ms_array(self.crop_start + np.arange(reduced_time_bins, dtype=float) * self.time_factor)
+            self._bins_to_ms_array(self.crop_start + np.arange(reduced_time_bins, dtype=float) * tfac)
             if reduced_time_bins
             else np.array([], dtype=float)
         )
@@ -949,7 +954,7 @@ class BurstSession:
             event_start_abs,
             event_end_abs,
             base=self.crop_start,
-            factor=self.time_factor,
+            factor=tfac,
             max_bins=reduced_time_bins,
             require_nonempty=True,
         )
@@ -975,7 +980,7 @@ class BurstSession:
                 start_abs,
                 end_abs,
                 base=self.crop_start,
-                factor=self.time_factor,
+                factor=tfac,
                 max_bins=reduced_time_bins,
             )
             if mapped is not None:
@@ -987,7 +992,7 @@ class BurstSession:
                 start_abs,
                 end_abs,
                 base=self.crop_start,
-                factor=self.time_factor,
+                factor=tfac,
                 max_bins=reduced_time_bins,
             )
             if mapped is not None:
@@ -1003,7 +1008,7 @@ class BurstSession:
                         self._reduce_peak_bin(
                             int(peak),
                             base=self.crop_start,
-                            factor=self.time_factor,
+                            factor=tfac,
                             max_bins=reduced_time_bins,
                         )
                     ]
@@ -1032,7 +1037,7 @@ class BurstSession:
             burst_regions_rel=burst_regions_rel,
             offpulse_regions_rel=offpulse_regions_rel,
             peak_bins=peak_bins,
-            effective_tsamp_ms=float(self.tsamp_ms * self.time_factor),
+            effective_tsamp_ms=float(self.tsamp_ms * tfac),
             effective_freqres_mhz=float(abs(self.freqres) * self.freq_factor),
         )
 
@@ -1069,8 +1074,9 @@ class BurstSession:
         data: np.ndarray | None = None,
         *,
         event_bounds_abs: tuple[int, int] | None = None,
+        time_factor: int | None = None,
     ) -> tuple[ReducedAnalysisGrid, MeasurementContext]:
-        grid = self._reduced_analysis_grid(data, event_bounds_abs=event_bounds_abs)
+        grid = self._reduced_analysis_grid(data, event_bounds_abs=event_bounds_abs, time_factor=time_factor)
         context = self._measurement_context_from_grid(grid)
         return grid, context
 
@@ -1103,8 +1109,19 @@ class BurstSession:
         data: np.ndarray,
         *,
         event_bounds_abs: tuple[int, int] | None = None,
+        native_time: bool = False,
     ) -> DMMetricInput:
-        grid, context = self._build_measurement_context_for_data(data, event_bounds_abs=event_bounds_abs)
+        """Metric input on the analysis grid, or with `native_time` at native time resolution.
+
+        At native time resolution `analysis_window_samples` carries the
+        session's time downsampling, so a metric can keep the analysis
+        resolution while sliding its windows one native sample at a time.
+        """
+        grid, context = self._build_measurement_context_for_data(
+            data,
+            event_bounds_abs=event_bounds_abs,
+            time_factor=1 if native_time else None,
+        )
         selected_waterfall = np.asarray(grid.masked[context.spec_lo : context.spec_hi + 1, :], dtype=float)
         event_waterfall = np.asarray(
             selected_waterfall[:, context.event_rel_start : context.event_rel_end],
@@ -1118,6 +1135,7 @@ class BurstSession:
             offpulse_bins=np.asarray(context.offpulse_bins, dtype=int),
             freqs_mhz=np.asarray(context.spectral_axis_mhz, dtype=float),
             tsamp_sec=float(grid.effective_tsamp_ms / 1000.0),
+            analysis_window_samples=int(self.time_factor) if native_time else 1,
         )
 
     def _dm_metric_input_for_reduced_grid(
@@ -2263,6 +2281,9 @@ class BurstSession:
         # Structure metrics score the reduced analysis grid, so they respect the
         # time and frequency downsampling the user is analysing at.
         reduced_grid_metric = metric in {"dm_phase", STRUCTURE_METRIC}
+        # Peak S/N slides analysis-length windows along the native samples, so
+        # where the burst falls on the analysis grid does not move its peak.
+        native_time = metric == PEAK_SNR_METRIC
         metric_options: dict[str, Any] = {
             "structure_cutoff": structure_cutoff,
             "structure_filter_order": structure_filter_order,
@@ -2291,7 +2312,7 @@ class BurstSession:
                     )
                 )
                 if reduced_grid_metric
-                else (lambda data: self._dm_metric_input_for_data(data))
+                else (lambda data: self._dm_metric_input_for_data(data, native_time=native_time))
             ),
             residuals=lambda data: self._subband_residuals_for_data(data),
             provenance=self._dm_provenance(
@@ -2338,6 +2359,7 @@ class BurstSession:
                         lambda data, bounds=event_bounds_abs: self._dm_metric_input_for_data(
                             data,
                             event_bounds_abs=bounds,
+                            native_time=native_time,
                         )
                     )
                 ),

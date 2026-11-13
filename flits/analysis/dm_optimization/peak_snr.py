@@ -1,10 +1,15 @@
 """Peak S/N of the burst against trial DM, and the Gaussian fitted to that curve.
 
 At each trial DM the band-summed S/N profile is searched over the event window
-for its highest value. ``peak_bin`` takes single samples at the analysis
-resolution. ``boxcar`` also smooths the profile with boxcars of increasing width
-and keeps the best one, as a matched filter. The peak S/N is highest at the DM
-that aligns the burst across the band and falls as a wrong DM smears it in time.
+for its highest value. ``peak_bin`` takes the highest S/N of a window one
+analysis sample long. ``boxcar`` also tries longer boxcars and keeps the best,
+as a matched filter. The peak S/N is highest at the DM that aligns the burst
+across the band and falls as a wrong DM smears it in time.
+
+The windows slide along the native samples rather than sitting on the analysis
+grid. On a fixed grid the peak S/N also depends on where the burst falls
+between two samples, and a DM change shifts the burst in time: at coarse
+resolution that split the curve into two peaks with a dip at the true DM.
 
 FLITS fits a Gaussian plus a constant to the whole curve. The Gaussian's centre
 is the best DM. Its standard deviation measures how quickly the peak S/N falls
@@ -41,17 +46,33 @@ def validate_peak_snr_filter(value: str) -> str:
     return value
 
 
-def boxcar_widths(max_width: int) -> list[int]:
-    """Boxcar widths in samples from 1 up to `max_width`, growing by about 1.5 each step."""
-    cap = max(1, int(max_width))
+def boxcar_widths(max_width: int, min_width: int = 1) -> list[int]:
+    """Boxcar widths in samples from `min_width` up to `max_width`, growing by about 1.5 each step."""
+    width = max(1, int(min_width))
+    cap = max(width, int(max_width))
     widths: list[int] = []
-    width = 1
     while width <= cap:
         widths.append(width)
         width = max(width + 1, int(round(width * 1.5)))
     if widths[-1] != cap:
         widths.append(cap)
     return widths
+
+
+def _moving_sum(values: np.ndarray, width: int) -> np.ndarray:
+    """``np.convolve(values, np.ones(width), mode="same")`` from a running sum.
+
+    It costs the same for every width, which matters on native-resolution
+    profiles where boxcars reach thousands of samples. `values` must be finite.
+    """
+    if width <= 1:
+        return np.asarray(values, dtype=float).copy()
+    count = values.size
+    running = np.concatenate(([0.0], np.cumsum(values, dtype=float)))
+    index = np.arange(count)
+    upper = np.minimum(index + (width - 1) // 2 + 1, count)
+    lower = np.maximum(index - width // 2, 0)
+    return running[upper] - running[lower]
 
 
 def _boxcar_profile(profile_sn: np.ndarray, width: int, offpulse_bins: np.ndarray) -> np.ndarray:
@@ -65,8 +86,7 @@ def _boxcar_profile(profile_sn: np.ndarray, width: int, offpulse_bins: np.ndarra
     exceeds 1. With fewer independent samples the scatter would be
     underestimated and the S/N inflated.
     """
-    kernel = np.ones(int(width), dtype=float) / np.sqrt(float(width))
-    smoothed = np.convolve(profile_sn, kernel, mode="same")
+    smoothed = _moving_sum(profile_sn, int(width)) / np.sqrt(float(width))
     offpulse = np.asarray(offpulse_bins, dtype=int)
     offpulse = offpulse[(offpulse >= 0) & (offpulse < smoothed.size)]
     if width <= 1 or offpulse.size < MIN_INDEPENDENT_OFFPULSE_WIDTHS * width:
@@ -85,8 +105,9 @@ def profile_peak_snr(
     *,
     offpulse_bins: np.ndarray,
     peak_snr_filter: str = DEFAULT_PEAK_SNR_FILTER,
+    min_width: int = 1,
 ) -> tuple[float, int]:
-    """Highest S/N inside the event window, and the boxcar width in samples that reached it.
+    """Highest S/N inside the event window, and the window width in samples that reached it.
 
     Parameters
     ----------
@@ -97,8 +118,12 @@ def profile_peak_snr(
     offpulse_bins
         Off-pulse sample indices, used to re-normalize smoothed profiles.
     peak_snr_filter
-        ``peak_bin`` for single samples, ``boxcar`` to also try boxcars up to
-        the event window's length.
+        ``peak_bin`` for windows `min_width` samples long, ``boxcar`` to also
+        try longer boxcars up to the event window's length.
+    min_width
+        Shortest window, in samples. Pass the analysis downsampling factor
+        with a native-resolution profile: the window then has the analysis
+        resolution but slides one native sample at a time.
     """
     validate_peak_snr_filter(peak_snr_filter)
     values = np.asarray(profile_sn, dtype=float)
@@ -110,14 +135,13 @@ def profile_peak_snr(
     if not np.isfinite(values[start:end]).any():
         return float("-inf"), 0
 
-    best_snr = float(np.max(finite[start:end]))
-    best_width = 1
-    if peak_snr_filter == BOXCAR:
-        for width in boxcar_widths(end - start)[1:]:
-            smoothed = _boxcar_profile(finite, width, offpulse_bins)
-            value = float(np.max(smoothed[start:end]))
-            if value > best_snr:
-                best_snr, best_width = value, width
+    shortest = max(1, int(min_width))
+    widths = boxcar_widths(end - start, min_width=shortest) if peak_snr_filter == BOXCAR else [shortest]
+    best_snr, best_width = float("-inf"), shortest
+    for width in widths:
+        value = float(np.max(_boxcar_profile(finite, width, offpulse_bins)[start:end]))
+        if value > best_snr:
+            best_snr, best_width = value, width
     return best_snr, best_width
 
 
