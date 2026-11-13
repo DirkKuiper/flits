@@ -4,6 +4,14 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.8.1](https://github.com/DirkKuiper/flits/compare/flits-v1.8.0...flits-v1.8.1) (2026-11-13)
+
+
+### Documentation
+
+* credit outside contributors in a Community section ([c9f766b](https://github.com/DirkKuiper/flits/commit/c9f766b48f17acf16052faa85a0438fd3dffdaed))
+* credit outside contributors in a Community section ([c19890e](https://github.com/DirkKuiper/flits/commit/c19890e469f4e90d23a2df09bae6082ca49d2592))
+
 ## [1.8.0](https://github.com/DirkKuiper/flits/compare/flits-v1.7.1...flits-v1.8.0) (2026-11-13)
 
 
