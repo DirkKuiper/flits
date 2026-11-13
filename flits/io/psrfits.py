@@ -16,7 +16,7 @@ from flits.io.reader import FilterbankInspection
 from flits.io.validation import validate_metadata
 from flits.models import FilterbankMetadata
 from flits.settings import ObservationConfig, detect_preset, get_preset, resolve_default_sefd_jy
-from flits.signal import dedisperse, normalize, normalize_stokes
+from flits.signal import dedisperse_and_normalize
 from flits.stokes import basis_from_psrfits, normalize_polarization_basis, stokes_from_products
 
 _PSRFITS_FOLD_MODES = frozenset({"PSR", "FOLD"})
@@ -53,16 +53,6 @@ def _polarization_order_for_preset(polarization_order: str | None, preset_key: s
     if normalized_order == "IQUV" and _normalise_preset_key(preset_key) == _NRT_PRESET_KEY:
         return None
     return normalized_order
-
-
-def _dedisperse_any(values: np.ndarray, dm: float, freqs_mhz: np.ndarray, tsamp: float) -> np.ndarray:
-    """Dedisperse a 2-D dynamic spectrum or a 3-D Stokes cube identically."""
-    if values.ndim == 2:
-        return dedisperse(values, dm, freqs_mhz, tsamp, fill_value=0.0)
-    return np.stack(
-        [dedisperse(plane, dm, freqs_mhz, tsamp, fill_value=0.0) for plane in values],
-        axis=0,
-    )
 
 
 def _preset_polarization_basis(preset_key: str | None) -> str | None:
@@ -815,15 +805,7 @@ def _load_folded_psrfits(
     values = values[..., nstart : nstart + nread]
 
     effective_npol = max(1, int(config.npol_override)) if config.npol_override is not None else effective_npol
-    if abs(float(config.dm)) > 0.0:
-        values = _dedisperse_any(values, config.dm, freqs_mhz, tsamp)
-
-    tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
-    offpulse_start = min(values.shape[-1] - 1, int((1 - tail_fraction) * values.shape[-1]))
-    offpulse = values[..., offpulse_start:]
-    values = (normalize_stokes(values, offpulse) if want_stokes else normalize(values, offpulse)).astype(
-        np.float32, copy=False
-    )
+    values = dedisperse_and_normalize(values, config.dm, freqs_mhz, tsamp, config.normalization_tail_fraction)
 
     diffs = np.diff(freqs_mhz.astype(float))
     freqres = (

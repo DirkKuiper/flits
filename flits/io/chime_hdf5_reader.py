@@ -27,7 +27,6 @@ from flits.io.chime import (
     _is_bbdata_beamformed,
     _is_chime_catalog,
     _looks_like_chime_intensity,
-    _normalize_waterfall,
     _parse_event_mjd,
     _parse_tns_mjd,
     _read_attr,
@@ -50,7 +49,7 @@ from flits.io.reader import FilterbankInspection
 from flits.io.validation import require_fields, validate_metadata
 from flits.models import FilterbankMetadata
 from flits.settings import ObservationConfig, detect_preset, resolve_default_sefd_jy
-from flits.signal import dedisperse
+from flits.signal import dedisperse_and_normalize
 
 try:
     import h5py as _h5py
@@ -354,8 +353,7 @@ class ChimeHdf5Reader:
 
         effective_npol = max(1, int(config.npol_override)) if config.npol_override is not None else header_npol
 
-        stokes_i = dedisperse(stokes_i, config.dm, freqs_mhz, tsamp, fill_value=0.0)
-        stokes_i = _normalize_waterfall(stokes_i, config.normalization_tail_fraction)
+        stokes_i = dedisperse_and_normalize(stokes_i, config.dm, freqs_mhz, tsamp, config.normalization_tail_fraction)
 
         metadata = FilterbankMetadata(
             source_path=resolved,
@@ -471,7 +469,7 @@ class ChimeHdf5Reader:
         header_npol = 1
         effective_npol = max(1, int(config.npol_override)) if config.npol_override is not None else header_npol
 
-        stokes_i = _normalize_waterfall(stokes_i, config.normalization_tail_fraction)
+        stokes_i = dedisperse_and_normalize(stokes_i, 0.0, plot_freq, tsamp, config.normalization_tail_fraction)
 
         metadata = FilterbankMetadata(
             source_path=resolved,
@@ -642,8 +640,7 @@ class ChimeHdf5Reader:
             filterbank_inspection = inspection
 
         residual_dm = float(config.dm) - float(coherent_dm)
-        stokes_i = dedisperse(stokes_i, residual_dm, freqs_mhz, tsamp, fill_value=0.0)
-        stokes_i = _normalize_waterfall(stokes_i, config.normalization_tail_fraction)
+        stokes_i = dedisperse_and_normalize(stokes_i, residual_dm, freqs_mhz, tsamp, config.normalization_tail_fraction)
 
         freq_lo = float(np.min(freqs_mhz))
         freq_hi = float(np.max(freqs_mhz))

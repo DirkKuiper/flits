@@ -498,6 +498,86 @@ def write_full_stokes_folded_psrfits(
 
 
 @dataclass(frozen=True)
+class DispersedWaterfall:
+    """A SIGPROC file holding one dispersed burst at a known time and DM."""
+
+    path: Path
+    dm: float
+    burst_time_s: float  # arrival at the highest channel frequency, from the start of the file
+    tsamp_s: float
+    freqs_mhz: np.ndarray
+    nbits: int
+    nifs: int
+
+
+def write_dispersed_filterbank(
+    path: Path,
+    *,
+    dm: float = 300.0,
+    burst_time_s: float = 11.0,
+    duration_s: float = 20.0,
+    tsamp_s: float = 1e-3,
+    nchan: int = 64,
+    fch1_mhz: float = 1500.0,
+    foff_mhz: float = -4.0,
+    baseline: float = 0.0,
+    noise_std: float = 1.0,
+    burst_amp: float = 3.0,
+    burst_sigma_s: float = 0.003,
+    nbits: int = 32,
+    nifs: int = 1,
+    rng_seed: int = 1,
+) -> DispersedWaterfall:
+    """Write a burst dispersed by `dm` into noise around `baseline`.
+
+    `nbits=8` stores unsigned bytes, as most search backends do, so `baseline`
+    should then sit well inside 0-255. Every IF holds the same signal.
+    """
+    from flits.io.sigproc import SigprocFilterbankHeader, build_sigproc_filterbank_bytes
+
+    ntime = int(round(duration_s / tsamp_s))
+    freqs = fch1_mhz + foff_mhz * np.arange(nchan)
+    rng = np.random.default_rng(rng_seed)
+    data = rng.normal(baseline, noise_std, size=(nifs, nchan, ntime)).astype(np.float32)
+    t = np.arange(ntime) * tsamp_s
+    for chan, freq in enumerate(freqs):
+        arrival = burst_time_s + _DM_CONSTANT * dm * (freq**-2.0 - freqs.max() ** -2.0)
+        data[:, chan] += (burst_amp * np.exp(-0.5 * ((t - arrival) / burst_sigma_s) ** 2)).astype(np.float32)
+    header = SigprocFilterbankHeader(
+        rawdatafile=path.name,
+        source_name="DISPERSED",
+        nchans=nchan,
+        foff=foff_mhz,
+        fch1=fch1_mhz,
+        tsamp=tsamp_s,
+        tstart=60000.0,
+        telescope_id=0,
+        machine_id=0,
+        src_raj=123456.78,
+        src_dej=-123456.78,
+        nbits=nbits,
+        nifs=nifs,
+    )
+    if nbits == 32:
+        path.write_bytes(build_sigproc_filterbank_bytes(data, header))
+    elif nbits == 8:
+        head = build_sigproc_filterbank_bytes(np.zeros((nifs, nchan, 0), dtype=np.float32), header)
+        samples = np.clip(np.round(data), 0, 255).astype(np.uint8)
+        path.write_bytes(head + np.ascontiguousarray(samples.transpose(2, 0, 1)).tobytes())
+    else:
+        raise ValueError(f"nbits={nbits} is not supported here")
+    return DispersedWaterfall(
+        path=path,
+        dm=dm,
+        burst_time_s=burst_time_s,
+        tsamp_s=tsamp_s,
+        freqs_mhz=freqs,
+        nbits=nbits,
+        nifs=nifs,
+    )
+
+
+@dataclass(frozen=True)
 class DriftingWaterfall:
     """A SIGPROC filterbank holding a burst with a known sub-burst drift rate."""
 

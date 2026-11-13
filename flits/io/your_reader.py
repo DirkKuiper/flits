@@ -23,7 +23,6 @@ from flits.io.psrfits import (
     _build_stokes_i,
     _decode_source_name,
     _decode_telescope_name,
-    _dedisperse_any,
     _effective_preset_key,
     _inspect_folded_psrfits,
     _is_psrfits_fold_mode,
@@ -47,7 +46,7 @@ from flits.io.search_data import open_search_file
 from flits.io.validation import validate_metadata
 from flits.models import FilterbankMetadata
 from flits.settings import ObservationConfig, detect_preset, resolve_default_sefd_jy
-from flits.signal import normalize, normalize_stokes
+from flits.signal import dedisperse_and_normalize
 from flits.stokes import basis_from_psrfits, stokes_from_products
 
 _SIGPROC_MAGIC = struct.pack("i", 12) + b"HEADER_START"
@@ -378,14 +377,7 @@ class YourFilterbankReader:
                 path=source_path,
             )
 
-        values = _dedisperse_any(values, config.dm, freqs_mhz, tsamp)
-
-        tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
-        offpulse_start = min(values.shape[-1] - 1, int((1 - tail_fraction) * values.shape[-1]))
-        offpulse = values[..., offpulse_start:]
-        values = (normalize_stokes(values, offpulse) if want_stokes else normalize(values, offpulse)).astype(
-            np.float32, copy=False
-        )
+        values = dedisperse_and_normalize(values, config.dm, freqs_mhz, tsamp, config.normalization_tail_fraction)
 
         metadata = FilterbankMetadata(
             source_path=source_path,
