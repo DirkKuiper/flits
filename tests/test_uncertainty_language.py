@@ -43,6 +43,9 @@ def _all_details(session: BurstSession) -> list[tuple[str, UncertaintyDetail]]:
     for metric in ("integrated_event_snr", "dm_phase", "smoothed_structure"):
         sweep = session.optimize_dm(0.0, 60.0, 6.0, metric=metric)
         details.extend((f"dm.{metric}.{key}", d) for key, d in sweep.uncertainty_details.items())
+    for peak_snr_filter in ("peak_bin", "boxcar"):
+        sweep = session.optimize_dm(0.0, 60.0, 6.0, metric="peak_snr", peak_snr_filter=peak_snr_filter)
+        details.extend((f"dm.peak_snr.{peak_snr_filter}.{key}", d) for key, d in sweep.uncertainty_details.items())
     drift = session.run_drift_analysis(settings=DriftAnalysisSettings(monte_carlo_trials=8, random_seed=3))
     details.extend((f"drift.{key}", d) for key, d in drift.uncertainty_details.items())
     temporal = session.run_temporal_structure_analysis(16.0)

@@ -804,7 +804,8 @@ class WebApiTest(unittest.TestCase):
         self.assertIn("origin", metric_defs[0])
         self.assertIn("references", metric_defs[0])
         self.assertEqual(
-            [item["key"] for item in metric_defs], ["integrated_event_snr", "dm_phase", "smoothed_structure"]
+            [item["key"] for item in metric_defs],
+            ["integrated_event_snr", "dm_phase", "smoothed_structure", "peak_snr"],
         )
 
     def test_session_action_apply_best_dm_preserves_dm_optimization_payload(self) -> None:
@@ -835,7 +836,7 @@ class WebApiTest(unittest.TestCase):
                     session_id,
                     ActionRequest(
                         type="optimize_dm",
-                        payload={"center_dm": 50.0, "half_range": 4.0, "step": 0.5, "metric": "peak_snr"},
+                        payload={"center_dm": 50.0, "half_range": 4.0, "step": 0.5, "metric": "profile_sharpness"},
                     ),
                 )
         finally:

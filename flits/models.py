@@ -484,6 +484,8 @@ class DmOptimizationSettings:
     # automatically) and the filter order.
     structure_cutoff: int | None = None
     structure_filter_order: int | None = None
+    # Peak-S/N metric only: "peak_bin" or "boxcar".
+    peak_snr_filter: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -497,12 +499,15 @@ class DmOptimizationSettings:
         if self.structure_cutoff is not None or self.structure_filter_order is not None:
             payload["structure_cutoff"] = self.structure_cutoff
             payload["structure_filter_order"] = self.structure_filter_order
+        if self.peak_snr_filter is not None:
+            payload["peak_snr_filter"] = self.peak_snr_filter
         return payload
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> DmOptimizationSettings:
         cutoff = payload.get("structure_cutoff")
         order = payload.get("structure_filter_order")
+        peak_snr_filter = payload.get("peak_snr_filter")
         return cls(
             center_dm=float(payload.get("center_dm", 0.0)),
             half_range=float(payload.get("half_range", payload.get("requested_half_range", 0.0))),
@@ -510,6 +515,59 @@ class DmOptimizationSettings:
             metric=str(payload.get("metric", "integrated_event_snr")),
             structure_cutoff=None if cutoff is None else int(cutoff),
             structure_filter_order=None if order is None else int(order),
+            peak_snr_filter=None if peak_snr_filter is None else str(peak_snr_filter),
+        )
+
+
+@dataclass(frozen=True)
+class DmGaussianFit:
+    """The Gaussian the peak-S/N DM metric fitted to peak S/N against trial DM.
+
+    The model is ``amplitude * exp(-(DM - center_dm)^2 / 2 sigma_dm^2) + baseline``,
+    fitted to every trial. `snr_drop_one_half_width` is the distance from
+    `center_dm` at which the fitted curve has fallen by 1 in S/N. `matched_width_ms`
+    holds, for each trial, the width of the samples or boxcar that gave its peak
+    S/N. When the fit fails, the parameters are None and `fit_status` says why.
+    """
+
+    peak_snr_filter: str
+    fit_status: str
+    amplitude: float | None
+    center_dm: float | None
+    sigma_dm: float | None
+    baseline: float | None
+    residual_rms: float | None
+    snr_drop_one_half_width: float | None
+    matched_width_ms: np.ndarray
+    warning_flags: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "peak_snr_filter": self.peak_snr_filter,
+            "fit_status": self.fit_status,
+            "amplitude": _float_or_none(self.amplitude),
+            "center_dm": _float_or_none(self.center_dm),
+            "sigma_dm": _float_or_none(self.sigma_dm),
+            "baseline": _float_or_none(self.baseline),
+            "residual_rms": _float_or_none(self.residual_rms),
+            "snr_drop_one_half_width": _float_or_none(self.snr_drop_one_half_width),
+            "matched_width_ms": _jsonable_1d(self.matched_width_ms, digits=6),
+            "warning_flags": [str(flag) for flag in self.warning_flags],
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> DmGaussianFit:
+        return cls(
+            peak_snr_filter=str(payload.get("peak_snr_filter", "peak_bin")),
+            fit_status=str(payload.get("fit_status", "unknown")),
+            amplitude=_float_or_none(payload.get("amplitude")),
+            center_dm=_float_or_none(payload.get("center_dm")),
+            sigma_dm=_float_or_none(payload.get("sigma_dm")),
+            baseline=_float_or_none(payload.get("baseline")),
+            residual_rms=_float_or_none(payload.get("residual_rms")),
+            snr_drop_one_half_width=_float_or_none(payload.get("snr_drop_one_half_width")),
+            matched_width_ms=_array_1d(payload.get("matched_width_ms"), dtype=float),
+            warning_flags=[str(flag) for flag in payload.get("warning_flags", [])],
         )
 
 
@@ -634,6 +692,7 @@ class DmComponentOptimizationResult:
     fit_status: str
     uncertainty_details: dict[str, UncertaintyDetail] = field(default_factory=dict)
     structure: DmStructureDiagnostics | None = None
+    gaussian_fit: DmGaussianFit | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -653,6 +712,8 @@ class DmComponentOptimizationResult:
         }
         if self.structure is not None:
             payload["structure"] = self.structure.to_dict()
+        if self.gaussian_fit is not None:
+            payload["gaussian_fit"] = self.gaussian_fit.to_dict()
         return payload
 
     @classmethod
@@ -673,6 +734,9 @@ class DmComponentOptimizationResult:
             uncertainty_details=_uncertainty_detail_map_from_dict(payload.get("uncertainty_details")),
             structure=(
                 None if payload.get("structure") is None else DmStructureDiagnostics.from_dict(payload["structure"])
+            ),
+            gaussian_fit=(
+                None if payload.get("gaussian_fit") is None else DmGaussianFit.from_dict(payload["gaussian_fit"])
             ),
         )
 
@@ -942,6 +1006,7 @@ class DmOptimizationResult:
     settings: DmOptimizationSettings | None = None
     provenance: DmOptimizationProvenance | None = None
     structure: DmStructureDiagnostics | None = None
+    gaussian_fit: DmGaussianFit | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -974,10 +1039,12 @@ class DmOptimizationResult:
             "settings": None if self.settings is None else self.settings.to_dict(),
             "provenance": None if self.provenance is None else self.provenance.to_dict(),
         }
-        # Only the smoothed-structure metric produces this, so results from the
-        # other metrics serialize exactly as before.
+        # Only the smoothed-structure and peak-S/N metrics produce these, so
+        # results from the other metrics serialize exactly as before.
         if self.structure is not None:
             payload["structure"] = self.structure.to_dict()
+        if self.gaussian_fit is not None:
+            payload["gaussian_fit"] = self.gaussian_fit.to_dict()
         return payload
 
     @classmethod
@@ -1019,6 +1086,9 @@ class DmOptimizationResult:
             ),
             structure=(
                 None if payload.get("structure") is None else DmStructureDiagnostics.from_dict(payload["structure"])
+            ),
+            gaussian_fit=(
+                None if payload.get("gaussian_fit") is None else DmGaussianFit.from_dict(payload["gaussian_fit"])
             ),
         )
 

@@ -15,18 +15,29 @@ This module includes a clean-room FLITS implementation of DMphase. FLITS keeps
 the runtime implementation native so it can operate on the current reduced
 analysis grid, masking, crop, and selection state without depending on the
 external package. The smoothed-structure metric, which also yields a DM
-interval, lives in :mod:`flits.analysis.dm_optimization.structure`.
+interval, lives in :mod:`flits.analysis.dm_optimization.structure`; the
+peak-S/N metric and its Gaussian curve fit in
+:mod:`flits.analysis.dm_optimization.peak_snr`.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 import numpy as np
 from scipy import signal
 
+from flits.analysis.dm_optimization.peak_snr import (
+    BOXCAR,
+    DEFAULT_PEAK_SNR_FILTER,
+    GaussianCurveFit,
+    fit_gaussian_curve,
+    profile_peak_snr,
+    validate_peak_snr_filter,
+)
 from flits.analysis.dm_optimization.structure import (
     DEFAULT_FILTER_ORDER,
     MIN_EVENT_BINS,
@@ -39,6 +50,7 @@ from flits.analysis.dm_optimization.structure import (
 )
 from flits.measurements import MeasurementContext, event_snr
 from flits.models import (
+    DmGaussianFit,
     DmMetricDefinition,
     DmMetricReference,
     DmOptimizationProvenance,
@@ -51,6 +63,7 @@ from flits.models import (
 from flits.signal import dedisperse
 
 STRUCTURE_METRIC = "smoothed_structure"
+PEAK_SNR_METRIC = "peak_snr"
 
 ResidualRunner = Callable[[], tuple[np.ndarray, np.ndarray, np.ndarray, str]]
 
@@ -80,6 +93,10 @@ class DMMetricInput:
         Frequency axis in MHz matching ``selected_waterfall`` rows.
     tsamp_sec
         Effective time resolution of ``waterfall`` in seconds.
+    analysis_window_samples
+        Samples of ``waterfall`` per analysis sample. It is 1 unless the
+        metric is handed native-resolution data while the session analyses a
+        downsampled grid, as the peak-S/N metric is.
     """
 
     context: MeasurementContext
@@ -89,6 +106,7 @@ class DMMetricInput:
     offpulse_bins: np.ndarray
     freqs_mhz: np.ndarray
     tsamp_sec: float
+    analysis_window_samples: int = 1
 
 
 @dataclass(frozen=True)
@@ -105,6 +123,8 @@ class DMMetricPreparedTrial:
     dmphase_power_spectrum: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
     dmphase_channel_count: int = 0
     structure_lightcurve: np.ndarray = field(default_factory=lambda: np.array([], dtype=float))
+    # Peak-S/N metric: width of the samples or boxcar that gave the peak, in ms.
+    peak_snr_width_ms: float | None = None
 
 
 @dataclass(frozen=True)
@@ -276,6 +296,42 @@ DM_METRIC_METADATA: dict[str, DmMetricDefinition] = {
             ),
         ],
     ),
+    PEAK_SNR_METRIC: DmMetricDefinition(
+        key=PEAK_SNR_METRIC,
+        label="Peak S/N (Gaussian fit)",
+        summary=(
+            "Find the burst's peak S/N at each trial DM, in single samples or the best boxcar, and fit a Gaussian "
+            "to the curve: its centre is the best DM and its sigma how sharply the S/N peaks."
+        ),
+        formula=(
+            "score = max over the event window of the band-summed S/N profile (single samples, or boxcar-smoothed "
+            "over widths up to the event window); fit S/N(DM) = A exp(-(DM - DM_0)^2 / 2 sigma^2) + C to all trials."
+        ),
+        origin=(
+            "FLITS implementation of the S/N-versus-DM method of Ould-Boukattine et al. (2026), on incoherently "
+            "dedispersed data, with a Gaussian fitted to the whole curve."
+        ),
+        references=[
+            _dm_ref(
+                label="Ould-Boukattine et al. 2026",
+                citation=(
+                    "Ould-Boukattine, O. S., Cooper, A. J., Hessels, J. W. T., et al. 2026, MNRAS 546, stag090: "
+                    "A HyperFlash and ÉCLAT view of the local environment and energetics of the repeating FRB 20240619D"
+                ),
+                url="https://doi.org/10.1093/mnras/stag090",
+                note=(
+                    "Takes each burst's DM as the centre of a Gaussian fitted to peak S/N against trial DM, on "
+                    "coherently dedispersed baseband data (their Section 3.2 and Figure 2)."
+                ),
+            ),
+            _dm_ref(
+                label="PDMP",
+                citation="Teoh 2005, PDMP User Manual",
+                url="https://psrchive.sourceforge.net/manuals/pdmp/pdmp_manual.html",
+                note="Software precedent for DM sweeps scored by profile S/N.",
+            ),
+        ],
+    ),
 }
 
 
@@ -293,6 +349,30 @@ def _run_integrated_event_snr_prepare(metric_input: DMMetricInput) -> DMMetricPr
     context = metric_input.context
     score = float(event_snr(context.selected_profile_sn, context.event_rel_start, context.event_rel_end))
     return DMMetricPreparedTrial(scalar_score=score)
+
+
+def _run_peak_snr_prepare(
+    metric_input: DMMetricInput,
+    *,
+    peak_snr_filter: str = DEFAULT_PEAK_SNR_FILTER,
+) -> DMMetricPreparedTrial:
+    """Score one trial by the peak S/N of its band-summed profile inside the event window.
+
+    The windows are `analysis_window_samples` long or longer and slide one
+    sample of the profile at a time, so a native-resolution profile gives the
+    analysis resolution without its fixed sample grid.
+    """
+    context = metric_input.context
+    score, width_bins = profile_peak_snr(
+        context.selected_profile_sn,
+        context.event_rel_start,
+        context.event_rel_end,
+        offpulse_bins=metric_input.offpulse_bins,
+        peak_snr_filter=peak_snr_filter,
+        min_width=metric_input.analysis_window_samples,
+    )
+    width_ms = float(width_bins) * float(metric_input.tsamp_sec) * 1000.0 if width_bins > 0 else None
+    return DMMetricPreparedTrial(scalar_score=score, peak_snr_width_ms=width_ms)
 
 
 def _finalize_scalar_scores(prepared_trials: list[DMMetricPreparedTrial]) -> DMMetricFinalizeResult:
@@ -745,6 +825,45 @@ def _structure_uncertainty_detail(
     )
 
 
+def _peak_snr_uncertainty_detail(
+    fit: GaussianCurveFit,
+    *,
+    peak_snr_filter: str,
+    trial_count: int,
+) -> UncertaintyDetail:
+    """Describe the Gaussian sigma of the peak-S/N curve."""
+    peak_text = "the best boxcar" if peak_snr_filter == BOXCAR else "single samples"
+    flags = ["integer_bin_dedispersion", fit.status, *fit.warning_flags]
+    if fit.sigma is None:
+        flags.append("uncertainty_unavailable")
+        basis = (
+            f"No Gaussian could be fitted to the peak S/N ({peak_text}) of the {trial_count} trials "
+            f"({fit.status}), so the best DM is the best sampled trial."
+        )
+    else:
+        drop = fit.drop_one_half_width
+        drop_text = "" if drop is None else f" The fitted S/N falls by 1 at {drop:.3g} pc cm^-3 from the centre."
+        basis = (
+            f"Standard deviation of a Gaussian plus a constant fitted to the peak S/N ({peak_text}) of all "
+            f"{trial_count} trials.{drop_text}"
+        )
+    tooltip = (
+        "How quickly the burst's peak S/N falls as the DM moves away from the best value. It is set by the burst's "
+        "width and the band, and does not shrink as the burst gets brighter. The distance at which the fitted S/N "
+        "falls by 1 is stored as snr_drop_one_half_width."
+    )
+    return UncertaintyDetail(
+        value=fit.sigma,
+        units="pc cm^-3",
+        classification="heuristic_local_fit",
+        is_formal_1sigma=False,
+        publishable=False,
+        basis=basis,
+        tooltip=tooltip,
+        warning_flags=flags,
+    )
+
+
 DM_METRIC_REGISTRY: dict[str, DMMetricAlgorithm] = {
     "integrated_event_snr": DMMetricAlgorithm(
         prepare_trial=_run_integrated_event_snr_prepare,
@@ -757,6 +876,10 @@ DM_METRIC_REGISTRY: dict[str, DMMetricAlgorithm] = {
     STRUCTURE_METRIC: DMMetricAlgorithm(
         prepare_trial=_run_structure_prepare,
         finalize_scores=_finalize_structure_scores,
+    ),
+    PEAK_SNR_METRIC: DMMetricAlgorithm(
+        prepare_trial=_run_peak_snr_prepare,
+        finalize_scores=_finalize_scalar_scores,
     ),
 }
 
@@ -946,6 +1069,7 @@ def optimize_dm_trials(
     metric: str = "integrated_event_snr",
     structure_cutoff: int | None = None,
     structure_filter_order: int = DEFAULT_FILTER_ORDER,
+    peak_snr_filter: str = DEFAULT_PEAK_SNR_FILTER,
 ) -> DmOptimizationResult:
     """Run a DM trial sweep and return the optimized DM result.
 
@@ -991,6 +1115,10 @@ def optimize_dm_trials(
         Low-pass cutoff ``k_c`` and filter order for the smoothed-structure
         metric. A cutoff of None is chosen automatically from the DCT spectrum.
         Ignored by the other metrics.
+    peak_snr_filter
+        For the peak-S/N metric, ``peak_bin`` to take the highest single
+        sample of each trial's profile or ``boxcar`` to also try boxcars up to
+        the event window's length. Ignored by the other metrics.
 
     Returns
     -------
@@ -1009,6 +1137,11 @@ def optimize_dm_trials(
     if metric_algorithm is None:
         valid = ", ".join(sorted(DM_METRIC_REGISTRY))
         raise ValueError(f"Unsupported DM metric '{metric}'. Valid metrics: {valid}.")
+    prepare_trial: Callable[[DMMetricInput], DMMetricPreparedTrial] = metric_algorithm.prepare_trial
+    chosen_filter = DEFAULT_PEAK_SNR_FILTER
+    if metric == PEAK_SNR_METRIC:
+        chosen_filter = validate_peak_snr_filter(str(peak_snr_filter))
+        prepare_trial = partial(_run_peak_snr_prepare, peak_snr_filter=chosen_filter)
 
     trial_dms, actual_half_range = dm_trial_grid(center_dm, half_range, step)
     data = np.asarray(data, dtype=float)
@@ -1026,7 +1159,7 @@ def optimize_dm_trials(
             trial_data = dedisperse(score_source, float(trial_dm - score_dm), score_freqs, score_tsamp)
 
         metric_input = metric_input_builder(trial_data)
-        prepared_trials.append(metric_algorithm.prepare_trial(metric_input))
+        prepared_trials.append(prepare_trial(metric_input))
 
     if metric == STRUCTURE_METRIC:
         finalized = _finalize_structure_scores(
@@ -1047,7 +1180,41 @@ def optimize_dm_trials(
     sampled_best_score = float(scores[peak_index])
     structure_diagnostics: DmStructureDiagnostics | None = None
     structure_detail: UncertaintyDetail | None = None
-    if metric == STRUCTURE_METRIC and finalized.structure_payload is not None:
+    gaussian_diagnostics: DmGaussianFit | None = None
+    peak_snr_detail: UncertaintyDetail | None = None
+    if metric == PEAK_SNR_METRIC:
+        gaussian = fit_gaussian_curve(trial_dms, scores)
+        if gaussian.succeeded:
+            best_dm = float(gaussian.center if gaussian.center is not None else sampled_best_dm)
+            peak_value = gaussian.peak_value
+            best_score = float(peak_value) if peak_value is not None else sampled_best_score
+        else:
+            # Without a fitted curve the best sampled trial is all there is.
+            best_dm = sampled_best_dm
+            best_score = sampled_best_score
+        best_dm_uncertainty = None
+        fit_status = gaussian.status
+        peak_snr_detail = _peak_snr_uncertainty_detail(
+            gaussian,
+            peak_snr_filter=chosen_filter,
+            trial_count=int(trial_dms.size),
+        )
+        gaussian_diagnostics = DmGaussianFit(
+            peak_snr_filter=chosen_filter,
+            fit_status=gaussian.status,
+            amplitude=gaussian.amplitude,
+            center_dm=gaussian.center,
+            sigma_dm=gaussian.sigma,
+            baseline=gaussian.baseline,
+            residual_rms=gaussian.residual_rms,
+            snr_drop_one_half_width=gaussian.drop_one_half_width,
+            matched_width_ms=np.asarray(
+                [np.nan if trial.peak_snr_width_ms is None else trial.peak_snr_width_ms for trial in prepared_trials],
+                dtype=float,
+            ),
+            warning_flags=list(peak_snr_detail.warning_flags),
+        )
+    elif metric == STRUCTURE_METRIC and finalized.structure_payload is not None:
         # The interval is built from sampled trials, so the best DM stays on the
         # grid too rather than moving to a refined vertex the interval may miss.
         payload = finalized.structure_payload
@@ -1150,16 +1317,18 @@ def optimize_dm_trials(
         metric=metric,
         structure_cutoff=structure_cutoff if metric == STRUCTURE_METRIC else None,
         structure_filter_order=int(structure_filter_order) if metric == STRUCTURE_METRIC else None,
+        peak_snr_filter=chosen_filter if metric == PEAK_SNR_METRIC else None,
     )
-    best_dm_detail = (
-        structure_detail
-        if structure_detail is not None
-        else _best_dm_uncertainty_detail(
+    if structure_detail is not None:
+        best_dm_detail = structure_detail
+    elif peak_snr_detail is not None:
+        best_dm_detail = peak_snr_detail
+    else:
+        best_dm_detail = _best_dm_uncertainty_detail(
             value=best_dm_uncertainty,
             metric=metric,
             fit_status=fit_status,
         )
-    )
     return DmOptimizationResult(
         center_dm=float(center_dm),
         requested_half_range=float(half_range),
@@ -1189,4 +1358,5 @@ def optimize_dm_trials(
         settings=settings,
         provenance=provenance,
         structure=structure_diagnostics,
+        gaussian_fit=gaussian_diagnostics,
     )
