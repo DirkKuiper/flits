@@ -66,6 +66,17 @@ def normalize_stokes(cube: np.ndarray, offpulse: np.ndarray) -> np.ndarray:
 DM_CONSTANT_S_MHZ2 = 1.0 / (2.41 * 10**-4)
 
 
+def dispersion_delay_sec(dm: float, freq_lo_mhz: float, freq_hi_mhz: float) -> float:
+    """Return how much later a dispersed signal arrives at `freq_lo_mhz` than at `freq_hi_mhz`.
+
+    This is the dispersion sweep across a band: the time a burst at DM `dm`
+    (pc cm^-3) takes to drift from the top of the band to the bottom, in
+    seconds. It is negative for a negative DM.
+    """
+    lo, hi = sorted((float(freq_lo_mhz), float(freq_hi_mhz)))
+    return float(DM_CONSTANT_S_MHZ2 * float(dm) * (lo**-2.0 - hi**-2.0))
+
+
 def dedispersion_shift_bins(dm: float, freqs_mhz: np.ndarray, tsamp_sec: float) -> np.ndarray:
     """Return the per-channel sample shift that dedisperses to the top of band.
 

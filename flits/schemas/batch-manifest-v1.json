@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/DirkKuiper/flits/main/flits/schemas/batch-manifest-v1.json",
   "title": "FLITS per-burst measurement manifest v1",
-  "description": "Merge defaults with each burst's options (options replace whole values). The loader additionally requires a DM after merging, unique ids, known telescope presets, finite numbers, and increasing ranges. File paths resolve relative to the manifest.",
+  "description": "Merge defaults with each burst's options (options replace whole values). The loader additionally requires a DM after merging, unique ids, known telescope presets, finite numbers, increasing ranges, and at most one of read_window_s and burst_time_s (seconds from the start of the file). File paths resolve relative to the manifest.",
   "type": "object",
   "properties": {
     "schema_version": {
@@ -62,6 +62,36 @@
           "exclusiveMinimum": 0
         },
         "sefd_fractional_uncertainty": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "read_window_s": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "burst_time_s": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "burst_pad_s": {
           "type": [
             "number",
             "null"
