@@ -85,6 +85,21 @@ record = flits.measure_burst("search.fil", flits.MeasureOptions(dm=527.7, burst_
 `read_end_sec` for an explicit window. The web API's `POST /api/sessions`
 accepts `burst_time_sec` and `burst_pad_sec` too.
 
+## Many channels
+
+A file with thousands of channels can be modest in size and still hold
+hundreds of millions of samples: 8192 channels for six seconds at 128 µs is
+384 million. FLITS keeps the averaged grid every view and measurement starts
+from, and only rebuilds it when the crop, the channel mask, the downsampling or
+the DM changes, not when you move a selection.
+
+The dynamic spectrum in the viewer is drawn from at most 1024 rows and 4096
+columns. A larger grid is averaged in blocks for the picture alone, and the
+**Displayed shape** in the session details then reads, for example,
+`8192 x 1464 (drawn at 1024 x 1464)`. The time and frequency profiles beside it,
+every selection you click, and every measurement keep the full analysis
+resolution, so mask single channels on the frequency profile.
+
 ## The memory budget
 
 Before reading a single sample, FLITS estimates the peak memory of the load
