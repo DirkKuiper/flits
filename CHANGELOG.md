@@ -4,6 +4,28 @@ All notable changes to FLITS will be documented in this file.
 
 This file is managed by Release Please.
 
+## [1.9.0](https://github.com/DirkKuiper/flits/compare/flits-v1.8.0...flits-v1.9.0) (2026-11-20)
+
+
+### Features
+
+* load only what a burst needs and refuse loads over a memory budget ([3e0905c](https://github.com/DirkKuiper/flits/commit/3e0905c47f069cfc03cb650c844deb29d6395028))
+* load only what a burst needs, and refuse loads over a memory budget ([4d77fc0](https://github.com/DirkKuiper/flits/commit/4d77fc015548be4dcb60f27a1ac54ce2f11c6690))
+* **web:** show that clicks select, and say when a drag only zoomed ([5cc044e](https://github.com/DirkKuiper/flits/commit/5cc044eb70a3d32c8041efc07e382cce00d79d37))
+* **web:** show that clicks select, and say when a drag only zoomed ([6d896f8](https://github.com/DirkKuiper/flits/commit/6d896f8c8394a3bfb046c079d76243e1950dc6ea)), closes [#165](https://github.com/DirkKuiper/flits/issues/165)
+
+
+### Bug Fixes
+
+* **io:** keep dedispersion fill out of the normalization statistics ([803e775](https://github.com/DirkKuiper/flits/commit/803e775da3f8130a59018e93ac6f46501b52c883))
+
+
+### Documentation
+
+* add a large-files guide and teach the skill to window long files ([86c031e](https://github.com/DirkKuiper/flits/commit/86c031eb41e1efe19a88d968ce83395cb46f20a8))
+* credit outside contributors in a Community section ([c9f766b](https://github.com/DirkKuiper/flits/commit/c9f766b48f17acf16052faa85a0438fd3dffdaed))
+* credit outside contributors in a Community section ([c19890e](https://github.com/DirkKuiper/flits/commit/c19890e469f4e90d23a2df09bae6082ca49d2592))
+
 ## [1.8.0](https://github.com/DirkKuiper/flits/compare/flits-v1.7.1...flits-v1.8.0) (2026-11-13)
 
 
