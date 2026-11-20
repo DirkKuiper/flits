@@ -36,6 +36,7 @@ branch or stop the user's server to upgrade; start a new one on a free port.
 | Read a file's metadata and loading DM | `flits inspect FILE...`, which prints JSON |
 | Measure one or many bursts | `flits measure FILE... --dm DM`, which prints JSON |
 | Different DM or settings per burst | `flits measure --manifest batch.json` |
+| A burst in a file too large to load whole | `flits measure FILE --dm DM --around T`, with T its arrival in s |
 | The same from Python | `flits.measure_burst(path, flits.MeasureOptions(dm=...))` |
 | DM sweeps, widths, drift, polarization, model fits | `flits.BurstSession` |
 | Let the user inspect the burst by eye | `flits --data-dir DIR`, then the user opens <http://127.0.0.1:8000> |
@@ -57,6 +58,7 @@ flits measure burst.fil --dm 527.7
 flits measure data/*.fil --dm 527.7 --format csv --output results.csv
 flits measure burst.fil --dm 527.7 --event 235 250 --band 1300 1750 --sefd 10 --sefd-uncertainty 0.1
 flits measure --manifest batch.json --snapshot-dir sessions
+flits measure search.fil --dm 527.7 --around 312.418
 ```
 
 Each file is masked, localized and measured automatically. Pin any of those
@@ -66,6 +68,15 @@ which `flits replay SNAPSHOT --check` recomputes. `flits measure --help` lists
 every option. A manifest gives each burst its own file, DM and options; relative
 paths are resolved from the manifest's directory. `flits schema batch-manifest`
 and `flits schema measurement` print the input and output JSON schemas.
+
+FLITS loads the whole file unless told otherwise, and refuses (`LoadTooLargeError`,
+an `error` record) a load larger than its memory budget instead of exhausting
+memory. `flits inspect` reports `estimated_load_bytes` and `max_window_s`. For a
+long file, load only the burst: `--around T` takes its arrival time in seconds
+from the start of the file at the top of the band and reads just the dispersed
+burst plus `--pad` (0.5 s); `--read START END` gives a span in seconds. Results
+stay in ms from the start of the file. Raise the budget with `--max-load-gb` only
+when the machine has the memory.
 
 Start with the documented entry point. Avoid reading package internals or
 writing a replacement analysis when the command already supplies the requested
@@ -154,4 +165,5 @@ with open("burst_flits_session.json", "w") as f:
 - Docs index for language models: <https://dirkkuiper.github.io/flits/llms.txt>,
   and everything in one file: <https://dirkkuiper.github.io/flits/llms-full.txt>
 - Headless measurement: <https://dirkkuiper.github.io/flits/user-guide/headless-measurement/>
+- Large files: <https://dirkkuiper.github.io/flits/user-guide/large-files/>
 - Uncertainties: <https://dirkkuiper.github.io/flits/user-guide/uncertainties/>

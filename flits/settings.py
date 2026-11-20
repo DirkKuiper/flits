@@ -370,6 +370,11 @@ class ObservationConfig:
     # An explicit operator override only. The telescope preset carries the
     # instrument default; see `flits.io.psrfits.resolve_stokes_basis`.
     polarization_basis: str | None = None
+    # Memory budget for loading, in GB. None uses FLITS_MAX_LOAD_GB or half the
+    # available memory; zero or less turns the check off. See
+    # `flits.io.load_budget`. A property of the machine, not of the burst, so
+    # it is not saved in session snapshots.
+    max_load_gb: float | None = None
 
     @classmethod
     def from_preset(
@@ -393,6 +398,7 @@ class ObservationConfig:
         observatory_latitude_deg: float | None = None,
         observatory_height_m: float | None = None,
         polarization_basis: str | None = None,
+        max_load_gb: float | None = None,
     ) -> ObservationConfig:
         preset = get_preset(preset_key)
         mask_profile = get_auto_mask_profile(auto_mask_profile)
@@ -426,6 +432,7 @@ class ObservationConfig:
             observatory_latitude_deg=(None if observatory_latitude_deg is None else float(observatory_latitude_deg)),
             observatory_height_m=None if observatory_height_m is None else float(observatory_height_m),
             polarization_basis=resolved_basis,
+            max_load_gb=None if max_load_gb is None else float(max_load_gb),
         )
 
     def read_start_for_file(self, filename: str) -> float:

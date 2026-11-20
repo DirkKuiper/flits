@@ -9,7 +9,6 @@ from pathlib import Path
 import numpy as np
 
 from flits.io.errors import CorruptedDataError, MetadataMissingError
-from flits.signal import normalize
 
 try:
     import h5py as _h5py
@@ -385,10 +384,3 @@ def _dm_delay_seconds(dm: float, freqs_mhz: np.ndarray) -> np.ndarray:
     freqs = np.asarray(freqs_mhz, dtype=float)
     freq_ref = float(np.max(freqs))
     return _DM_CONSTANT * float(dm) * (freqs**-2.0 - freq_ref**-2.0)
-
-
-def _normalize_waterfall(stokes_i: np.ndarray, tail_fraction: float) -> np.ndarray:
-    tail_fraction = float(np.clip(tail_fraction, 0.05, 0.95))
-    offpulse_start = min(stokes_i.shape[1] - 1, int((1 - tail_fraction) * stokes_i.shape[1]))
-    offpulse = stokes_i[:, offpulse_start:]
-    return normalize(stokes_i, offpulse).astype(np.float32, copy=False)

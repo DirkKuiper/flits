@@ -65,7 +65,15 @@ def _options(payload: dict[str, Any]) -> MeasureOptions:
             raise ValueError(f"{name} must be positive")
     if options.sefd_fractional_uncertainty is not None and options.sefd_fractional_uncertainty < 0:
         raise ValueError("sefd_fractional_uncertainty must be non-negative")
-    for name in ("crop_ms", "event_ms", "band_mhz", "offpulse_ms"):
+    for name in ("burst_time_s", "burst_pad_s"):
+        value = getattr(options, name)
+        if value is not None and (not math.isfinite(value) or value < 0):
+            raise ValueError(f"{name} must be a finite, non-negative number of seconds")
+    if options.burst_time_s is not None and options.read_window_s is not None:
+        raise ValueError("burst_time_s and read_window_s both set the read window; give one")
+    if options.burst_pad_s is not None and options.burst_time_s is None:
+        raise ValueError("burst_pad_s only applies together with burst_time_s")
+    for name in ("read_window_s", "crop_ms", "event_ms", "band_mhz", "offpulse_ms"):
         value = getattr(options, name)
         ranges = value if name == "offpulse_ms" else (() if value is None else (value,))
         for start, end in ranges:
@@ -121,14 +129,23 @@ def load_measure_manifest(path: str | Path) -> list[ManifestEntry]:
 
 
 def measure_manifest_entries(
-    entries: list[ManifestEntry], *, snapshot_dir: Path | None = None, overwrite: bool = False
+    entries: list[ManifestEntry],
+    *,
+    snapshot_dir: Path | None = None,
+    overwrite: bool = False,
+    max_load_gb: float | None = None,
 ) -> Iterable[dict[str, Any]]:
     """Measure validated entries in order, including per-file failures."""
     taken: set[Path] = set()
     for entry in entries:
         try:
             record = measure_burst(
-                entry.file, entry.options, snapshot_dir=snapshot_dir, overwrite=overwrite, _taken=taken
+                entry.file,
+                entry.options,
+                snapshot_dir=snapshot_dir,
+                overwrite=overwrite,
+                max_load_gb=max_load_gb,
+                _taken=taken,
             )
         except Exception as exc:
             record = error_record(entry.file, exc)

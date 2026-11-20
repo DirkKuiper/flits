@@ -66,6 +66,17 @@ def normalize_stokes(cube: np.ndarray, offpulse: np.ndarray) -> np.ndarray:
 DM_CONSTANT_S_MHZ2 = 1.0 / (2.41 * 10**-4)
 
 
+def dispersion_delay_sec(dm: float, freq_lo_mhz: float, freq_hi_mhz: float) -> float:
+    """Return how much later a dispersed signal arrives at `freq_lo_mhz` than at `freq_hi_mhz`.
+
+    This is the dispersion sweep across a band: the time a burst at DM `dm`
+    (pc cm^-3) takes to drift from the top of the band to the bottom, in
+    seconds. It is negative for a negative DM.
+    """
+    lo, hi = sorted((float(freq_lo_mhz), float(freq_hi_mhz)))
+    return float(DM_CONSTANT_S_MHZ2 * float(dm) * (lo**-2.0 - hi**-2.0))
+
+
 def dedispersion_shift_bins(dm: float, freqs_mhz: np.ndarray, tsamp_sec: float) -> np.ndarray:
     """Return the per-channel sample shift that dedisperses to the top of band.
 
@@ -180,6 +191,91 @@ def shift_channels(
     for idx, bins in enumerate(shift_bins):
         shifted[idx, :] = _shift_channel(data[idx, :], int(bins), fill_value)
     return shifted
+
+
+def _shift_row_in_place(row: np.ndarray, shift_bins: int) -> tuple[int, int]:
+    """Shift a 1-D row by `shift_bins` samples in place; return the span that still holds data.
+
+    The vacated samples are left as they are; the caller overwrites them.
+    """
+    ntime = row.size
+    if shift_bins == 0:
+        return 0, ntime
+    if abs(shift_bins) >= ntime:
+        return 0, 0
+    if shift_bins > 0:
+        row[shift_bins:] = row[:-shift_bins]
+        return shift_bins, ntime
+    row[:shift_bins] = row[-shift_bins:]
+    return 0, ntime + shift_bins
+
+
+def _offpulse_tail(start: int, stop: int, tail_fraction: float) -> slice:
+    """The last `tail_fraction` of the samples in ``[start, stop)``, as the readers have always taken it."""
+    length = stop - start
+    return slice(start + min(length - 1, int((1 - tail_fraction) * length)), stop)
+
+
+def dedisperse_and_normalize(
+    values: np.ndarray,
+    dm: float,
+    freqs_mhz: np.ndarray,
+    tsamp_sec: float,
+    tail_fraction: float,
+) -> np.ndarray:
+    """Dedisperse freshly read data and normalize each channel, as a reader does once on load.
+
+    `values` is a ``(channels, time)`` waterfall or a ``(4, channels, time)``
+    Stokes I/Q/U/V cube. Each channel is shifted to the top of the band, then
+    baselined and scaled by the median and standard deviation of its off-pulse
+    reference: the last `tail_fraction` of the samples the channel still holds
+    after the shift. Samples a shift vacates hold no data; they are left out of
+    those statistics and set to zero, the normalized baseline, afterwards. A
+    Stokes cube is scaled by the Stokes I deviation in every parameter, as
+    :func:`normalize_stokes` explains.
+
+    Works on one float32 copy of `values`, so the load peaks at the raw data
+    plus a single float32 array.
+    """
+    stokes = values.ndim == 3
+    if stokes and (values.shape[0] < 4):
+        raise ValueError("A Stokes cube must have shape (4, n_channels, n_time).")
+    out = np.array(values, dtype=np.float32, copy=True)
+    tail_fraction = float(np.clip(tail_fraction, 0.05, 0.95))
+    planes = out if stokes else out[np.newaxis]
+    nchan = planes.shape[1]
+    if abs(float(dm)) > 0.0:
+        shifts = dedispersion_shift_bins(dm, freqs_mhz, tsamp_sec)
+    else:
+        shifts = np.zeros(nchan, dtype=np.int64)
+
+    with warnings.catch_warnings():
+        # A channel of NaNs has no median; it is left as NaN, as before.
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        for chan in range(nchan):
+            shift = int(shifts[chan])
+            start, stop = 0, planes.shape[2]
+            for plane in planes:
+                start, stop = _shift_row_in_place(plane[chan], shift)
+            if stop > start:
+                tail = _offpulse_tail(start, stop, tail_fraction)
+                if stokes:
+                    baseline = np.nanmedian(planes[:, chan, tail], axis=1)
+                    scale = np.nanstd(planes[0, chan, tail])
+                    if not np.isfinite(scale) or scale <= 0.0:
+                        scale = np.float32(1.0)
+                    planes[:, chan, start:stop] -= baseline[:, np.newaxis]
+                    planes[:, chan, start:stop] /= scale
+                else:
+                    row = planes[0, chan]
+                    chan_mean = np.nanmedian(row[tail])
+                    chan_std = np.nanstd(row[tail])
+                    row[start:stop] -= chan_mean
+                    if np.isfinite(chan_std) and chan_std != 0:
+                        row[start:stop] /= chan_std
+            planes[:, chan, :start] = 0.0
+            planes[:, chan, stop:] = 0.0
+    return out
 
 
 def dedispersion_edge_bins(dm: float, freqs_mhz: np.ndarray, tsamp_sec: float) -> tuple[int, int]:

@@ -17,7 +17,7 @@ import importlib
 import importlib.metadata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, Protocol, runtime_checkable
+from typing import ClassVar, Protocol, TypedDict, runtime_checkable
 
 import numpy as np
 
@@ -28,6 +28,18 @@ from flits.io.errors import (
 )
 from flits.models import FilterbankMetadata
 from flits.settings import ObservationConfig
+
+
+class DataLayout(TypedDict):
+    """The layout fields of :class:`FilterbankInspection`, for readers to fill in one go."""
+
+    nchans: int | None
+    nsamples: int | None
+    tsamp_s: float | None
+    nbits: int | None
+    data_bytes: int | None
+    in_memory_bytes_per_value: float | None
+    windowed_read: bool | None
 
 
 @dataclass(frozen=True)
@@ -56,6 +68,26 @@ class FilterbankInspection:
     polarization_products: int | None = None
     polarization_basis: str | None = None
     polarization_basis_source: str | None = None
+    # Data layout, read from the header, from which FLITS estimates what loading
+    # a read window costs before reading it. `data_bytes` counts the samples on
+    # disk; `in_memory_bytes_per_value` is what each sample takes once the reader
+    # has read it, before FLITS converts it to float32; `windowed_read` is True
+    # when the reader reads only the requested window from disk rather than the
+    # whole file. All are None where a reader does not report them.
+    nchans: int | None = None
+    nsamples: int | None = None
+    tsamp_s: float | None = None
+    nbits: int | None = None
+    data_bytes: int | None = None
+    in_memory_bytes_per_value: float | None = None
+    windowed_read: bool | None = None
+
+    @property
+    def duration_s(self) -> float | None:
+        """Length of the file in seconds, or None when the header does not establish it."""
+        if self.nsamples is None or self.tsamp_s is None:
+            return None
+        return float(self.nsamples) * float(self.tsamp_s)
 
     @property
     def stokes_available(self) -> bool:
@@ -345,8 +377,16 @@ def load_filterbank_data(
     config: ObservationConfig,
     inspection: FilterbankInspection | None = None,
 ) -> tuple[np.ndarray, FilterbankMetadata]:
+    """Load the Stokes I waterfall for `config`'s read window.
+
+    Raises :class:`~flits.io.errors.LoadTooLargeError`, before reading any
+    sample, when the load is estimated to exceed the load budget.
+    """
+    from flits.io.load_budget import enforce_load_budget
+
     resolved = Path(path).expanduser().resolve()
     reader = detect_reader(resolved)
+    enforce_load_budget(resolved, inspection or reader.inspect(resolved), config)
     return reader.load(resolved, config, inspection=inspection)
 
 
@@ -373,11 +413,15 @@ def load_stokes_data(
             path=resolved,
             reason="reader_unsupported",
         )
+    from flits.io.load_budget import enforce_load_budget
+
+    enforce_load_budget(resolved, inspection or reader.inspect(resolved), config, stokes=True)
     return reader.load_stokes(resolved, config, inspection=inspection)  # type: ignore[attr-defined]
 
 
 __all__ = [
     "BurstReader",
+    "DataLayout",
     "FilterbankInspection",
     "StokesBurstReader",
     "detect_reader",

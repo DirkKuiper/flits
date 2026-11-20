@@ -196,7 +196,7 @@ def test_manifest_and_shared_per_burst_flags_cannot_be_mixed(tmp_path, flags):
 
 
 def test_packaged_schemas_are_valid_and_available_offline(capsys):
-    for name in ("measurement", "batch-manifest"):
+    for name in ("measurement", "batch-manifest", "inspection"):
         assert main(["schema", name]) == 0
         schema = json.loads(capsys.readouterr().out)
         Draft202012Validator.check_schema(schema)

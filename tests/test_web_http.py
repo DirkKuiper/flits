@@ -288,3 +288,35 @@ class TestErrorReporting:
         assert "reset_view" in response.json()["detail"]
         # The traceback must survive rather than being discarded.
         assert "synthetic internal fault" in caplog.text
+
+
+def test_an_oversized_load_is_a_413_with_the_remedy(client: TestClient, synthetic_waterfall, monkeypatch) -> None:
+    monkeypatch.setenv("FLITS_MAX_LOAD_GB", "0.0001")
+
+    response = client.post("/api/sessions", json={"bfile": synthetic_waterfall.path.name, "dm": 0.0})
+
+    assert response.status_code == 413
+    payload = response.json()
+    assert payload["error_type"] == "LoadTooLargeError"
+    assert payload["estimated_load_bytes"] == 147_456
+    assert payload["budget_bytes"] == 100_000
+    assert "--around" in payload["detail"]
+    assert app_module.SESSIONS == {}
+
+
+def test_a_session_can_open_around_the_burst(client: TestClient, synthetic_waterfall) -> None:
+    response = client.post(
+        "/api/sessions",
+        json={"bfile": synthetic_waterfall.path.name, "dm": 0.0, "burst_time_sec": 0.128, "burst_pad_sec": 0.05},
+    )
+    assert response.status_code == 200, response.text
+    session = app_module.SESSIONS[response.json()["session_id"]]
+    assert session.config.read_start_sec == pytest.approx(0.078)
+    assert session.config.read_end_sec == pytest.approx(0.178)
+
+    response = client.post(
+        "/api/sessions",
+        json={"bfile": synthetic_waterfall.path.name, "dm": 0.0, "burst_time_sec": 5.0},
+    )
+    assert response.status_code == 400
+    assert "beyond the end of the file" in response.json()["detail"]

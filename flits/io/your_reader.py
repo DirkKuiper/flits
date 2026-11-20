@@ -23,7 +23,6 @@ from flits.io.psrfits import (
     _build_stokes_i,
     _decode_source_name,
     _decode_telescope_name,
-    _dedisperse_any,
     _effective_preset_key,
     _inspect_folded_psrfits,
     _is_psrfits_fold_mode,
@@ -42,12 +41,12 @@ from flits.io.psrfits import (
     require_stokes_basis,
     resolve_stokes_basis,
 )
-from flits.io.reader import FilterbankInspection
+from flits.io.reader import DataLayout, FilterbankInspection
 from flits.io.search_data import open_search_file
 from flits.io.validation import validate_metadata
 from flits.models import FilterbankMetadata
 from flits.settings import ObservationConfig, detect_preset, resolve_default_sefd_jy
-from flits.signal import normalize, normalize_stokes
+from flits.signal import dedisperse_and_normalize
 from flits.stokes import basis_from_psrfits, stokes_from_products
 
 _SIGPROC_MAGIC = struct.pack("i", 12) + b"HEADER_START"
@@ -92,6 +91,32 @@ def _header_polarization_basis(
     if not is_fits:
         return None
     return basis_from_psrfits(polarization_order, _psrfits_feed_polarization(path))
+
+
+def _search_layout(header: object, *, is_fits: bool, fallback_tsamp: object = None) -> DataLayout:
+    """The data layout of a search-mode file, for estimating what a load costs.
+
+    Both search readers read only the requested window from disk. SIGPROC keeps
+    the samples in their stored type until Stokes I is built; PSRFITS calibrates
+    them to float32 as it reads.
+    """
+    nchans = int(getattr(header, "nchans", 0) or 0)
+    nspectra = int(getattr(header, "nspectra", 0) or 0)
+    npol = max(1, int(getattr(header, "npol", 1) or 1))
+    nbits = int(getattr(header, "nbits", 0) or 0)
+    tsamp = _safe_float(getattr(header, "tsamp", None))
+    if tsamp is None:
+        tsamp = _safe_float(fallback_tsamp)
+    return {
+        "nchans": nchans or None,
+        "nsamples": nspectra or None,
+        "tsamp_s": tsamp if tsamp is not None and tsamp > 0 else None,
+        "nbits": nbits or None,
+        "data_bytes": (nchans * nspectra * npol * nbits) // 8 if nbits else None,
+        # PSRFITS holds the packed samples and their float32 calibration at once.
+        "in_memory_bytes_per_value": (4.0 if is_fits else 0.0) + max(nbits, 8) / 8,
+        "windowed_read": True,
+    }
 
 
 class YourFilterbankReader:
@@ -194,6 +219,7 @@ class YourFilterbankReader:
             time_reference_frame="topocentric",
             barycentric_header_flag=_safe_bool_flag(timing_metadata.get("barycentric_header_flag")),
             pulsarcentric_header_flag=_safe_bool_flag(timing_metadata.get("pulsarcentric_header_flag")),
+            **_search_layout(header, is_fits=is_fits, fallback_tsamp=fits_fallback.get("tsamp")),
         )
 
     def load(
@@ -378,14 +404,7 @@ class YourFilterbankReader:
                 path=source_path,
             )
 
-        values = _dedisperse_any(values, config.dm, freqs_mhz, tsamp)
-
-        tail_fraction = float(np.clip(config.normalization_tail_fraction, 0.05, 0.95))
-        offpulse_start = min(values.shape[-1] - 1, int((1 - tail_fraction) * values.shape[-1]))
-        offpulse = values[..., offpulse_start:]
-        values = (normalize_stokes(values, offpulse) if want_stokes else normalize(values, offpulse)).astype(
-            np.float32, copy=False
-        )
+        values = dedisperse_and_normalize(values, config.dm, freqs_mhz, tsamp, config.normalization_tail_fraction)
 
         metadata = FilterbankMetadata(
             source_path=source_path,

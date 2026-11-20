@@ -23,6 +23,10 @@ have; it does not search for bursts.
   `flits schema measurement` print the input and output JSON schemas offline.
 - Full control: `flits.BurstSession.from_file(path, dm=...)`. Every action in
   the interface is a method on it.
+- Large files: FLITS loads the whole file by default and refuses a load larger
+  than its memory budget (`LoadTooLargeError`). `flits inspect` reports
+  `estimated_load_bytes`; load only the burst with `--around T` (seconds from
+  the start of the file, top of the band) or `--read START END`.
 - Keep masking on (the default) when localizing automatically. Unmasked
   interference can outshine the burst.
 - Report uncertainties together with their `uncertainty_details[...]["classification"]`.

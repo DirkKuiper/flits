@@ -455,16 +455,44 @@ class BurstSession:
         observatory_latitude_deg: float | None = None,
         observatory_height_m: float | None = None,
         polarization_basis: str | None = None,
+        burst_time_sec: float | None = None,
+        burst_pad_sec: float | None = None,
+        max_load_gb: float | None = None,
     ) -> BurstSession:
         """Open a burst file and build a session at the given DM.
 
         The file's format is detected automatically and a matching telescope
         preset is applied unless `telescope` names one explicitly. The data is
         dedispersed to `dm` on load.
+
+        Only the read window ``[read_start_sec, read_end_sec)`` is loaded; by
+        default that is the whole file. `burst_time_sec` instead loads just the
+        span that holds a burst arriving at that time (seconds from the start
+        of the file, at the top of the band): ``[T - pad, T + sweep + pad]``,
+        where the sweep is the dispersion delay across the band at `dm` and
+        `burst_pad_sec` the padding (default 0.5 s). It cannot be combined with
+        an explicit read window.
+
+        A load estimated to need more memory than the budget raises
+        :class:`~flits.io.errors.LoadTooLargeError` before any data is read.
+        `max_load_gb` sets the budget; otherwise ``FLITS_MAX_LOAD_GB`` or half
+        the available memory applies, and zero or less turns the check off.
         """
         from flits.io import inspect_filterbank, load_filterbank_data
+        from flits.io.load_budget import DEFAULT_BURST_PAD_SEC, burst_read_window
 
         inspection = inspect_filterbank(bfile)
+        if burst_time_sec is not None:
+            if read_start_sec is not None or read_end_sec is not None:
+                raise ValueError("burst_time_sec sets the read window; do not also pass read_start_sec/read_end_sec")
+            read_start_sec, read_end_sec = burst_read_window(
+                inspection,
+                dm,
+                float(burst_time_sec),
+                DEFAULT_BURST_PAD_SEC if burst_pad_sec is None else float(burst_pad_sec),
+            )
+        elif burst_pad_sec is not None:
+            raise ValueError("burst_pad_sec only applies together with burst_time_sec")
         preset_key = telescope if telescope is not None else inspection.detected_preset_key
         config = ObservationConfig.from_preset(
             dm=dm,
@@ -485,6 +513,7 @@ class BurstSession:
             observatory_latitude_deg=observatory_latitude_deg,
             observatory_height_m=observatory_height_m,
             polarization_basis=polarization_basis,
+            max_load_gb=max_load_gb,
         )
         data, metadata = load_filterbank_data(bfile, config, inspection=inspection)
         num_time_bins = data.shape[1]

@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/DirkKuiper/flits/main/flits/schemas/inspection-v1.json",
+  "title": "FLITS inspection record v1",
+  "description": "One record per file from flits inspect, which prints them as a JSON array. An error record carries only schema_version, file, status, error and error_type. Sizes are bytes; estimated_load_bytes is the peak memory FLITS expects loading the whole file as Stokes I to take.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "file": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "error"
+      ]
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "error_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "format_id": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "suggested_dm": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "dm_guidance": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stokes_available": {
+      "type": "boolean"
+    },
+    "duration_s": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "nsamples": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "bytes_on_disk": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "estimated_load_bytes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "load_budget_bytes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "max_window_s": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema_version",
+    "file",
+    "status",
+    "error",
+    "error_type"
+  ],
+  "if": {
+    "properties": {
+      "status": {
+        "const": "ok"
+      }
+    }
+  },
+  "then": {
+    "required": [
+      "format_id",
+      "metadata",
+      "suggested_dm",
+      "dm_guidance",
+      "stokes_available",
+      "duration_s",
+      "nsamples",
+      "bytes_on_disk",
+      "estimated_load_bytes",
+      "load_budget_bytes",
+      "max_window_s"
+    ]
+  },
+  "additionalProperties": true
+}

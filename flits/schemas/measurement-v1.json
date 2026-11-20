@@ -112,6 +112,14 @@
             "manual"
           ]
         },
+        "read_window_s": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
         "crop_ms": {
           "type": "array",
           "items": {
