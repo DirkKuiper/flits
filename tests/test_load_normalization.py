@@ -91,3 +91,11 @@ def test_stokes_cube_shares_the_stokes_i_shift_and_scale():
     np.testing.assert_array_equal(result[0], expected_i)
     # Q is half of I, so after the common scale it stays half of I.
     np.testing.assert_allclose(result[1], 0.5 * expected_i, atol=1e-5)
+
+
+def test_the_loaded_waterfall_is_stored_channel_by_channel(tmp_path):
+    burst = write_dispersed_filterbank(tmp_path / "burst.fil", nchan=256, duration_s=2.0, burst_time_s=1.0)
+    session = BurstSession.from_file(str(burst.path), dm=burst.dm)
+    # Every per-channel operation walks a row; a column-major array makes each
+    # of them stride across all the channels.
+    assert session.data.flags.c_contiguous

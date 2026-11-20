@@ -240,7 +240,10 @@ def dedisperse_and_normalize(
     stokes = values.ndim == 3
     if stokes and (values.shape[0] < 4):
         raise ValueError("A Stokes cube must have shape (4, n_channels, n_time).")
-    out = np.array(values, dtype=np.float32, copy=True)
+    # Channel by channel in memory. Readers hand over transposes of the file's
+    # (time, channel) layout; keeping that column-major order would make every
+    # per-channel step, here and in the session, stride across all channels.
+    out = np.array(values, dtype=np.float32, order="C", copy=True)
     tail_fraction = float(np.clip(tail_fraction, 0.05, 0.95))
     planes = out if stokes else out[np.newaxis]
     nchan = planes.shape[1]
