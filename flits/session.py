@@ -12,6 +12,7 @@ import os
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -89,10 +90,140 @@ AUTO_MASK_TESTS = CHANNEL_TESTS
 
 
 def _jsonable_array(values: np.ndarray, digits: int = 4) -> list[Any]:
+    """Round to `digits` and convert to nested lists of floats, with None for non-finite values."""
     rounded = np.round(values, digits)
+    if not np.issubdtype(rounded.dtype, np.floating):
+        rounded = rounded.astype(float)
+    converted = rounded.tolist()
+    finite = np.isfinite(rounded)
+    if finite.all():
+        return converted
     if rounded.ndim == 1:
-        return [float(value) if np.isfinite(value) else None for value in rounded]
-    return [[float(value) if np.isfinite(value) else None for value in row] for row in rounded]
+        return [value if ok else None for value, ok in zip(converted, finite.tolist(), strict=True)]
+    for index in np.flatnonzero(~finite.all(axis=1)):
+        row_ok = finite[index].tolist()
+        converted[index] = [value if ok else None for value, ok in zip(converted[index], row_ok, strict=True)]
+    return converted
+
+
+HEATMAP_MAX_ROWS = 1024
+HEATMAP_MAX_COLUMNS = 4096
+"""The most rows and columns of the dynamic spectrum the view sends for drawing.
+
+More than a screen can show only slows the server and the browser down. Larger
+grids are averaged in blocks for the picture alone; the time and frequency
+profiles, and every measurement, keep the analysis resolution."""
+
+
+def _ceil_div(value: int, divisor: int) -> int:
+    return -(-value // divisor)
+
+
+def _nanmean_groups(values: np.ndarray, factor: int, axis: int) -> np.ndarray:
+    """Average consecutive groups of `factor` along `axis`, ignoring NaNs; the last group may be short."""
+    if factor <= 1:
+        return values
+    length = values.shape[axis]
+    padded_length = _ceil_div(length, factor) * factor
+    if padded_length != length:
+        pad = [(0, 0)] * values.ndim
+        pad[axis] = (0, padded_length - length)
+        values = np.pad(values.astype(float, copy=False), pad, constant_values=np.nan)
+    shape = list(values.shape)
+    shape[axis : axis + 1] = [padded_length // factor, factor]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        return np.nanmean(values.reshape(shape), axis=axis + 1)
+
+
+def heatmap_for_display(
+    display: np.ndarray,
+    freqs_mhz: np.ndarray,
+    time_axis_ms: np.ndarray,
+    *,
+    max_rows: int = HEATMAP_MAX_ROWS,
+    max_columns: int = HEATMAP_MAX_COLUMNS,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return ``(z, freqs_mhz, time_ms)`` with at most `max_rows` x `max_columns` cells, for drawing.
+
+    Rows are averaged into groups of channels at the groups' mean frequency;
+    columns into groups of samples starting where each group starts, like the
+    analysis grid's own time axis. Masked (NaN) samples are left out of the
+    averages. A grid already small enough comes back unchanged.
+    """
+    rows, columns = display.shape
+    row_factor = max(1, _ceil_div(rows, max_rows))
+    column_factor = max(1, _ceil_div(columns, max_columns))
+    if row_factor == 1 and column_factor == 1:
+        return display, freqs_mhz, time_axis_ms
+    z = _nanmean_groups(_nanmean_groups(display, row_factor, 0), column_factor, 1)
+    freqs = _nanmean_groups(np.asarray(freqs_mhz, dtype=float), row_factor, 0)
+    times = np.asarray(time_axis_ms, dtype=float)[::column_factor]
+    return z, freqs, times
+
+
+def _reduce_masked_crop(
+    crop: np.ndarray,
+    channel_mask: np.ndarray | None,
+    tfac: int,
+    ffac: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return the crop with masked channels as NaN, block-averaged, and the per-row display offset.
+
+    The reduced array is what `block_reduce_mean(get_masked_crop(), tfac,
+    ffac)` returns, bit for bit. When only time is averaged, it is computed
+    from block sums over a view of the crop, without the full-resolution
+    NaN-filled copies that `numpy.nanmean` makes; a block holding a NaN is
+    recomputed the slow way. The offset is each reduced channel's mean over
+    the crop, which the view subtracts so that the bandpass does not dominate
+    the picture.
+    """
+    nchan, ntime = crop.shape
+    mask = None if channel_mask is None or not channel_mask.any() else np.asarray(channel_mask, dtype=bool)
+    floating = np.issubdtype(crop.dtype, np.floating)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        if floating:
+            row_means = np.sum(crop, axis=1) / max(ntime, 1)
+            unresolved = ~np.isfinite(row_means)
+            for chan in np.flatnonzero(unresolved if mask is None else unresolved & ~mask):
+                row_means[chan] = np.nanmean(crop[chan])
+        else:
+            row_means = np.nanmean(crop.astype(np.float32), axis=1)
+        if mask is not None:
+            row_means = np.where(mask, np.nan, row_means)
+
+        if floating and ffac == 1 and tfac > 1 and ntime >= tfac:
+            usable = ntime - ntime % tfac
+            blocks = crop[:, :usable].reshape(nchan, usable // tfac, tfac)
+            reduced = np.sum(blocks, axis=2)
+            np.true_divide(reduced, tfac, out=reduced, casting="unsafe")
+            if mask is not None:
+                reduced[mask] = np.nan
+            unresolved_rows = ~np.isfinite(reduced).all(axis=1)
+            if mask is not None:
+                unresolved_rows &= ~mask
+            for chan in np.flatnonzero(unresolved_rows):
+                reduced[chan] = np.nanmean(blocks[chan], axis=1)
+        elif floating and tfac == 1 and ffac == 1:
+            # Nothing to average: one float64 copy, which is what callers get
+            # anyway, rather than a float32 copy converted afterwards.
+            reduced = np.array(crop, dtype=float, copy=True)
+            if mask is not None:
+                reduced[mask, :] = np.nan
+        else:
+            masked = np.array(crop, copy=True)
+            if not floating:
+                masked = masked.astype(np.float32, copy=False)
+            if mask is not None:
+                masked[mask, :] = np.nan
+            reduced = block_reduce_mean(masked, tfac=tfac, ffac=ffac)
+
+        offsets = np.where(np.isfinite(row_means), row_means, np.nan)
+        offsets = _nanmean_groups(offsets[: nchan - nchan % ffac] if ffac > 1 else offsets, ffac, 0)
+    offsets = np.where(np.isfinite(offsets), offsets, 0.0).astype(float)
+    return reduced, offsets[: reduced.shape[0]]
 
 
 def _power_of_two_ceiling(value: float) -> int:
@@ -299,7 +430,8 @@ def _public_capability(capability: dict[str, Any]) -> dict[str, Any]:
 @dataclass(frozen=True)
 class ReducedAnalysisGrid:
     masked: np.ndarray
-    display: np.ndarray
+    # Each channel's mean over the crop; `display` subtracts it.
+    display_offset: np.ndarray
     time_axis_ms: np.ndarray
     freqs_mhz: np.ndarray
     event_rel_start: int
@@ -311,6 +443,11 @@ class ReducedAnalysisGrid:
     peak_bins: list[int]
     effective_tsamp_ms: float
     effective_freqres_mhz: float
+
+    @cached_property
+    def display(self) -> np.ndarray:
+        """`masked` with each channel's mean over the crop removed, for the view and peak finding."""
+        return self.masked - self.display_offset[:, np.newaxis]
 
 
 @dataclass
@@ -391,6 +528,11 @@ class BurstSession:
     _stokes_base_cube: np.ndarray | None = field(default=None, repr=False, compare=False)
     _stokes_metadata: FilterbankMetadata | None = field(default=None, repr=False, compare=False)
     _polarization_capability: dict[str, Any] | None = field(default=None, repr=False, compare=False)
+    # The block-averaged masked crop of `data`, which every view and measurement
+    # starts from and which costs seconds to minutes on files with thousands
+    # of channels. Keyed by everything it depends on, and held only for the
+    # current `data` array, which the session replaces rather than edits.
+    _reduction_cache: dict[str, Any] | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.provenance.record("data_load")
@@ -960,10 +1102,8 @@ class BurstSession:
         # `time_factor` overrides the session's time downsampling, for callers
         # that need another resolution of the same selection.
         tfac = self.time_factor if time_factor is None else max(1, int(time_factor))
-        masked = self.get_masked_crop(data)
-        display = self.get_display_crop(data)
-        reduced_masked = block_reduce_mean(masked, tfac=tfac, ffac=self.freq_factor)
-        reduced_display = block_reduce_mean(display, tfac=tfac, ffac=self.freq_factor)
+        reduced_masked, display_offset = self._reduced_masked_crop(data, tfac)
+        reduced_display = reduced_masked - display_offset[:, np.newaxis]
 
         reduced_time_bins = int(reduced_masked.shape[1])
         reduced_freq_bins = int(reduced_masked.shape[0])
@@ -1055,8 +1195,8 @@ class BurstSession:
                     peak_bins = [int(np.nanargmax(profile))]
 
         return ReducedAnalysisGrid(
-            masked=np.asarray(reduced_masked, dtype=float),
-            display=np.asarray(reduced_display, dtype=float),
+            masked=reduced_masked,
+            display_offset=display_offset,
             time_axis_ms=np.asarray(time_axis_ms, dtype=float),
             freqs_mhz=np.asarray(freqs_mhz, dtype=float),
             event_rel_start=int(event_rel_start),
@@ -1069,6 +1209,42 @@ class BurstSession:
             effective_tsamp_ms=float(self.tsamp_ms * tfac),
             effective_freqres_mhz=float(abs(self.freqres) * self.freq_factor),
         )
+
+    def _reduced_masked_crop(self, data: np.ndarray | None, tfac: int) -> tuple[np.ndarray, np.ndarray]:
+        """The masked crop averaged by `tfac` and `freq_factor`, as float64, with its display offset.
+
+        Cached for the session's own `data`; the arrays are read-only because
+        later calls share them.
+        """
+        source = self.data if data is None else data
+        mask = self.channel_mask
+        key = (
+            int(tfac),
+            int(self.freq_factor),
+            int(self.crop_start),
+            int(self.crop_end),
+            None if mask is None or not mask.any() else np.asarray(mask, dtype=bool).tobytes(),
+        )
+        cacheable = source is self.data
+        cache = self._reduction_cache
+        if cacheable and cache is not None and cache["source"] is source and key in cache["grids"]:
+            return cache["grids"][key]  # type: ignore[no-any-return]
+
+        reduced, offsets = _reduce_masked_crop(source[:, self.crop_start : self.crop_end], mask, tfac, self.freq_factor)
+        reduced = np.asarray(reduced, dtype=float)
+        if reduced.base is not None or reduced is source:
+            reduced = reduced.copy()
+        reduced.setflags(write=False)
+        offsets.setflags(write=False)
+        if cacheable:
+            if cache is None or cache["source"] is not source:
+                cache = {"source": source, "grids": {}}
+                self._reduction_cache = cache
+            grids = cache["grids"]
+            while len(grids) >= 4:
+                grids.pop(next(iter(grids)))
+            grids[key] = (reduced, offsets)
+        return reduced, offsets
 
     def get_masked_crop(self, data: np.ndarray | None = None) -> np.ndarray:
         """Return the cropped dynamic spectrum with masked channels removed."""
@@ -1694,7 +1870,10 @@ class BurstSession:
         peak_positions_ms = [
             float(grid.time_axis_ms[peak]) for peak in grid.peak_bins if 0 <= int(peak) < grid.time_axis_ms.size
         ]
-        zmin, zmax = robust_color_limits(grid.display)
+        heatmap_z, heatmap_freqs_mhz, heatmap_time_ms = heatmap_for_display(
+            grid.display, grid.freqs_mhz, grid.time_axis_ms
+        )
+        zmin, zmax = robust_color_limits(heatmap_z)
         source_ra_deg, source_dec_deg, source_position_basis = self._source_position()
         observatory = self._observatory_location()
 
@@ -1742,6 +1921,7 @@ class BurstSession:
                 "observatory_location_basis": None if observatory is None else observatory.basis,
                 "shape": [self.total_channels, self.total_time_bins],
                 "view_shape": [int(grid.display.shape[0]), int(grid.display.shape[1])],
+                "heatmap_shape": [int(heatmap_z.shape[0]), int(heatmap_z.shape[1])],
                 "freq_range_mhz": [freq_lo_mhz, freq_hi_mhz],
                 "dm_metrics": available_dm_metrics(),
             },
@@ -1761,9 +1941,9 @@ class BurstSession:
             },
             "plot": {
                 "heatmap": {
-                    "x_ms": _jsonable_array(grid.time_axis_ms, digits=4),
-                    "y_mhz": _jsonable_array(grid.freqs_mhz, digits=4),
-                    "z": _jsonable_array(grid.display, digits=3),
+                    "x_ms": _jsonable_array(heatmap_time_ms, digits=4),
+                    "y_mhz": _jsonable_array(heatmap_freqs_mhz, digits=4),
+                    "z": _jsonable_array(heatmap_z, digits=3),
                     "zmin": zmin,
                     "zmax": zmax,
                 },
@@ -2170,6 +2350,7 @@ class BurstSession:
         target_shift = dedispersion_shift_bins(new_dm - self._load_dm, self.freqs, self.tsamp)
         delta_shift = target_shift - self._applied_shift_bins
         if np.any(delta_shift):
+            self._reduction_cache = None
             self.data = shift_channels(self.data, delta_shift)
         self._applied_shift_bins = target_shift
         self.config = replace(self.config, dm=new_dm)
