@@ -42,6 +42,12 @@ the plot at right is the frequency profile. Select an interaction mode above
 the plots, then click the plot to set its bounds. **Exact Selection** below the
 toolbar accepts coordinates directly when you need reproducible boundaries.*
 
+Selections are made by clicking, never by dragging: click the start, then the
+end. Over the plots the cursor is a thick cross, whichever zoom or pan tool the
+plot's own toolbar has selected, to show that a click marks a point. Dragging
+zooms or pans the view without changing any selection, and the box under the
+mode help says so. Double-click a plot to zoom back out.
+
 ## Measurement mindset
 
 A good workflow is to make the preparation state explicit before interpreting

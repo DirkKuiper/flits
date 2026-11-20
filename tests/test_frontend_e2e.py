@@ -479,3 +479,29 @@ def test_uncertainties_say_what_they_are(page, synthetic_waterfall) -> None:
     assert "Method:" in tooltip
     assert badge.get_attribute("data-tone") == "neutral"
     assert page.errors == [], f"page raised JavaScript errors: {page.errors}"
+
+
+def test_selection_mode_has_its_own_cursor_and_a_zoom_drag_says_so(page, synthetic_waterfall) -> None:
+    _load_session(page, synthetic_waterfall)
+    page.click('.mode-button[data-mode="crop"]')
+    time_profile = page.locator('#viewerPlot .nsewdrag[data-subplot="x2y2"]')
+
+    def cursor() -> str:
+        return time_profile.evaluate("element => getComputedStyle(element).cursor")
+
+    # Clicks mark the crop window, whichever tool the plot's toolbar has selected.
+    assert cursor() == "cell"
+    page.click('#viewerPlot .modebar-btn[data-val="pan"]')
+    assert cursor() == "cell"
+    page.click('#viewerPlot .modebar-btn[data-val="zoom"]')
+
+    box = time_profile.bounding_box()
+    assert box is not None
+    y = box["y"] + box["height"] / 2
+    page.mouse.move(box["x"] + 0.3 * box["width"], y)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 0.6 * box["width"], y, steps=10)
+    page.mouse.up()
+
+    expect(page.locator("#pendingBox")).to_contain_text("That drag zoomed the plot; it did not set the crop window")
+    assert page.errors == [], f"page raised JavaScript errors: {page.errors}"

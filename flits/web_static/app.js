@@ -49,6 +49,10 @@ const modeLabels = {
   "spec-extent": "Spectral Window",
 }
 
+// Modes that take a start and an end. Dragging on the plot zooms it instead, so
+// a drag in one of these modes gets a hint saying how to make the selection.
+const spanSelectionModes = new Set(["event", "crop", "offpulse", "region", "mask-range", "spec-extent"])
+
 const modeHelp = {
   event: "Click twice on the top time profile or center dynamic spectrum to mark the start and end of the event window.",
   crop: "Click twice on the top time profile to define the crop window you want to work in.",
@@ -6035,6 +6039,26 @@ function parameterComparisonRow(scopeLabel, label, initial, bestfit, uncertainty
 
 function bindPlotEvents() {
   bindPlotEvent("viewerPlot", handleViewerPlotClick)
+  const plot = document.getElementById("viewerPlot")
+  if (plot.dataset.relayoutBound !== "true") {
+    plot.on("plotly_relayout", handleViewerRelayout)
+    plot.dataset.relayoutBound = "true"
+  }
+}
+
+function zoomedAxes(relayout) {
+  return Object.keys(relayout || {}).some((key) => /^[xy]axis\d*\.range(\[0\])?$/.test(key))
+}
+
+function handleViewerRelayout(relayout) {
+  // A drag with Plotly's zoom tool changes the view, not the selection.
+  if (!spanSelectionModes.has(state.mode) || state.pending || !zoomedAxes(relayout)) {
+    return
+  }
+  pendingBox.textContent =
+    `That drag zoomed the plot; it did not set the ${modeLabels[state.mode].toLowerCase()}. ` +
+    "Click its start, then its end. Double-click the plot to zoom back out."
+  pendingBox.classList.add("is-active")
 }
 
 function bindPlotEvent(elementId, handler) {
@@ -6190,6 +6214,9 @@ function applyExactSelection() {
 function setMode(mode) {
   state.mode = mode
   clearPending()
+  // Styles the cursor over the plot, so a click visibly marks a point in this
+  // mode whichever zoom or pan tool the plot's toolbar last selected.
+  viewerPlot.dataset.selectionMode = mode
   modeChip.textContent = `Mode: ${modeLabels[mode]}`
   modeHelpEl.textContent = modeHelp[mode]
   modeButtons.forEach((button) => {
