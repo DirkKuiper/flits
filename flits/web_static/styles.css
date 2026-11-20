@@ -974,6 +974,14 @@ button.is-busy::after {
   white-space: nowrap;
 }
 
+/* Clicks on the viewer mark points in the current selection mode, whatever
+   tool the plot's toolbar has selected. Show that with a cursor of its own
+   rather than Plotly's zoom crosshair or pan arrows. The axis drag handles keep
+   their resize cursors. */
+.viewer-plot[data-selection-mode] .nsewdrag {
+  cursor: cell !important;
+}
+
 .viewer-plot.is-busy {
   pointer-events: none;
   opacity: 0.68;
