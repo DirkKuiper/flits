@@ -13,7 +13,10 @@ passed in; callers map to absolute session coordinates.
 
 from __future__ import annotations
 
+import os
 import warnings
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -88,20 +91,91 @@ def _robust_stats(values: np.ndarray) -> tuple[float, float]:
     return center, scale
 
 
-def _row_nanmedian(values: np.ndarray) -> np.ndarray:
+def _median_threads() -> int:
+    """Threads for whole-array work: rows are independent and NumPy releases the GIL."""
+    return max(1, min(8, os.cpu_count() or 1))
+
+
+def _in_chunks(length: int, run: Callable[[int, int], None], *, work: int) -> None:
+    """Call ``run(lo, hi)`` over `length` split into contiguous chunks, on threads when `work` is large.
+
+    Each chunk writes only its own slice of the output, so the result does not
+    depend on the split. Large arrays are also faster to fill from several
+    threads on busy machines, where first touching freshly allocated memory
+    dominates.
+    """
+    workers = _median_threads() if work >= 1 << 22 else 1
+    if workers == 1 or length < 2 * workers:
+        run(0, length)
+        return
+    bounds = np.linspace(0, length, workers + 1).astype(int)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(lambda index: run(int(bounds[index]), int(bounds[index + 1])), range(workers)))
+
+
+def _rows_any_finite(values: np.ndarray) -> np.ndarray:
+    """``np.isfinite(values).any(axis=1)`` without a full-size boolean array at once."""
+    out = np.empty(values.shape[0], dtype=bool)
+
+    def run(lo: int, hi: int) -> None:
+        out[lo:hi] = np.isfinite(values[lo:hi]).any(axis=1)
+
+    _in_chunks(values.shape[0], run, work=values.size)
+    return out
+
+
+def _row_median(values: np.ndarray, rows: np.ndarray | None, *, overwrite: bool) -> np.ndarray:
+    """``np.median(values[rows], axis=1)`` (all rows when `rows` is None), split over threads; identical values.
+
+    Selected rows are copied chunk by chunk inside the threads. With
+    `overwrite` and all rows, `values` itself is partitioned in place.
+    """
+    count = values.shape[0] if rows is None else rows.size
+    out = np.empty(count, dtype=np.result_type(values.dtype, np.float16))
+
+    def run(lo: int, hi: int) -> None:
+        if rows is None:
+            out[lo:hi] = np.median(values[lo:hi], axis=1, overwrite_input=overwrite)
+        else:
+            out[lo:hi] = np.median(values[rows[lo:hi]], axis=1, overwrite_input=True)
+
+    _in_chunks(count, run, work=count * values.shape[1])
+    return out
+
+
+def _row_nanmedian(values: np.ndarray, *, overwrite: bool = False) -> np.ndarray:
     """``np.nanmedian(values, axis=1, keepdims=True)``, without its slow path.
 
     Masked channels are whole NaN rows, and any NaN sends ``np.nanmedian``
-    through a Python loop over rows. Complete rows go to ``np.median`` in one
-    call instead, and only rows with some values missing use ``np.nanmedian``.
+    through a Python loop over rows. Rows are told apart by their sums, which
+    are finite unless a row holds a NaN or an infinity, so only those rows are
+    examined value by value. Complete rows go to ``np.median``, spread over
+    threads, and only rows with some values missing use ``np.nanmedian``. With
+    `overwrite`, `values` may be reordered in place.
     """
-    present = ~np.isnan(values)
-    complete = present.all(axis=1)
-    partial = present.any(axis=1) & ~complete
-    result = np.full((values.shape[0], 1), np.nan, dtype=np.result_type(values.dtype, np.float16))
-    if complete.any():
-        result[complete, 0] = np.median(values[complete], axis=1)
-    if partial.any():
+    nrows = values.shape[0]
+    sums = np.empty(nrows, dtype=float)
+
+    def run(lo: int, hi: int) -> None:
+        sums[lo:hi] = np.sum(values[lo:hi], axis=1, dtype=float)
+
+    _in_chunks(nrows, run, work=values.size)
+    complete = np.ones(nrows, dtype=bool)
+    partial: list[int] = []
+    for row in np.flatnonzero(~np.isfinite(sums)):
+        present = ~np.isnan(values[row])
+        if present.all():
+            continue  # an infinity, which np.median handles
+        complete[row] = False
+        if present.any():
+            partial.append(int(row))
+
+    result = np.full((nrows, 1), np.nan, dtype=np.result_type(values.dtype, np.float16))
+    if complete.all():
+        result[:, 0] = _row_median(values, None, overwrite=overwrite)
+    elif complete.any():
+        result[complete, 0] = _row_median(values, np.flatnonzero(complete), overwrite=True)
+    if partial:
         result[partial, 0] = np.nanmedian(values[partial], axis=1)
     return result
 
@@ -120,44 +194,98 @@ def _moving_sum(values: np.ndarray, width: int) -> np.ndarray:
 
 
 def _normalize_channels(masked: np.ndarray, exclude: tuple[int, int] | None) -> np.ndarray:
-    """Per-channel robust z-scores, with stats taken outside `exclude`."""
+    """Per-channel robust z-scores, with stats taken outside `exclude`.
+
+    Every full-size array is filled row chunk by row chunk on threads; the
+    values are those of the plain NumPy expressions in the comments.
+    """
+    nrows = masked.shape[0]
     reference = masked
+    keep: np.ndarray | None = None
     if exclude is not None:
         lo, hi = exclude
-        keep = np.ones(masked.shape[1], dtype=bool)
-        keep[max(0, lo) : max(0, hi)] = False
-        if keep.sum() >= 16:
-            reference = masked[:, keep]
+        excluded = np.ones(masked.shape[1], dtype=bool)
+        excluded[max(0, lo) : max(0, hi)] = False
+        if excluded.sum() >= 16:
+            keep = excluded
+            # masked[:, keep]
+            reference = np.empty((nrows, int(keep.sum())), dtype=masked.dtype)
+
+            def take(lo: int, hi: int, columns: np.ndarray = keep, out: np.ndarray = reference) -> None:
+                np.compress(columns, masked[lo:hi], axis=1, out=out[lo:hi])
+
+            _in_chunks(nrows, take, work=masked.size)
     with np.errstate(invalid="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
         center = _row_nanmedian(reference)
-        scale = 1.4826 * _row_nanmedian(np.abs(reference - center))
+        # np.abs(reference - center), a temporary that its medians may reorder.
+        deviation = np.empty(reference.shape, dtype=np.result_type(reference.dtype, center.dtype))
+
+        def deviate(lo: int, hi: int, out: np.ndarray = deviation) -> None:
+            with np.errstate(invalid="ignore"):
+                np.subtract(reference[lo:hi], center[lo:hi], out=out[lo:hi])
+                np.abs(out[lo:hi], out=out[lo:hi])
+
+        _in_chunks(nrows, deviate, work=reference.size)
+        scale = 1.4826 * _row_nanmedian(deviation, overwrite=True)
+        del deviation
         # The standard deviation is only needed where the MAD is unusable,
-        # such as quantized channels. It is taken over the whole array, not
-        # the rows that need it: on a non-contiguous float32 array the two
-        # sum in different orders and differ by up to ~1e-3.
+        # such as quantized channels. Its value depends on the memory layout
+        # it is summed in: on a non-contiguous float32 array two layouts sum in
+        # different orders and differ by up to ~1e-3. So it is taken from the
+        # same expression as always, `masked[:, keep]` or `masked`, restricted
+        # to the rows that need it first, which leaves each row's summation
+        # order unchanged; a column-major input without an exclusion still
+        # uses the whole array.
         unusable = ~(np.isfinite(scale) & (scale > 0))
         if unusable.any():
-            scale = np.where(unusable, np.nanstd(reference, axis=1, keepdims=True), scale)
+            rows = np.flatnonzero(unusable[:, 0])
+            if keep is not None:
+                std = np.nanstd(masked[rows][:, keep], axis=1)
+            elif masked.strides[1] == masked.itemsize:
+                std = np.nanstd(masked[rows], axis=1)
+            else:
+                std = np.nanstd(masked, axis=1)[rows]
+            scale[rows, 0] = std
     valid = np.isfinite(scale) & (scale > 0)
     # Keep the input precision: multi-GB float32 waterfalls must not be
     # silently doubled in memory.
     dtype = np.result_type(masked.dtype, np.float32)
-    z = np.full(masked.shape, np.nan, dtype=dtype)
-    np.subtract(masked, center.astype(dtype), out=z, where=valid)
-    np.divide(z, scale.astype(dtype), out=z, where=valid)
+    center_cast = center.astype(dtype)
+    scale_cast = scale.astype(dtype)
+    # (masked - center) / scale, NaN in channels without a usable scale.
+    z = np.empty(masked.shape, dtype=dtype)
+
+    def standardize(lo: int, hi: int) -> None:
+        with np.errstate(invalid="ignore", divide="ignore"):
+            np.subtract(masked[lo:hi], center_cast[lo:hi], out=z[lo:hi])
+            np.divide(z[lo:hi], scale_cast[lo:hi], out=z[lo:hi])
+            z[lo:hi][~valid[lo:hi, 0]] = np.nan
+
+    _in_chunks(nrows, standardize, work=masked.size)
     return z
 
 
 def _band_profile_sn(z: np.ndarray, spec_lo: int, spec_hi: int, exclude: tuple[int, int] | None) -> np.ndarray:
     """S/N time profile of the selected band, robustly re-normalized off-event."""
     band = z[spec_lo : spec_hi + 1, :]
-    active = np.isfinite(band).any(axis=1)
+    active = _rows_any_finite(band)
     if not active.any():
         return np.zeros(z.shape[1], dtype=float)
-    with np.errstate(invalid="ignore"):
-        summed = np.nansum(band[active], axis=0)
-        counts = np.isfinite(band[active]).sum(axis=0).astype(float)
+    every_row = bool(active.all())
+    ntime = band.shape[1]
+    summed = np.empty(ntime, dtype=np.result_type(band.dtype, np.float32))
+    counts = np.empty(ntime, dtype=float)
+
+    # np.nansum(band[active], axis=0) and the finite counts, taken a block of
+    # columns at a time: each column is still summed over the rows in order.
+    def run(lo: int, hi: int) -> None:
+        block = band[:, lo:hi] if every_row else band[active, lo:hi]
+        with np.errstate(invalid="ignore"):
+            summed[lo:hi] = np.nansum(block, axis=0)
+            counts[lo:hi] = np.isfinite(block).sum(axis=0)
+
+    _in_chunks(ntime, run, work=band.size)
     profile = np.where(counts > 0, summed / np.sqrt(np.maximum(counts, 1.0)), 0.0)
     reference = profile
     if exclude is not None:
@@ -341,7 +469,7 @@ def _spectral_extent(
     with np.errstate(invalid="ignore"):
         channel_sn = np.nansum(z[:, ev_lo:ev_hi], axis=1) / np.sqrt(float(n_event))
     channel_sn[~np.isfinite(channel_sn)] = np.nan
-    dead = ~np.isfinite(z).any(axis=1)
+    dead = ~_rows_any_finite(z)
     channel_sn[dead] = np.nan
 
     usable = np.flatnonzero(~dead)
@@ -465,7 +593,7 @@ def localize_burst(
     search_window = _validate_search_window(search_window_bins, ntime)
     fallback_bin = ntime // 2 if search_window is None else (search_window[0] + search_window[1]) // 2
 
-    dead = ~np.isfinite(masked).any(axis=1)
+    dead = ~_rows_any_finite(masked)
     usable_channels = np.flatnonzero(~dead)
     if usable_channels.size == 0 or ntime < 8:
         return BurstLocalization(

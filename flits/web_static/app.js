@@ -1969,7 +1969,7 @@ function renderSessionFacts(view) {
     ["Machine ID", view.meta.machine_id === null ? "missing" : String(view.meta.machine_id)],
     ["Detection", view.meta.detection_basis],
     ["Raw shape", `${view.meta.shape[0]} x ${view.meta.shape[1]}`],
-    ["Displayed shape", `${view.meta.view_shape[0]} x ${view.meta.view_shape[1]}`],
+    ["Displayed shape", displayedShapeLabel(view.meta)],
     ["SEFD", view.meta.sefd_jy === null ? "not set" : `${fmt(view.meta.sefd_jy, 2)} Jy`],
     ["SEFD frac. uncertainty", view.meta.sefd_fractional_uncertainty === null || view.meta.sefd_fractional_uncertainty === undefined ? "not set" : fmt(view.meta.sefd_fractional_uncertainty, 4)],
     ["Distance", view.meta.distance_mpc === null ? "not set" : `${fmt(view.meta.distance_mpc, 3)} Mpc`],
@@ -6009,6 +6009,17 @@ function renderScatteringParameterTable(initialParameters, bestfitParameters, un
       </div>
     </details>
   `
+}
+
+function displayedShapeLabel(meta) {
+  // The analysis grid; the dynamic spectrum is drawn from a coarser copy when
+  // the grid has more rows or columns than a screen can show.
+  const [rows, columns] = meta.view_shape
+  const heatmap = meta.heatmap_shape
+  if (!heatmap || (heatmap[0] === rows && heatmap[1] === columns)) {
+    return `${rows} x ${columns}`
+  }
+  return `${rows} x ${columns} (drawn at ${heatmap[0]} x ${heatmap[1]})`
 }
 
 function parameterComparisonRow(scopeLabel, label, initial, bestfit, uncertainty, scale, unit, note = null) {
